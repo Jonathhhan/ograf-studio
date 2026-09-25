@@ -238,7 +238,7 @@ class ShaderEffectStackController {
     return stage.canvas;
   }
 
-  async render(revision: number): Promise<void> {
+  async render(): Promise<void> {
     let result = await this.captureBase();
     const liveShaderIds = new Set<string>();
     for (const effect of getEffectStack(this.effects)) {
@@ -253,7 +253,10 @@ class ShaderEffectStackController {
       stage.renderer.dispose();
       this.shaders.delete(id);
     }
-    if (this.disposed || revision !== this.requested) return;
+    // Dynamic inputs (Media, Lottie, shader paints) may request another frame while html-to-image
+    // is still flattening this one. Commit the latest completed frame instead of starving the
+    // output forever; run() immediately follows with the newest queued revision.
+    if (this.disposed) return;
     if (this.output.width !== result.width) this.output.width = result.width;
     if (this.output.height !== result.height) this.output.height = result.height;
     const context = this.output.getContext('2d');
@@ -278,7 +281,7 @@ class ShaderEffectStackController {
     if (this.busy || this.disposed) return;
     const revision = this.requested;
     this.busy = true;
-    void this.render(revision)
+    void this.render()
       .catch((cause: unknown) => {
         this.error = cause instanceof Error ? cause : new Error(String(cause));
         this.host.dataset.ografEffectError = this.error.message;

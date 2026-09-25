@@ -124,4 +124,49 @@ describe('shader effect compositing', () => {
       true,
     );
   });
+
+  it('commits a completed Media frame while a newer effect frame is queued', async () => {
+    const { host } = fixture();
+    const media = host.ownerDocument.createElement('canvas') as Canvas;
+    media.width = 100;
+    media.height = 60;
+    media.dataset.ografMediaCanvas = 'true';
+    host.appendChild(media);
+    const layer = createLayerOfKind('rectangle');
+    layer.effects.stack = [];
+    addEffect(layer, 'shader', { blendMode: 'normal' });
+    let resolveFirst = (_canvas: Canvas) => {};
+    let resolveSecond = (_canvas: Canvas) => {};
+    mocks.toCanvas
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSecond = resolve;
+        }),
+      );
+
+    applyLayerEffectsFilter(host as unknown as HTMLElement, layer.effects, 0);
+    applyLayerEffectsFilter(host as unknown as HTMLElement, layer.effects, 16);
+    const first = host.ownerDocument.createElement('canvas') as Canvas;
+    first.width = 100;
+    first.height = 60;
+    resolveFirst(first);
+
+    await vi.waitFor(() => expect(mocks.toCanvas).toHaveBeenCalledTimes(2));
+    const output = host.children.find(
+      (node) => node.dataset.ografShaderEffectOutput === 'true',
+    ) as Canvas;
+    expect(output.context.drawImage).toHaveBeenCalledOnce();
+
+    const second = host.ownerDocument.createElement('canvas') as Canvas;
+    second.width = 100;
+    second.height = 60;
+    resolveSecond(second);
+    await waitForLayerEffectsReady(host as unknown as HTMLElement);
+    expect(output.context.drawImage).toHaveBeenCalledTimes(2);
+  });
 });
