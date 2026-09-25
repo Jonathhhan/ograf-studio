@@ -281,6 +281,9 @@ export function mountMediaPaintContent(
   canvas.width = size.width;
   canvas.height = size.height;
   canvas.dataset.ografMediaCanvas = 'true';
+  canvas.dataset.ografMediaFit = paint.fit;
+  canvas.dataset.ografMediaPositionX = String(paint.positionX);
+  canvas.dataset.ografMediaPositionY = String(paint.positionY);
   Object.assign(canvas.style, {
     position: 'absolute',
     inset: '0',

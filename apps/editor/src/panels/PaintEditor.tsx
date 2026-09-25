@@ -296,7 +296,6 @@ function MediaPaintControls({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composition = useActiveComposition();
   const importAsset = useProjectStore((state) => state.importAsset);
-  const supportsNonRealTime = useProjectStore((state) => state.project.supportsNonRealTime);
   const mediaAssets = composition.assets.filter((asset) => asset.kind === 'media');
   const imageAssets = composition.assets.filter((asset) => asset.kind === 'image');
   const patch = (next: Partial<MediaPaint>) => onChange(createMediaPaint({ ...value, ...next }));
@@ -517,12 +516,10 @@ function MediaPaintControls({
         </>
       ) : null}
       <p className="inspector-hint">Media paint is visual-only and always muted.</p>
-      {supportsNonRealTime ? (
-        <p className="inspector-playout-warning" role="status">
-          ⚠ The initial Media paint runtime is real-time-only. Disable Non-real-time before
-          certification or export.
-        </p>
-      ) : null}
+      <p className="inspector-playout-warning" role="status">
+        Media is real-time-only. Studio keeps Real-time enabled and Non-real-time disabled while a
+        Media paint is present.
+      </p>
     </div>
   );
 }

@@ -3,12 +3,15 @@ import {
   effectEnabled,
   effectStackPadding,
   effectStackToCss,
+  getElementMediaPaint,
   getEffectStack,
+  type Element,
   type EffectBlendMode,
   type LayerEffect,
   type LayerEffects,
 } from '@ograf-editor/scene-model';
 import { createShaderRenderer, type ShaderRenderer } from './shaderRendering';
+import { mediaFitRect } from './mediaPaintRendering';
 
 interface ShaderStage {
   canvas: HTMLCanvasElement;
@@ -18,6 +21,8 @@ interface ShaderStage {
   width: number;
   height: number;
 }
+
+type ShaderEffectInput = HTMLCanvasElement | ImageBitmap;
 
 class ShaderEffectStackController {
   readonly host: HTMLElement;
@@ -31,7 +36,7 @@ class ShaderEffectStackController {
   busy = false;
   disposed = false;
   error: Error | null = null;
-  baseCanvas: HTMLCanvasElement | null = null;
+  baseCanvas: ShaderEffectInput | null = null;
   baseSignature = '';
   waiters: Array<{ revision: number; resolve: () => void }> = [];
 
@@ -104,7 +109,72 @@ class ShaderEffectStackController {
     ]);
   }
 
-  async captureBase(): Promise<HTMLCanvasElement> {
+  async captureHost(width: number, height: number): Promise<ShaderEffectInput> {
+    const media = [...this.host.querySelectorAll<HTMLCanvasElement>('canvas')].find(
+      (canvas) => canvas.dataset.ografMediaCanvas === 'true',
+    );
+    const options = {
+      width,
+      height,
+      canvasWidth: width,
+      canvasHeight: height,
+      pixelRatio: 1,
+      cacheBust: false,
+      style: {
+        transform: 'none',
+        transformOrigin: '0 0',
+        opacity: '1',
+        filter: 'none',
+        mixBlendMode: 'normal',
+      },
+      filter: (node: HTMLElement) => {
+        const dataset = node.dataset;
+        return (
+          !dataset ||
+          (dataset.ografShaderEffectOutput !== 'true' && dataset.ografEffectFilter !== 'true')
+        );
+      },
+    };
+    if (!media) return toCanvas(this.host, options);
+    const video = [...this.host.querySelectorAll<HTMLVideoElement>('video')].find(
+      (candidate) =>
+        candidate.dataset.ografMediaClip === 'true' &&
+        candidate.readyState >= 2 &&
+        candidate.videoWidth > 0 &&
+        candidate.videoHeight > 0,
+    );
+    const serialized = this.host.dataset.ografRenderedElement;
+    const paint = serialized ? getElementMediaPaint(JSON.parse(serialized) as Element) : undefined;
+    const fit = paint?.fit ?? media.dataset.ografMediaFit;
+    const positionX = paint?.positionX ?? Number(media.dataset.ografMediaPositionX);
+    const positionY = paint?.positionY ?? Number(media.dataset.ografMediaPositionY);
+    if (
+      video &&
+      (fit === 'cover' || fit === 'contain' || fit === 'fill') &&
+      Number.isFinite(positionX) &&
+      Number.isFinite(positionY)
+    ) {
+      const source = this.canvas(width, height);
+      const context = source.getContext('2d');
+      if (!context) throw new Error('Shader effect video input requires Canvas 2D support.');
+      const rect = mediaFitRect(
+        { width: video.videoWidth, height: video.videoHeight },
+        { width, height },
+        fit,
+        positionX,
+        positionY,
+      );
+      context.drawImage(video, rect.x, rect.y, rect.width, rect.height);
+      return source;
+    }
+    // The Media renderer has already flattened native geometry/alpha into this canvas. Supplying
+    // it directly avoids both html-to-image's live-canvas omission and Chromium's unreliable
+    // canvas-to-canvas-to-WebGL upload path.
+    if (typeof createImageBitmap === 'undefined') return media;
+    return createImageBitmap(media);
+  }
+
+  async captureBase(): Promise<ShaderEffectInput> {
     const { width, height } = this.size();
     const padding = effectStackPadding(this.effects);
     const signature = `${this.sourceSignature(width, height)}:${padding}`;
@@ -112,31 +182,14 @@ class ShaderEffectStackController {
     this.showOriginals();
     this.output.style.display = 'none';
     try {
-      const captured = await toCanvas(this.host, {
-        width,
-        height,
-        canvasWidth: width,
-        canvasHeight: height,
-        pixelRatio: 1,
-        cacheBust: false,
-        style: {
-          transform: 'none',
-          transformOrigin: '0 0',
-          opacity: '1',
-          filter: 'none',
-          mixBlendMode: 'normal',
-        },
-        filter: (node) => {
-          const dataset = (node as HTMLElement).dataset;
-          return (
-            !dataset ||
-            (dataset.ografShaderEffectOutput !== 'true' && dataset.ografEffectFilter !== 'true')
-          );
-        },
-      });
-      if (padding > 0) {
-        this.baseCanvas = this.canvas(width + padding * 2, height + padding * 2);
-        this.baseCanvas.getContext('2d')?.drawImage(captured, padding, padding);
+      const captured = await this.captureHost(width, height);
+      const isBitmap = typeof ImageBitmap !== 'undefined' && captured instanceof ImageBitmap;
+      if (padding > 0 && !isBitmap) {
+        if (typeof ImageBitmap !== 'undefined' && this.baseCanvas instanceof ImageBitmap)
+          this.baseCanvas.close();
+        const padded = this.canvas(width + padding * 2, height + padding * 2);
+        padded.getContext('2d')?.drawImage(captured, padding, padding);
+        this.baseCanvas = padded;
         Object.assign(this.output.style, {
           left: `${-padding}px`,
           top: `${-padding}px`,
@@ -144,6 +197,12 @@ class ShaderEffectStackController {
           height: `calc(100% + ${padding * 2}px)`,
         });
       } else {
+        if (
+          typeof ImageBitmap !== 'undefined' &&
+          this.baseCanvas instanceof ImageBitmap &&
+          this.baseCanvas !== captured
+        )
+          this.baseCanvas.close();
         this.baseCanvas = captured;
         Object.assign(this.output.style, { left: '0', top: '0', width: '100%', height: '100%' });
       }
@@ -168,7 +227,7 @@ class ShaderEffectStackController {
     return mode === 'normal' ? 'source-over' : mode;
   }
 
-  applyCanvasEffect(input: HTMLCanvasElement, effect: LayerEffect): HTMLCanvasElement {
+  applyCanvasEffect(input: ShaderEffectInput, effect: LayerEffect): HTMLCanvasElement {
     const processed = this.canvas(input.width, input.height);
     const processedContext = processed.getContext('2d');
     if (!processedContext) throw new Error('Effect stack requires Canvas 2D support.');
@@ -191,8 +250,9 @@ class ShaderEffectStackController {
   }
 
   async applyShaderEffect(
-    input: HTMLCanvasElement,
+    input: ShaderEffectInput,
     effect: LayerEffect,
+    mediaOverlay = false,
   ): Promise<HTMLCanvasElement> {
     if (!effect.shader) throw new Error(`${effect.name} has no shader source.`);
     let stage = this.shaders.get(effect.id);
@@ -211,10 +271,7 @@ class ShaderEffectStackController {
         { width: input.width, height: input.height },
         () => {},
         false,
-        {
-          blendMode: effect.blendMode ?? 'normal',
-          blendOpacity: effect.blendOpacity ?? 1,
-        },
+        { blendMode: 'normal', blendOpacity: 1 },
       );
       stage = {
         canvas,
@@ -227,26 +284,60 @@ class ShaderEffectStackController {
       this.shaders.set(effect.id, stage);
     } else {
       stage.renderer.updateParameters(effect.shader);
-      stage.renderer.setEffectBlend({
-        blendMode: effect.blendMode ?? 'normal',
-        blendOpacity: effect.blendOpacity ?? 1,
-      });
+      stage.renderer.setEffectBlend({ blendMode: 'normal', blendOpacity: 1 });
     }
     stage.renderer.setInput(input);
     stage.renderer.render(this.elapsedMs);
     await stage.renderer.ready();
-    return stage.canvas;
+    if (mediaOverlay) return stage.canvas;
+    const mode = effect.blendMode ?? 'normal';
+    const opacity = effect.blendOpacity ?? 1;
+    const blended = this.canvas(input.width, input.height);
+    const context = blended.getContext('2d');
+    if (!context) throw new Error('Shader effect blending requires Canvas 2D support.');
+    if (mode === 'normal' && opacity === 1) {
+      context.drawImage(stage.canvas, 0, 0);
+    } else {
+      context.drawImage(input, 0, 0);
+      context.globalAlpha = opacity;
+      context.globalCompositeOperation = this.blendMode(mode);
+      context.drawImage(stage.canvas, 0, 0);
+      context.globalAlpha = 1;
+      context.globalCompositeOperation = 'source-over';
+    }
+    // A post-process may recolor pixels but must not expand a Media-painted object's native alpha.
+    context.globalCompositeOperation = 'destination-in';
+    context.drawImage(input, 0, 0);
+    context.globalCompositeOperation = 'source-over';
+    return blended;
   }
 
   async render(): Promise<void> {
     let result = await this.captureBase();
+    const mediaOverlay = [...this.host.querySelectorAll<HTMLCanvasElement>('canvas')].some(
+      (canvas) => canvas.dataset.ografMediaCanvas === 'true',
+    );
+    let overlayEffect: LayerEffect | undefined;
     const liveShaderIds = new Set<string>();
     for (const effect of getEffectStack(this.effects)) {
       if (!effectEnabled(effect, this.effects) || effect.blendOpacity === 0) continue;
       if (effect.type === 'shader') {
         liveShaderIds.add(effect.id);
-        result = await this.applyShaderEffect(result, effect);
-      } else result = this.applyCanvasEffect(result, effect);
+        result = await this.applyShaderEffect(result, effect, mediaOverlay);
+        if (mediaOverlay) overlayEffect = effect;
+      } else {
+        const css = effectStackToCss({
+          ...this.effects,
+          stack: [{ ...effect, blendMode: 'normal', blendOpacity: 1 }],
+        });
+        if (
+          css === 'none' &&
+          (effect.blendMode ?? 'normal') === 'normal' &&
+          (effect.blendOpacity ?? 1) === 1
+        )
+          continue;
+        result = this.applyCanvasEffect(result, effect);
+      }
     }
     for (const [id, stage] of this.shaders) {
       if (liveShaderIds.has(id)) continue;
@@ -263,6 +354,15 @@ class ShaderEffectStackController {
     if (!context) throw new Error('Shader effect output requires Canvas 2D support.');
     context.clearRect(0, 0, this.output.width, this.output.height);
     context.drawImage(result, 0, 0);
+    if (mediaOverlay && overlayEffect) {
+      this.showOriginals();
+      this.output.style.mixBlendMode =
+        overlayEffect.blendMode === 'add' ? 'screen' : (overlayEffect.blendMode ?? 'normal');
+      this.output.style.opacity = String(overlayEffect.blendOpacity ?? 1);
+    } else {
+      this.output.style.mixBlendMode = 'normal';
+      this.output.style.opacity = '1';
+    }
     delete this.host.dataset.ografEffectError;
     this.error = null;
   }
@@ -317,6 +417,9 @@ class ShaderEffectStackController {
     this.disposed = true;
     for (const stage of this.shaders.values()) stage.renderer.dispose();
     this.shaders.clear();
+    if (typeof ImageBitmap !== 'undefined' && this.baseCanvas instanceof ImageBitmap)
+      this.baseCanvas.close();
+    this.baseCanvas = null;
     this.showOriginals();
     this.output.remove();
     this.settle();

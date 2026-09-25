@@ -101,7 +101,37 @@ describe('project store authoring', () => {
         source: { kind: 'clip', src: 'https://media.example/clip.mp4' },
         muted: true,
       });
+      expect(useProjectStore.getState().project).toMatchObject({
+        supportsRealTime: true,
+        supportsNonRealTime: false,
+      });
     }
+  });
+  it('repairs and preserves the real-time-only profile required by Media paints', () => {
+    const store = useProjectStore.getState();
+    const id = store.addLayer('rectangle');
+    const project = structuredClone(useProjectStore.getState().project);
+    const layer = project.compositions[0]!.layers.find((candidate) => candidate.id === id)!;
+    if (!('fill' in layer.element)) throw new Error('Expected a fill-capable layer.');
+    layer.element.fill = createMediaPaint({
+      source: { kind: 'clip', src: 'https://media.example/clip.mp4' },
+    });
+    project.supportsRealTime = false;
+    project.supportsNonRealTime = true;
+
+    store.loadProject(project);
+    expect(useProjectStore.getState().project).toMatchObject({
+      supportsRealTime: true,
+      supportsNonRealTime: false,
+    });
+    useProjectStore.getState().setProjectMeta({
+      supportsRealTime: false,
+      supportsNonRealTime: true,
+    });
+    expect(useProjectStore.getState().project).toMatchObject({
+      supportsRealTime: true,
+      supportsNonRealTime: false,
+    });
   });
   it('keeps pragma controls and generated field defaults coherent through editing and duplication', () => {
     const store = useProjectStore.getState();

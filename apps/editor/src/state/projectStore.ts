@@ -52,6 +52,7 @@ import {
   inspectShaderElement,
   getElementShaderPaints,
   getElementShaderPaint,
+  hasElementMediaPaint,
   getShaderAnimatableProperties,
   getShaderAnimationValue,
   parseShaderAnimationProperty,
@@ -943,6 +944,21 @@ function duplicateObjectLayers(composition: Composition, layerIds: string[]): La
 
 let projectLoadGeneration = 0;
 
+function projectUsesMediaPaint(project: Project): boolean {
+  return project.compositions.some((composition) =>
+    [
+      ...composition.layers,
+      ...composition.components.flatMap((component) => component.layers),
+    ].some((layer) => hasElementMediaPaint(layer.element)),
+  );
+}
+
+function enforceMediaRuntimeProfile(project: Project): void {
+  if (!projectUsesMediaPaint(project)) return;
+  project.supportsRealTime = true;
+  project.supportsNonRealTime = false;
+}
+
 export const useProjectStore = create<ProjectStore>()(
   immer((set, get) => {
     const initialProject = createProject();
@@ -973,6 +989,7 @@ export const useProjectStore = create<ProjectStore>()(
           const migrated = migrateProject(project);
           for (const candidate of migrated.compositions)
             syncCompositionShaderParameterFields(candidate);
+          enforceMediaRuntimeProfile(migrated);
           state.project = migrated;
           state.activeCompositionId = migrated.mainCompositionId;
           const composition = getActiveComposition(migrated, migrated.mainCompositionId);
@@ -983,6 +1000,7 @@ export const useProjectStore = create<ProjectStore>()(
       setProjectMeta: (patch) =>
         set((state) => {
           Object.assign(state.project, patch);
+          enforceMediaRuntimeProfile(state.project);
         }),
 
       updateCompositionSettings: (patch) =>
@@ -1904,6 +1922,7 @@ export const useProjectStore = create<ProjectStore>()(
               if (!inspection.valid) throw new Error(inspection.errors.join('\n'));
             }
             Object.assign(layer.element, patch);
+            enforceMediaRuntimeProfile(state.project);
             syncShaderParameterFields(composition, layer);
             pruneInvalidGradientStopTracks(layer);
           }
@@ -2109,6 +2128,10 @@ export const useProjectStore = create<ProjectStore>()(
             return;
           }
           const element = layer.element;
+          if (isMediaPaint(paint)) {
+            state.project.supportsRealTime = true;
+            state.project.supportsNonRealTime = false;
+          }
           if (
             element.type === 'image' ||
             element.type === 'image-sequence' ||

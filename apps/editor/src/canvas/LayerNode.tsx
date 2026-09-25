@@ -214,13 +214,14 @@ export function LayerNode({
           // The master timeline and Stage's local-loop sampler own animated uniforms. This
           // independent clock advances iTime only, so a held loop's values are never replaced.
           renderAnimatedElementAtTime(host, element, shaderPreviewClock.sample(performance.now()));
-          if (!shaderPreviewClock.running) watchContentReadiness(host);
+          if (!shaderPreviewClock.running && !hasMediaPaint) watchContentReadiness(host);
         } catch (error) {
           setContentError(error instanceof Error ? error.message : String(error));
           // A restored context can resume itself. Compilation/draw failures await a source edit.
           if (!(error instanceof Error) || error.name !== 'ShaderContextLostError') return;
         }
-        if (shaderPreviewClock.running) animationFrame = requestAnimationFrame(render);
+        if (shaderPreviewClock.running || hasMediaPaint)
+          animationFrame = requestAnimationFrame(render);
       };
       const sync = () => {
         if (animationFrame !== null) cancelAnimationFrame(animationFrame);
@@ -287,7 +288,8 @@ export function LayerNode({
     const render = () => {
       animationFrame = null;
       apply();
-      if (shaderPreviewClock.running) animationFrame = requestAnimationFrame(render);
+      if (shaderPreviewClock.running || hasMediaPaint)
+        animationFrame = requestAnimationFrame(render);
     };
     const sync = () => {
       if (animationFrame !== null) cancelAnimationFrame(animationFrame);
@@ -298,7 +300,15 @@ export function LayerNode({
       unsubscribe();
       if (animationFrame !== null) cancelAnimationFrame(animationFrame);
     };
-  }, [layer, testValues, dataFields, transform.width, transform.height, shaderPreviewClock]);
+  }, [
+    layer,
+    testValues,
+    dataFields,
+    transform.width,
+    transform.height,
+    shaderPreviewClock,
+    hasMediaPaint,
+  ]);
 
   if (!layer.isVisible) return null;
 
