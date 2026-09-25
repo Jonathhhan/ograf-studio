@@ -16,6 +16,7 @@ import {
 } from '@ograf-editor/scene-model';
 import { useProjectStore } from '../state/projectStore';
 import { shaderPaintWithPatch } from '../state/shaderResources';
+import { SHADER_RESOURCE_MIME, shaderEffectPatchFromResourceDrag } from '../state/shaderDrag';
 import { ShaderSourceEditor } from './ShaderSourceEditor';
 import './EffectStackEditor.css';
 
@@ -30,7 +31,8 @@ const swallow = {
 
 export function EffectStackEditor({ layer, frame }: { layer: Layer; frame: number }) {
   const [type, setType] = useState<EffectType>('glow'),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [dragOver, setDragOver] = useState(false);
   const add = useProjectStore((s) => s.addLayerEffect),
     update = useProjectStore((s) => s.updateLayerEffect),
     remove = useProjectStore((s) => s.removeLayerEffect),
@@ -54,7 +56,44 @@ export function EffectStackEditor({ layer, frame }: { layer: Layer; frame: numbe
     });
   const full = stack.length >= MAX_EFFECTS;
   return (
-    <div className="effect-stack-editor">
+    <div
+      className={`effect-stack-editor${dragOver ? ' is-shader-drag-over' : ''}`}
+      data-shader-drop-slot="effects"
+      onDragEnter={(event) => {
+        if (!event.dataTransfer.types.includes(SHADER_RESOURCE_MIME)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = full || layer.isLocked ? 'none' : 'copy';
+        setDragOver(!full && !layer.isLocked);
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes(SHADER_RESOURCE_MIME)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = full || layer.isLocked ? 'none' : 'copy';
+        setDragOver(!full && !layer.isLocked);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false);
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.types.includes(SHADER_RESOURCE_MIME)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDragOver(false);
+        if (full || layer.isLocked) return;
+        run(() =>
+          add(
+            layer.id,
+            'shader',
+            shaderEffectPatchFromResourceDrag(
+              useProjectStore.getState().project,
+              event.dataTransfer.getData(SHADER_RESOURCE_MIME),
+            ),
+          ),
+        );
+      }}
+    >
       <h3
         className="inspector-section"
         title="Effects run top to bottom. Reorder to change the result; bypass keeps settings and animation. Animate numeric parameters in Timeline."
@@ -82,6 +121,9 @@ export function EffectStackEditor({ layer, frame }: { layer: Layer; frame: numbe
           Add
         </button>
       </div>
+      <p className="effect-stack-drop-hint">
+        Drop a shader here to process this layer without replacing its fill.
+      </p>
       {error && (
         <p role="alert" className="effect-stack-error">
           {error}

@@ -100,7 +100,9 @@ export function PaintEditor({
           help={
             label === 'Outline'
               ? 'Choose the text outline paint. Its shader follows editable characters and uses the Stroke Width below. Drop a shader from Resources onto this row to replace it.'
-              : 'Choose the object fill. Drop a shader from Resources onto this row to apply it. Shader controls are declared with #pragma ograf.'
+              : isMediaPaint(value)
+                ? 'Media is this object’s fill. Choosing or dropping a shader here replaces Media; drop the shader onto Effects stack to process the video instead.'
+                : 'Choose the object fill. Drop a shader from Resources onto this row to apply it. Shader controls are declared with #pragma ograf.'
           }
           className="inspector-row"
         >

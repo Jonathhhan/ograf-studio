@@ -331,7 +331,7 @@ interface ProjectActions {
   ) => void;
   removeShaderResource: (target: ShaderResourceTarget) => void;
   updateLayerEffects: (layerId: string, frame: number, patch: Partial<LayerEffects>) => void;
-  addLayerEffect: (layerId: string, type: EffectType) => void;
+  addLayerEffect: (layerId: string, type: EffectType, patch?: EffectPatch) => void;
   updateLayerEffect: (layerId: string, effectId: string, patch: EffectPatch, frame: number) => void;
   removeLayerEffect: (layerId: string, effectId: string) => void;
   duplicateLayerEffect: (layerId: string, effectId: string) => void;
@@ -2195,12 +2195,12 @@ export const useProjectStore = create<ProjectStore>()(
           pruneInvalidGradientStopTracks(layer);
         }),
 
-      addLayerEffect: (layerId, type) =>
+      addLayerEffect: (layerId, type, patch) =>
         set((state) => {
           const layer = getActiveComposition(state.project, state.activeCompositionId).layers.find(
             (l) => l.id === layerId,
           );
-          if (layer && !layer.isLocked) addEffect(layer, type);
+          if (layer && !layer.isLocked) addEffect(layer, type, patch);
         }),
       updateLayerEffect: (layerId, effectId, patch, frame) =>
         set((state) => {

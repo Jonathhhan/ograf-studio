@@ -31,6 +31,21 @@
   padding: 3px 10px;
 }
 
+.effect-stack-editor.is-shader-drag-over {
+  outline: 2px solid var(--accent, #4da3ff);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent, #4da3ff) 12%, transparent);
+}
+
+.effect-stack-drop-hint {
+  margin: 0;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted, #929eab);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .effect-stack-error {
   margin: 0;
   padding: 5px 8px;
