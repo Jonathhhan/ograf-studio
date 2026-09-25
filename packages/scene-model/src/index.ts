@@ -42,6 +42,7 @@ export * from './blendModes';
 export * from './fieldSchema';
 export * from './projectSource';
 export * from './projectThumbnail';
+export * from './playoutCompatibility';
 export { createId } from './id';
 export * from './patternLighting';
 export * from './stylePackColorLinks';

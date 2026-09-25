@@ -242,6 +242,16 @@
   color: var(--accent-focus);
 }
 
+.inspector-playout-warning {
+  margin: 0;
+  padding: 7px 8px;
+  border-left: 3px solid #ffb86b;
+  background: color-mix(in srgb, #ffb86b 10%, transparent);
+  color: #ffcb8c;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .inspector-evaluated-pose {
   display: flex;
   flex-direction: column;
@@ -299,6 +309,7 @@
 .inspector > .panel-placeholder,
 .inspector > .inspector-error,
 .inspector > .inspector-hint,
+.inspector > .inspector-playout-warning,
 .inspector > .inspector-evaluated-pose,
 .inspector > .inspector-font-preview,
 .inspector > .inspector-binding-list,

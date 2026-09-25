@@ -5,7 +5,10 @@ import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { colorPickerValue } from '../canvas/compositionBackground';
 import { COMPOSITION_PRESETS, matchesCompositionPreset } from './compositionPresets';
 import { FrameDurationControl } from './FrameDurationControl';
-import type { CanvasPresentationBackground } from '@ograf-editor/scene-model';
+import {
+  getPlayoutCompatibilityWarnings,
+  type CanvasPresentationBackground,
+} from '@ograf-editor/scene-model';
 
 const MAX_PRESENTATION_IMAGE_BYTES = 10 * 1024 * 1024;
 
@@ -37,6 +40,13 @@ export function CompositionSettings() {
   const pickerColor = colorPickerValue(composition.backgroundColor);
   const presentationImageSource = composition.layout.presentationBackgroundImageSource;
   const presentationImageIsEmbedded = presentationImageSource.startsWith('data:image/');
+  const playoutWarnings = getPlayoutCompatibilityWarnings(project, composition);
+  const nonRealtimeWarning = playoutWarnings.find(
+    (warning) => warning.id === 'davinci-resolve-non-realtime',
+  );
+  const backgroundWarning = playoutWarnings.find(
+    (warning) => warning.id === 'opaque-composition-background',
+  );
 
   const importPresentationImage = async (file: File | undefined) => {
     if (!file) return;
@@ -187,6 +197,11 @@ export function CompositionSettings() {
           onChange={(event) => setProjectMeta({ supportsNonRealTime: event.target.checked })}
         />
       </PropertyRow>
+      {nonRealtimeWarning ? (
+        <p className="inspector-playout-warning" role="status">
+          ⚠ {nonRealtimeWarning.message}
+        </p>
+      ) : null}
 
       <h3 className="inspector-section">Background</h3>
       <PropertyRow
@@ -223,6 +238,11 @@ export function CompositionSettings() {
           opaque background.
         </p>
       )}
+      {backgroundWarning ? (
+        <p className="inspector-playout-warning" role="status">
+          ⚠ {backgroundWarning.message}
+        </p>
+      ) : null}
 
       <h3 className="inspector-section">Canvas layout</h3>
       {(

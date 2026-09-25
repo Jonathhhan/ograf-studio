@@ -15,6 +15,7 @@ import type { Graphic, RenderType, ScheduledAction } from '@ograf-editor/ograf-t
 import { validateManifest } from '@ograf-editor/validation';
 import {
   computeKeyframeFrames,
+  getPlayoutCompatibilityWarnings,
   runBroadcastQa,
   type BroadcastQaIssue,
   type Project,
@@ -107,6 +108,14 @@ export function PreviewExportPanel() {
   const [scrubTimestamp, setScrubTimestamp] = useState(0);
   const [exportProfileId, setExportProfileId] = useState<ExportProfileMode>('dual');
   const exportProfile = getExportProfile(exportProfileId);
+  const playoutWarnings = useMemo(
+    () =>
+      getPlayoutCompatibilityWarnings(
+        { supportsNonRealTime: exportProfile.mode !== 'realtime' },
+        composition,
+      ),
+    [composition, exportProfile.mode],
+  );
   const [qaIssues, setQaIssues] = useState<BroadcastQaIssue[] | null>(null);
   const [isRunningQa, setIsRunningQa] = useState(false);
   const [interlacedQa, setInterlacedQa] = useState(false);
@@ -869,6 +878,20 @@ export function PreviewExportPanel() {
             Output-only profile: {exportProfile.mode}. The editable project render-mode flags and ID
             are not changed.
           </p>
+          {playoutWarnings.length > 0 ? (
+            <aside
+              className="preview-playout-warnings"
+              aria-label="Playout compatibility warnings"
+              role="status"
+            >
+              <strong>⚠ Playout compatibility</strong>
+              <ul>
+                {playoutWarnings.map((warning) => (
+                  <li key={warning.id}>{warning.message}</li>
+                ))}
+              </ul>
+            </aside>
+          ) : null}
           <p className={`preview-validation${validation.valid ? '' : ' invalid'}`}>
             {validation.valid
               ? '✓ Manifest schema precheck passed.'

@@ -44,6 +44,12 @@ use previous/next-frame buttons, or select **First OGraf step**. A successful ex
 choice for the template; cancelling leaves it unchanged. The ZIP includes `<id>_thumb.png` and
 references it in the OGraf manifest's `thumbnails` list.
 
+For DaVinci Resolve, choose the **Non-real-time** or **Dual** export profile: Resolve loads OGraf
+graphics in non-real-time mode and cannot render a real-time-only package. Enable **Transparent
+output** when the graphic should overlay video; an opaque composition background covers the full
+frame. Studio shows these as non-blocking playout warnings because both configurations remain legal
+OGraf for other workflows.
+
 ### Remote project URLs
 
 Use **Open URL** to download editable `.ogs` source from an absolute HTTP or HTTPS URL. OGraf
