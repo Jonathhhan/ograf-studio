@@ -306,6 +306,11 @@
   background: var(--bg-canvas);
 }
 
+.resources-media-thumb {
+  object-fit: cover;
+  background: #111;
+}
+
 .resources-asset-name {
   flex: 1;
   min-width: 0;

@@ -47,7 +47,7 @@ function assertCompatible(layer: Layer, binding: DesignTokenBinding, token: Desi
   const property = binding.targetProperty;
   if (shaderPaintConflictsWithBinding(layer.element, property))
     throw new Error(
-      'A shader paint cannot bind its whole fill or gradient stops; bind a generated shader parameter field instead.',
+      'Shader and media paints cannot bind their whole fill or gradient stops; bind a supported inner property instead.',
     );
   if (parseEffectProperty(property)) {
     const spec = effectParameterSpec(layer.effects, property);

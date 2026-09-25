@@ -679,6 +679,7 @@ export function InspectorPanel() {
             />
             <PaintEditor
               label="Outline"
+              allowMedia={false}
               disabled={layer.isLocked}
               allowGradient={false}
               value={

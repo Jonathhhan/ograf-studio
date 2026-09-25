@@ -167,6 +167,23 @@ Bypass retains settings and animation. When all effects are bypassed, the object
 rendering path without effect passes. Existing projects keep their enabled effects and appearance.
 Effect parameters remain animatable; blend mode and effect opacity are static settings.
 
+### Media fills
+
+Choose **Media** in an object's **Fill** selector to paint rectangles, ellipses, paths, patterns,
+text, images, image sequences, or Lottie with moving imagery. Select an imported MP4/WebM clip or
+enter a video URL, then choose Cover, Contain, or Stretch and adjust its focal position. Clip paint
+is muted and supports loop, speed, and initial offset controls. **Resources → Media** stores packaged
+clips once for reuse.
+
+Choose **Live** for a renderer-owned source such as `camera.program`. Exported output emits the
+`zd-ograf-media` version 1 hook; the Zero Density HTML renderer supplies the live frame. Other HTML
+renderers show the selected fallback image or transparency. Live output therefore remains valid
+OGraf but is renderer-specific.
+
+The initial Media runtime is realtime-only for both clips and live sources. Disable **Non-real-time**
+in Composition settings and use the **Real-time** export profile. Media is visual-only and always
+muted. Media-painted objects can receive masks but cannot currently act as alpha-mask sources.
+
 ### Shader fills
 
 Choose **Shader** in an object's **Fill** selector to render a self-contained GLSL `mainImage`

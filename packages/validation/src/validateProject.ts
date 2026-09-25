@@ -1,5 +1,6 @@
 import {
   isGradientPaint,
+  isMediaPaint,
   isShaderPaint,
   getElementFill,
   getElementShaderPaint,
@@ -32,6 +33,7 @@ import {
   getTotalFrames,
   fieldDefinitionAtPath,
   validatePaint,
+  mediaPaintAssetReferences,
   type Composition,
   type FieldDefinition,
   type Project,
@@ -846,6 +848,7 @@ function validateComposition(composition: Composition, errors: string[], warning
     composition.components.map((component) => [component.id, component]),
   );
   const assetIds = new Set(composition.assets.map((asset) => asset.id));
+  const assetById = new Map(composition.assets.map((asset) => [asset.id, asset]));
   const validateAssetReference = (value: string, owner: string) => {
     if (value.startsWith('asset:') && !assetIds.has(value.slice('asset:'.length))) {
       errors.push(`${prefix}: ${owner} references a missing asset "${value}".`);
@@ -1040,9 +1043,36 @@ function validateComposition(composition: Composition, errors: string[], warning
       ['image', 'image-sequence', 'lottie'].includes(layer.element.type) &&
       'fill' in layer.element &&
       layer.element.fill !== undefined &&
-      !isShaderPaint(layer.element.fill)
+      !isShaderPaint(layer.element.fill) &&
+      !isMediaPaint(layer.element.fill)
     ) {
-      errors.push(`${prefix}: layer "${layer.name}" media fill must be a shader paint or omitted.`);
+      errors.push(
+        `${prefix}: layer "${layer.name}" media fill must be a shader, media paint, or omitted.`,
+      );
+    }
+    const mediaPaint = isMediaPaint(getElementFill(layer.element))
+      ? getElementFill(layer.element)
+      : undefined;
+    if (mediaPaint && isMediaPaint(mediaPaint)) {
+      if (['image', 'image-sequence', 'lottie'].includes(layer.element.type))
+        for (const problem of validatePaint(mediaPaint))
+          errors.push(`${prefix}: layer "${layer.name}" ${problem}.`);
+      for (const reference of mediaPaintAssetReferences(mediaPaint))
+        validateAssetReference(reference, `layer "${layer.name}" media paint`);
+      if (mediaPaint.source.kind === 'clip' && mediaPaint.source.src.startsWith('asset:')) {
+        const asset = assetById.get(mediaPaint.source.src.slice('asset:'.length));
+        if (asset && (asset.kind !== 'media' || !asset.mimeType.startsWith('video/')))
+          errors.push(
+            `${prefix}: layer "${layer.name}" media clip must reference a video media asset.`,
+          );
+      }
+      if (mediaPaint.source.kind === 'live' && mediaPaint.source.fallback?.startsWith('asset:')) {
+        const asset = assetById.get(mediaPaint.source.fallback.slice('asset:'.length));
+        if (asset && (asset.kind !== 'image' || !asset.mimeType.startsWith('image/')))
+          errors.push(
+            `${prefix}: layer "${layer.name}" live media fallback must reference an image asset.`,
+          );
+      }
     }
     if (layer.element.type === 'image' && layer.element.src) {
       validateAssetReference(layer.element.src, `layer "${layer.name}"`);
@@ -1186,5 +1216,16 @@ export function validateProject(project: Project): ProjectValidationResult {
   }
   for (const composition of project.compositions)
     validateComposition(composition, errors, warnings);
+  if (project.supportsNonRealTime) {
+    for (const composition of project.compositions) {
+      for (const layer of composition.layers) {
+        const paint = getElementFill(layer.element);
+        if (isMediaPaint(paint))
+          errors.push(
+            `Composition "${composition.name}": layer "${layer.name}" uses media paint, whose initial runtime is real-time-only and cannot declare non-real-time support.`,
+          );
+      }
+    }
+  }
   return { valid: errors.length === 0, errors, warnings };
 }

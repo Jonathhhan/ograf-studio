@@ -1,9 +1,11 @@
 import {
   isGradientPaint,
+  isMediaPaint,
   getElementShaderPaint,
   getElementShaderPaints,
   isShaderPaint,
   createShaderPaint,
+  normalizeMediaPaint,
   migrateShaderBindingTarget,
   shaderPaintConflictsWithBinding,
   parseShaderAnimationProperty,
@@ -85,6 +87,7 @@ import {
   type MaterializedLowerThird,
   type LayerPropertyKeyframe,
   type LayerTransform,
+  type Paint,
   type Project,
 } from '@ograf-editor/scene-model';
 import type { AuthoringChangeSummary, AuthoringOperation } from './types';
@@ -421,6 +424,7 @@ function addLayer(
       elementPatch.borderRadius = normalizeCornerRadii(elementPatch.borderRadius as never);
     }
     if (isShaderPaint(elementPatch.fill)) elementPatch.fill = createShaderPaint(elementPatch.fill);
+    if (isMediaPaint(elementPatch.fill)) elementPatch.fill = normalizeMediaPaint(elementPatch.fill);
     if ('strokePaint' in elementPatch && layer.element.type !== 'text')
       throw new Error('Shader outlines are supported only on text layers.');
     if (isShaderPaint(elementPatch.strokePaint))
@@ -1333,7 +1337,9 @@ export function applyAuthoringOperations(
             ? 'font'
             : operation.mimeType.startsWith('image/')
               ? 'image'
-              : 'source',
+              : operation.mimeType.startsWith('video/')
+                ? 'media'
+                : 'source',
           mimeType: operation.mimeType,
           dataUri,
           originalFileName: operation.name.trim(),
@@ -1376,9 +1382,15 @@ export function applyAuthoringOperations(
         const layerConsumers = composition.layers.filter((layer) => {
           if (layer.element.type === 'image') return layer.element.src === reference;
           if (layer.element.type === 'image-sequence') {
-            return layer.element.frames.includes(reference);
+            if (layer.element.frames.includes(reference)) return true;
           }
-          return false;
+          const fill = 'fill' in layer.element ? layer.element.fill : undefined;
+          return (
+            isMediaPaint(fill) &&
+            (fill.source.kind === 'clip'
+              ? fill.source.src === reference
+              : fill.source.fallback === reference)
+          );
         });
         const fieldConsumers = composition.dataFields.filter(
           (field) =>
@@ -1395,6 +1407,28 @@ export function applyAuthoringOperations(
             if (layer.element.type === 'image') layer.element.src = null;
             else if (layer.element.type === 'image-sequence') {
               layer.element.frames = layer.element.frames.filter((frame) => frame !== reference);
+            }
+            const paintElement = 'fill' in layer.element ? layer.element : null;
+            const mutablePaintElement = paintElement as { fill?: Paint } | null;
+            const fill = paintElement?.fill;
+            if (isMediaPaint(fill)) {
+              if (fill.source.kind === 'live' && fill.source.fallback === reference) {
+                mutablePaintElement!.fill = {
+                  ...fill,
+                  source: { kind: 'live', tag: fill.source.tag },
+                };
+              } else if (fill.source.kind === 'clip' && fill.source.src === reference) {
+                if (
+                  layer.element.type === 'image' ||
+                  layer.element.type === 'image-sequence' ||
+                  layer.element.type === 'lottie'
+                )
+                  delete layer.element.fill;
+                else if (layer.element.type === 'text') {
+                  layer.element.color = '#3b3f4a';
+                  delete layer.element.fill;
+                } else mutablePaintElement!.fill = '#3b3f4a';
+              }
             }
             summary.affectedLayerIds.push(layer.id);
           }
@@ -1681,6 +1715,8 @@ export function applyAuthoringOperations(
             },
           });
         }
+        if (isMediaPaint(elementPatch.fill))
+          elementPatch.fill = normalizeMediaPaint(elementPatch.fill);
         if (
           isShaderPaint(elementPatch.fill) &&
           elementPatch.fill.parameters !== undefined &&
@@ -2212,7 +2248,7 @@ export function applyAuthoringOperations(
           shaderPaintConflictsWithBinding(layer.element, operation.binding.targetProperty)
         )
           throw new Error(
-            'A shader paint cannot bind its whole fill or gradient stops; bind a shader parameter instead.',
+            'Shader and media paints cannot bind their whole fill or gradient stops; bind a supported inner property instead.',
           );
         if (
           operation.binding &&
@@ -2239,7 +2275,7 @@ export function applyAuthoringOperations(
           )
         )
           throw new Error(
-            'A shader paint cannot bind its whole fill or gradient stops; bind a shader parameter instead.',
+            'Shader and media paints cannot bind their whole fill or gradient stops; bind a supported inner property instead.',
           );
         for (const binding of operation.bindings) {
           if (!composition.dataFields.some((field) => field.id === binding.fieldId)) {

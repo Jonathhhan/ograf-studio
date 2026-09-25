@@ -23,7 +23,7 @@ export interface GradientPaint {
   stops: GradientStop[];
 }
 
-export type Paint = string | GradientPaint | ShaderPaint;
+export type Paint = string | GradientPaint | ShaderPaint | MediaPaint;
 
 export interface CornerRadii {
   topLeft: number;
@@ -82,7 +82,7 @@ export interface ImageElement {
   type: 'image';
   src: string | null;
   /** Procedural paint clipped by the source image alpha; absent retains source pixels. */
-  fill?: ShaderPaint;
+  fill?: ShaderPaint | MediaPaint;
 }
 
 /**
@@ -192,7 +192,7 @@ export interface ImageSequenceElement {
   frames: string[];
   fps: number;
   loop: boolean;
-  fill?: ShaderPaint;
+  fill?: ShaderPaint | MediaPaint;
 }
 
 /** A self-contained Bodymovin/Lottie document rendered from the composition's absolute clock. */
@@ -215,7 +215,7 @@ export interface LottieElement {
   type: 'lottie';
   animationData: LottieAnimationData | null;
   speed: number;
-  fill?: ShaderPaint;
+  fill?: ShaderPaint | MediaPaint;
 }
 
 /** Self-contained single-pass GLSL mainImage, driven by the composition clock in WebGL2. */
@@ -250,6 +250,25 @@ export interface ShaderPaint {
   resolutionScale: number;
   parameters: Record<string, ShaderParameterValue>;
   inputImage?: ShaderImageInput;
+}
+
+export type MediaPaintFit = 'cover' | 'contain' | 'fill';
+
+export type MediaPaintSource =
+  { kind: 'clip'; src: string } | { kind: 'live'; tag: string; fallback?: string };
+
+/** Moving-image paint clipped by the object's native geometry or alpha. Audio is never emitted. */
+export interface MediaPaint {
+  type: 'media';
+  source: MediaPaintSource;
+  fit: MediaPaintFit;
+  /** Normalized focal point used by cover/contain placement. */
+  positionX: number;
+  positionY: number;
+  loop: boolean;
+  speed: number;
+  offsetMs: number;
+  muted: true;
 }
 
 /** @deprecated Import compatibility only; current scenes use a rectangle with ShaderPaint. */
@@ -742,7 +761,7 @@ export interface CustomActionDefinition {
 export interface Asset {
   id: string;
   name: string;
-  kind: 'image' | 'font' | 'source';
+  kind: 'image' | 'media' | 'font' | 'source';
   dataUri: string;
   mimeType: string;
   /** Original local filename retained for traceability after package-path normalization. */

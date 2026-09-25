@@ -5,7 +5,7 @@ import {
   defaultConstraintsForFieldType,
   defaultOptionsForFieldType,
   defaultValueForFieldType,
-  isShaderPaint,
+  isGradientPaint,
   type FieldConstraints,
   type FieldDefinition,
   type GradientPaint,
@@ -569,9 +569,10 @@ function DefaultValueInput({
     return value && typeof value === 'object' && !Array.isArray(value) && 'stops' in value ? (
       <PaintEditor
         allowShader={false}
+        allowMedia={false}
         value={value as GradientPaint}
         onChange={(paint) => {
-          if (paint !== undefined && !isShaderPaint(paint)) onChange(paint);
+          if (paint !== undefined && isGradientPaint(paint)) onChange(paint);
         }}
       />
     ) : null;

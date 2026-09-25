@@ -38,6 +38,7 @@ export function ResourcesPanel() {
   const selectMany = useSelectionStore((s) => s.selectMany);
   const [svgImportStatus, setSvgImportStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   const fontInputRef = useRef<HTMLInputElement>(null);
   const sourceInputRef = useRef<HTMLInputElement>(null);
   const missingReferences = useMemo(() => findMissingAssetReferences(composition), [composition]);
@@ -46,6 +47,7 @@ export function ResourcesPanel() {
     [composition.assets],
   );
   const imageAssets = assetsByKind.images;
+  const mediaAssets = assetsByKind.media;
   const fontAssets = assetsByKind.fonts;
   const sourceAssets = assetsByKind.sources;
 
@@ -248,6 +250,83 @@ export function ResourcesPanel() {
               </p>
             )}
             {svgImportStatus && <p className="inspector-hint">{svgImportStatus}</p>}
+          </ResourceTreeBranch>
+
+          <ResourceTreeBranch label="Media" count={mediaAssets.length}>
+            <div className="resources-tree-toolbar">
+              <span>Packaged video clips</span>
+              <button type="button" onClick={() => mediaInputRef.current?.click()}>
+                + Import
+              </button>
+              <input
+                ref={mediaInputRef}
+                type="file"
+                accept="video/mp4,video/webm,.mp4,.webm"
+                multiple
+                className="resources-file-input"
+                onChange={handleFileChange}
+              />
+            </div>
+            {mediaAssets.length === 0 ? (
+              <p className="panel-placeholder">No media clips imported.</p>
+            ) : (
+              <div className="resources-tree-items" role="group">
+                {mediaAssets.map((asset) => {
+                  const uses = usageCount(asset);
+                  return (
+                    <ResourceTreeItem
+                      key={asset.id}
+                      label={asset.name}
+                      meta={`${formatBytes(asset.byteSize)} · ${uses} uses`}
+                      preview={
+                        <video
+                          src={asset.dataUri}
+                          className="resources-asset-thumb resources-media-thumb"
+                          muted
+                          playsInline
+                          preload="metadata"
+                        />
+                      }
+                    >
+                      <div className="resources-asset-fields">
+                        <input
+                          aria-label="Media resource name"
+                          value={asset.name}
+                          onChange={(event) => updateAsset(asset.id, { name: event.target.value })}
+                        />
+                        <span className="resources-asset-meta">
+                          {asset.originalFileName || asset.name} · {asset.mimeType}
+                        </span>
+                        <input
+                          aria-label="Media package path"
+                          className={
+                            !asset.packagePath || isSafePackagePath(asset.packagePath)
+                              ? ''
+                              : 'invalid'
+                          }
+                          placeholder={`assets/${asset.id}`}
+                          value={asset.packagePath ?? ''}
+                          onChange={(event) =>
+                            updateAsset(asset.id, { packagePath: event.target.value || undefined })
+                          }
+                        />
+                        <div className="resources-tree-actions">
+                          <span>{uses} use(s)</span>
+                          <button
+                            type="button"
+                            className="data-table-delete"
+                            disabled={uses > 0}
+                            onClick={() => removeAsset(asset.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </ResourceTreeItem>
+                  );
+                })}
+              </div>
+            )}
           </ResourceTreeBranch>
 
           <ResourceTreeBranch label="Fonts" count={fontAssets.length}>

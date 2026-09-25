@@ -4,6 +4,7 @@ import {
   type OGrafManifest,
 } from '@ograf-editor/ograf-types';
 import type { Composition, Project } from '@ograf-editor/scene-model';
+import { isMediaPaint } from '@ograf-editor/scene-model';
 import { compileCustomActions, compileDataSchema } from './compileDataSchema';
 import type { CompiledGraphicDescriptor } from './compileDescriptor';
 
@@ -57,11 +58,25 @@ export function assembleManifest(
 ): OGrafManifest {
   const schema = compileDataSchema(composition);
   const customActions = compileCustomActions(composition);
-  const needsPublicInternet = descriptor.layers.some((layer) => {
+  const compiledLayers = [
+    ...descriptor.layers,
+    ...(descriptor.collections ?? []).flatMap((collection) => collection.prototypeLayers),
+  ];
+  const mediaPaints = compiledLayers.flatMap((layer) => {
+    const fill = 'fill' in layer.element ? layer.element.fill : undefined;
+    return isMediaPaint(fill) ? [fill] : [];
+  });
+  const needsLiveMedia = mediaPaints.some((paint) => paint.source.kind === 'live');
+  const needsPublicInternet = compiledLayers.some((layer) => {
     const element = layer.element;
     if (element.type === 'image') return /^https?:\/\//i.test(element.src ?? '');
     if (element.type === 'image-sequence')
       return element.frames.some((frame) => /^https?:\/\//i.test(frame));
+    const fill = 'fill' in element ? element.fill : undefined;
+    if (isMediaPaint(fill)) {
+      const source = fill.source.kind === 'clip' ? fill.source.src : fill.source.fallback;
+      return /^https?:\/\//i.test(source ?? '');
+    }
     return false;
   });
 
@@ -83,6 +98,9 @@ export function assembleManifest(
         resolution: { width: { exact: descriptor.width }, height: { exact: descriptor.height } },
         frameRate: { exact: descriptor.frameRate },
         accessToPublicInternet: { exact: needsPublicInternet },
+        ...(needsLiveMedia
+          ? { engine: [{ type: 'ZeroDensityHTML', version: { min: '1.0' } }] }
+          : {}),
       },
     ],
   };

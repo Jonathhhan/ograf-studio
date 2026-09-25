@@ -8,3 +8,12 @@
   outline: 2px solid var(--accent-focus);
   outline-offset: -2px;
 }
+
+.media-paint-controls {
+  display: contents;
+}
+
+.media-paint-import {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}

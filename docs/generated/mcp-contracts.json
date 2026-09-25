@@ -3225,7 +3225,7 @@
     {
       "name": "ograf_import_asset",
       "title": "Import a workspace asset into OGraf",
-      "description": "Embed workspace image/font/CSS/text (32 MiB max). Returns asset:<id> for sources/defaults.",
+      "description": "Embed workspace image/video/font/text (32 MiB max); returns asset:<id>.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3242,6 +3242,8 @@
               "image/gif",
               "image/webp",
               "image/svg+xml",
+              "video/mp4",
+              "video/webm",
               "font/ttf",
               "font/otf",
               "font/woff",

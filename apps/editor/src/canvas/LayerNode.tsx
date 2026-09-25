@@ -4,6 +4,7 @@ import {
   getLayerEffectsAtFrame,
   effectEnabled,
   getEffectStack,
+  hasElementMediaPaint,
   hasElementShaderPaint,
   shaderParameterTarget,
   type Element,
@@ -95,6 +96,7 @@ export function LayerNode({
   }, [assets, dataFields, layer, testValues, patterns]);
   const element = resolvedContent.element;
   const hasShaderPaint = hasElementShaderPaint(element);
+  const hasMediaPaint = hasElementMediaPaint(element);
   const lottieBackingSize = useMemo(() => lottieBackingSizeForLayer(layer), [layer]);
   const shaderBackingSize = useMemo(() => shaderBackingSizeForLayer(layer), [layer]);
   const shaderStrokePadding = useMemo(() => shaderStrokePaddingForLayer(layer), [layer]);
@@ -123,10 +125,10 @@ export function LayerNode({
     if (host) {
       renderElementContent(host, element, 0, {
         ...(element.type === 'lottie' ? { lottieBackingSize } : {}),
-        ...(hasShaderPaint ? { shaderBackingSize, shaderStrokePadding } : {}),
+        ...(hasShaderPaint || hasMediaPaint ? { shaderBackingSize, shaderStrokePadding } : {}),
       });
       applyAnimatedPaint(host, layer.animationTracks, useTimelineStore.getState().currentFrame);
-      if (element.type === 'lottie' || hasShaderPaint) watchContentReadiness(host);
+      if (element.type === 'lottie' || hasShaderPaint || hasMediaPaint) watchContentReadiness(host);
       else setContentError(null);
     }
     return () => {
@@ -135,6 +137,7 @@ export function LayerNode({
   }, [
     element,
     hasShaderPaint,
+    hasMediaPaint,
     layer.animationTracks,
     layer.isVisible,
     lottieBackingSize,
@@ -199,7 +202,7 @@ export function LayerNode({
   }, [layer.isVisible]);
 
   useLayoutEffect(() => {
-    if (hasShaderPaint) {
+    if (hasShaderPaint || hasMediaPaint) {
       let animationFrame: number | null = null;
       const render = () => {
         animationFrame = null;
@@ -256,6 +259,7 @@ export function LayerNode({
     compositionFrameRate,
     element,
     hasShaderPaint,
+    hasMediaPaint,
     layer.isVisible,
     lottieBackingSize,
     shaderBackingSize,

@@ -3,6 +3,8 @@ import { useTimelineStore } from './timelineStore';
 import {
   getLayerPropertyValueAtFrame,
   createShaderPaint,
+  createMediaPaint,
+  getElementMediaPaint,
   getElementShaderPaint,
   getEffectStack,
 } from '@ograf-editor/scene-model';
@@ -69,6 +71,36 @@ describe('project store authoring', () => {
       ).toBeUndefined();
       expect(current().dataFields).toHaveLength(0);
       expect(current().layers.find((layer) => layer.id === id)!.bindings).toHaveLength(0);
+    }
+  });
+  it('applies media paint to every fill-capable object without changing its kind', () => {
+    for (const kind of [
+      'rectangle',
+      'ellipse',
+      'path',
+      'pattern',
+      'text',
+      'image',
+      'image-sequence',
+      'lottie',
+    ] as const) {
+      const store = useProjectStore.getState();
+      store.newProject();
+      const id = store.addLayer(kind);
+      store.updateLayerPaint(
+        id,
+        0,
+        createMediaPaint({ source: { kind: 'clip', src: 'https://media.example/clip.mp4' } }),
+      );
+      const layer = useProjectStore
+        .getState()
+        .project.compositions[0]!.layers.find((candidate) => candidate.id === id)!;
+      expect(layer.element.type).toBe(kind);
+      expect(getElementMediaPaint(layer.element)).toMatchObject({
+        type: 'media',
+        source: { kind: 'clip', src: 'https://media.example/clip.mp4' },
+        muted: true,
+      });
     }
   });
   it('keeps pragma controls and generated field defaults coherent through editing and duplication', () => {

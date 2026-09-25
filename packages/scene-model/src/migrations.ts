@@ -26,6 +26,7 @@ import {
   isShaderPaint,
 } from './shader';
 import { compositionWithShaderParameterFields } from './shaderFields';
+import { isMediaPaint, normalizeMediaPaint } from './mediaPaint';
 import { parseShaderAnimationProperty } from './shaderAnimation';
 import type {
   Composition,
@@ -154,6 +155,11 @@ function normalizeFieldDefinition(field: LegacyFieldDefinition): FieldDefinition
     properties,
     items,
   };
+}
+
+function normalizeMediaPaintElement(element: Element): Element {
+  if (!('fill' in element) || !isMediaPaint(element.fill)) return element;
+  return { ...element, fill: normalizeMediaPaint(element.fill) } as Element;
 }
 
 function normalizeElement(element: Element): Element {
@@ -497,8 +503,15 @@ export function migrateProject(project: Project | LegacyProject): Project {
         ? { ...resource, paint: normalizeShaderElement(resource.paint) }
         : resource,
     ),
-    compositions: cloned.compositions.map((composition) =>
-      compositionWithShaderParameterFields(normalizeComposition(composition)),
-    ),
+    compositions: cloned.compositions.map((composition) => {
+      const normalized = normalizeComposition(composition);
+      return compositionWithShaderParameterFields({
+        ...normalized,
+        layers: normalized.layers.map((layer) => ({
+          ...layer,
+          element: normalizeMediaPaintElement(layer.element),
+        })),
+      });
+    }),
   };
 }

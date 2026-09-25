@@ -41,6 +41,14 @@ import {
   forgetShaderAnimationBase,
   rememberShaderAnimationBase,
 } from './shaderAnimationRendering';
+import {
+  disposeMediaPaintContent,
+  mountMediaPaintContent,
+  renderMediaPaintAtTime,
+  updateMediaPaintContent,
+  waitForMediaPaintContentReady,
+} from './mediaPaintRendering';
+import { hasElementMediaPaint } from '@ograf-editor/scene-model';
 
 interface MountedTextFit {
   observer?: ResizeObserver;
@@ -301,6 +309,7 @@ export async function waitForElementContentReady(root: ParentNode): Promise<void
   const failure = mounted.find((entry) => entry.error)?.error;
   if (failure) throw failure;
   await waitForShaderPaintContentReady(root);
+  await waitForMediaPaintContentReady(root);
   await waitForShadersReady(root);
   await waitForLayerEffectsReady(root);
 }
@@ -411,6 +420,7 @@ export function disposeElementContent(container: HTMLElement): void {
   disposeLayerEffects(container);
   forgetShaderAnimationBase(container);
   disposeShaderPaintContent(container);
+  disposeMediaPaintContent(container);
   disposeShader(container);
   const mountedLottie = lottieAnimations.get(container);
   if (mountedLottie) {
@@ -502,6 +512,11 @@ export function renderElementContent(
   options: ElementContentRenderOptions = {},
 ): void {
   const shaderFill = element.type !== 'shader' && hasElementShaderPaint(element);
+  const mediaFill = element.type !== 'shader' && hasElementMediaPaint(element);
+  if (mediaFill && updateMediaPaintContent(container, element, options)) {
+    container.dataset.ografRenderedElement = JSON.stringify(element);
+    return;
+  }
   if (shaderFill && updateShaderPaintContent(container, element, options)) {
     rememberShaderAnimationBase(container, element);
     container.dataset.ografRenderedElement = JSON.stringify(element);
@@ -525,7 +540,16 @@ export function renderElementContent(
   disposeElementContent(container);
   container.dataset.ografRenderedElement = JSON.stringify(element);
   rememberShaderAnimationBase(container, element);
-  if (shaderFill) {
+  if (mediaFill) {
+    mountMediaPaintContent(container, element, options, {
+      render: (host, base, baseOptions) =>
+        renderElementContent(host, base, frameIndex, baseOptions),
+      renderAtTime: renderAnimatedElementAtTime,
+      ready: waitForElementContentReady,
+      refreshLayout: (host) => textFitCallbacks.get(host)?.(),
+      dispose: disposeElementContent,
+    });
+  } else if (shaderFill) {
     mountShaderPaintContent(container, element, options, {
       render: (host, base, baseOptions) =>
         renderElementContent(host, base, frameIndex, baseOptions),
@@ -1005,6 +1029,7 @@ export function renderAnimatedElementAtTime(
   element: Element,
   elapsedMs: number,
 ): void {
+  if (renderMediaPaintAtTime(container, elapsedMs)) return;
   if (renderShaderPaintAtTime(container, elapsedMs)) return;
   if (element.type === 'shader') {
     renderShaderAtTime(container, elapsedMs);

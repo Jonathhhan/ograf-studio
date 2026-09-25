@@ -1,6 +1,6 @@
 ---
 name: ograf-authoring
-description: Create, inspect, animate, review, validate, certify, save, and export editable EBU OGraf-compatible broadcast graphics through OGraf Studio MCP. Use for lower thirds, scoreboards, tickers, Lottie layers, shader paints and exposed shader animation, procedural pattern presets, composable effects stacks, semantic scene authoring, Brand Kits, finite repeaters, runtime GDD collections, reusable components, HTML5 broadcast templates, .ogs source, .ograf.zip packages, per-property animation, data binding, and OGraf compliance work.
+description: Create, inspect, animate, review, validate, certify, save, and export editable EBU OGraf-compatible broadcast graphics through OGraf Studio MCP. Use for lower thirds, scoreboards, tickers, Lottie layers, shader and Media paints, exposed shader animation, procedural pattern presets, composable effects stacks, semantic scene authoring, Brand Kits, finite repeaters, runtime GDD collections, reusable components, HTML5 broadcast templates, .ogs source, .ograf.zip packages, per-property animation, data binding, and OGraf compliance work.
 ---
 
 # OGraf Authoring
@@ -364,3 +364,5 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
 - Read [references/examples.md](./references/examples.md) for a compact lower-third transaction pattern.
 - Read [references/setup.md](./references/setup.md) only for local startup, connection recovery,
   Claude Desktop configuration, or workspace confinement.
+- Read [references/media-paints.md](./references/media-paints.md) for packaged clips, live tags,
+  realtime limits, fallbacks, and renderer requirements.

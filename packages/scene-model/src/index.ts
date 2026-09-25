@@ -20,6 +20,7 @@ export * from './effectStack';
 export * from './effectRendering';
 export * from './layout';
 export * from './paint';
+export * from './mediaPaint';
 export * from './cornerRadii';
 export * from './clipping';
 export * from './masking';

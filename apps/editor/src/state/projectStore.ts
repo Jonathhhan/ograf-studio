@@ -61,7 +61,9 @@ import {
   applyElementDataValue,
   shaderParameterTarget,
   isGradientPaint,
+  isMediaPaint,
   isShaderPaint,
+  normalizeMediaPaint,
   syncShaderParameterFields,
   syncCompositionShaderParameterFields,
   createTransition,
@@ -2112,13 +2114,14 @@ export const useProjectStore = create<ProjectStore>()(
             element.type === 'image-sequence' ||
             element.type === 'lottie'
           ) {
-            if (paint !== undefined && !isShaderPaint(paint))
-              throw new Error('Media fill must be a shader or original pixels.');
+            if (paint !== undefined && !isShaderPaint(paint) && !isMediaPaint(paint))
+              throw new Error('Media fill must be a shader, media paint, or original pixels.');
             if (isShaderPaint(paint)) {
               const inspection = inspectShaderElement(paint);
               if (!inspection.valid) throw new Error(inspection.errors.join('\n'));
               element.fill = paint;
-            } else delete element.fill;
+            } else if (isMediaPaint(paint)) element.fill = normalizeMediaPaint(paint);
+            else delete element.fill;
             syncShaderParameterFields(composition, layer);
             return;
           }
@@ -2127,6 +2130,7 @@ export const useProjectStore = create<ProjectStore>()(
             const inspection = inspectShaderElement(paint);
             if (!inspection.valid) throw new Error(inspection.errors.join('\n'));
           }
+          if (isMediaPaint(paint)) paint = normalizeMediaPaint(paint);
           if (element.type === 'text') {
             if (typeof paint === 'string') {
               element.color = paint;
@@ -3107,7 +3111,13 @@ export const useProjectStore = create<ProjectStore>()(
                   ? 'font/ttf'
                   : undefined;
         const mimeType = (fontMime ?? file.type) || 'application/octet-stream';
-        const kind = fontMime ? 'font' : mimeType.startsWith('image/') ? 'image' : 'source';
+        const kind = fontMime
+          ? 'font'
+          : mimeType.startsWith('image/')
+            ? 'image'
+            : mimeType.startsWith('video/')
+              ? 'media'
+              : 'source';
         const asset = createAsset({
           name: file.name,
           kind,

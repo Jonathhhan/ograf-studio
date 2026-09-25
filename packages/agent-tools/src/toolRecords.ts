@@ -207,6 +207,24 @@ const SHADER_PAINT_CAPABILITIES = {
   },
 };
 
+const MEDIA_PAINT_CAPABILITIES = {
+  type: 'media',
+  shape:
+    '{type:"media",source:{kind:"clip",src}|{kind:"live",tag,fallback?},fit:"cover"|"contain"|"fill",positionX:0..1,positionY:0..1,loop,speed:0.1..16,offsetMs>=0,muted:true}',
+  semantics:
+    'Moving image clipped by native object geometry/alpha. Audio is never emitted. Clip sources may use asset:<id>, packaged/remote URLs or data URIs. Live sources emit the zd-ograf-media v1 hook and require the ZeroDensityHTML renderer; fallback is portable.',
+  assetImport:
+    'Import MP4/WebM through Resources > Media or ograf_import_asset, then use asset:<id> in source.src. Current editable sources embed asset bytes and retain the existing 32 MiB MCP import limit.',
+  timing:
+    'Clip playback is realtime, muted and optionally looped. Live media is realtime-only; disable non-real-time support before certification/export.',
+  liveTag: {
+    element: 'zd-ograf-media',
+    version: 1,
+    sourceAttribute: 'data-source-tag',
+    manifestEngineRequirement: 'ZeroDensityHTML >= 1.0',
+  },
+};
+
 const CAPABILITY_SECTIONS = [
   'elements',
   'shaders',
@@ -479,6 +497,8 @@ const IMPORT_MIME_BY_EXTENSION: Record<string, string> = {
   '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
   '.ttf': 'font/ttf',
   '.otf': 'font/otf',
   '.woff': 'font/woff',
@@ -1657,7 +1677,10 @@ export function createOGrafToolRecords(
           'image-sequence',
           'lottie',
         ],
-        paintSchemas: { shader: SHADER_PAINT_CAPABILITIES },
+        paintSchemas: {
+          shader: SHADER_PAINT_CAPABILITIES,
+          media: MEDIA_PAINT_CAPABILITIES,
+        },
         elementSchemas: {
           rectangle: {
             defaultTransform: { width: 200, height: 200, shape: 'square' },
@@ -1669,6 +1692,7 @@ export function createOGrafToolRecords(
                 'radial-gradient',
                 'conic-gradient',
                 'shader',
+                'media',
               ],
               default: '#3b3f4a',
               gradientShape: {
@@ -1697,6 +1721,7 @@ export function createOGrafToolRecords(
                 'radial-gradient',
                 'conic-gradient',
                 'shader',
+                'media',
               ],
               default: '#3b3f4a',
               gradientShape: {
@@ -1710,13 +1735,14 @@ export function createOGrafToolRecords(
           },
           text: {
             strokePaint: {
-              type: 'shader-or-omitted',
+              type: 'shader-or-media-or-omitted',
               description:
                 'Independent shader outline on editable text, using strokeWidth and glyph stroke alpha. Omitted uses strokeColor.',
             },
             fill: {
               type: 'paint-or-omitted',
-              description: 'Solid, gradient, or shader clipped by glyph alpha; omitted uses color.',
+              description:
+                'Solid, gradient, shader, or media clipped by glyph alpha; omitted uses color.',
             },
             content: { type: 'string', default: 'Text' },
             color: { type: 'color', default: '#ffffff' },
@@ -1756,7 +1782,7 @@ export function createOGrafToolRecords(
             },
           },
           image: {
-            fill: { type: 'shader-or-omitted' },
+            fill: { type: 'shader-or-media-or-omitted' },
             src: {
               type: 'string-or-null',
               default: null,
@@ -1807,6 +1833,7 @@ export function createOGrafToolRecords(
                 'radial-gradient',
                 'conic-gradient',
                 'shader',
+                'media',
               ],
               gradientShape: {
                 type: 'linear | radial | conic',
@@ -1821,7 +1848,7 @@ export function createOGrafToolRecords(
             viewBoxHeight: { type: 'number', default: 100, exclusiveMinimum: 0 },
           },
           'image-sequence': {
-            fill: { type: 'shader-or-omitted' },
+            fill: { type: 'shader-or-media-or-omitted' },
             frames: {
               type: 'string-array',
               default: [],
@@ -1832,7 +1859,7 @@ export function createOGrafToolRecords(
           },
           lottie: {
             fill: {
-              type: 'shader-or-omitted',
+              type: 'shader-or-media-or-omitted',
               description:
                 'Shader paint replaces color through source alpha; omitted preserves original pixels.',
             },
@@ -2238,8 +2265,8 @@ export function createOGrafToolRecords(
           dependencies:
             'Same composition. No self/cycles, guide sources or cross-runtime-collection references. Source tracks/loops are sampled independently. Include sources when saving components; duplication remaps internal references. Detach consumers before deleting a source.',
           unsupportedSources: ['text', 'image-sequence', 'lottie', 'shader'],
-          shaderPaint:
-            'Shader-painted layers may receive masks and provide geometric path masks; alpha-mask sourcing is unsupported.',
+          dynamicPaint:
+            'Shader- or media-painted layers may receive masks and provide geometric path masks; alpha-mask sourcing is unsupported.',
           conicAlpha:
             'SVG alpha masks tessellate conic paint at half-degree intervals; visible path paint uses native CSS gradients.',
         },
@@ -3571,8 +3598,7 @@ export function createOGrafToolRecords(
     'ograf_import_asset',
     {
       title: 'Import a workspace asset into OGraf',
-      description:
-        'Embed workspace image/font/CSS/text (32 MiB max). Returns asset:<id> for sources/defaults.',
+      description: 'Embed workspace image/video/font/text (32 MiB max); returns asset:<id>.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         expectedRevision: z.number().int().nonnegative(),
@@ -3586,6 +3612,8 @@ export function createOGrafToolRecords(
             'image/gif',
             'image/webp',
             'image/svg+xml',
+            'video/mp4',
+            'video/webm',
             'font/ttf',
             'font/otf',
             'font/woff',

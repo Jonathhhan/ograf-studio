@@ -7,6 +7,8 @@ import {
   createCustomActionDefinition,
   createFieldDefinition,
   createKeyframe,
+  createLayerOfKind,
+  createMediaPaint,
   createProject,
   createTransition,
   type Composition,
@@ -90,6 +92,19 @@ describe('assembleManifest — conformance to the real EBU schema', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('keeps renderer-specific live media schema-valid and declares its engine requirement', () => {
+    const layer = createLayerOfKind('rectangle');
+    if (!('fill' in layer.element)) throw new Error('Expected fill');
+    layer.element.fill = createMediaPaint({ source: { kind: 'live', tag: 'camera.program' } });
+    const composition = createComposition({ layers: [layer] });
+    const project = createProject({ supportsNonRealTime: false });
+    const manifest = build(composition, project);
+    expect(validateAgainstRealSchema(manifest)).toEqual({ valid: true, errors: [] });
+    expect(manifest.renderRequirements?.[0]?.engine).toEqual([
+      { type: 'ZeroDensityHTML', version: { min: '1.0' } },
+    ]);
+  });
+
   it('rejects the pre-Phase-5a raw-number renderRequirements shape', () => {
     // Regression guard: this is exactly what we used to emit, and what ograf-devtool rejected.
     const manifest = build(createComposition()) as unknown as Record<string, unknown>;
@@ -110,6 +125,16 @@ describe('assembleManifest — content', () => {
         accessToPublicInternet: { exact: false },
       },
     ]);
+  });
+
+  it('declares public internet access for a remote media clip', () => {
+    const layer = createLayerOfKind('ellipse');
+    if (!('fill' in layer.element)) throw new Error('Expected fill');
+    layer.element.fill = createMediaPaint({
+      source: { kind: 'clip', src: 'https://media.example/clip.mp4' },
+    });
+    const manifest = build(createComposition({ layers: [layer] }));
+    expect(manifest.renderRequirements?.[0]?.accessToPublicInternet).toEqual({ exact: true });
   });
 
   it('sets stepCount from the step count (outro excluded) and points main at main.js', () => {

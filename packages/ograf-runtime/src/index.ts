@@ -7,6 +7,12 @@ export { applyCompiledMasks } from './maskRendering';
 export { renderPatternAtElapsed } from './patternRendering';
 export { shaderStrokePaddingForLayer, updateShaderPaintUniforms } from './shaderPaintRendering';
 export {
+  disposeMediaPaintContent,
+  mediaFitRect,
+  renderMediaPaintAtTime,
+  waitForMediaPaintContentReady,
+} from './mediaPaintRendering';
+export {
   createShaderRenderer,
   shaderBackingSizeForLayer,
   shaderTimeSeconds,

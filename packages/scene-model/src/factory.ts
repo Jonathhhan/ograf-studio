@@ -529,7 +529,7 @@ export function createComposition(overrides: Partial<Composition> = {}): Composi
   };
 }
 
-export const PROJECT_DOCUMENT_VERSION = 33;
+export const PROJECT_DOCUMENT_VERSION = 34;
 
 export function createProject(overrides: Partial<Project> = {}): Project {
   const mainComposition = createComposition({ name: 'Main' });

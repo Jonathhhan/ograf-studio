@@ -3,6 +3,8 @@ import {
   createAsset,
   createComposition,
   createImageLayer,
+  createLayerOfKind,
+  createMediaPaint,
   createProject,
 } from '@ograf-editor/scene-model';
 import type { CompiledGraphicDescriptor } from '@ograf-editor/ograf-types';
@@ -199,5 +201,55 @@ describe('exported package resource resolution', () => {
       mimeType: 'image/svg+xml',
     });
     expect(artifacts.mainJs).toContain('artwork/custom.resource');
+  });
+
+  it('packages media paint clips once and resolves them relative to normal and blob modules', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const clip = createAsset({
+      id: 'clip',
+      name: 'Clip',
+      kind: 'media',
+      mimeType: 'video/mp4',
+      dataUri: 'data:video/mp4;base64,AAAA',
+    });
+    composition.assets.push(clip);
+    const layer = createLayerOfKind('rectangle');
+    if (!('fill' in layer.element)) throw new Error('Expected fill');
+    layer.element.fill = createMediaPaint({ source: { kind: 'clip', src: `asset:${clip.id}` } });
+    composition.layers.push(layer);
+    const artifacts = buildExportArtifactsWithRuntime(project, composition, runtime);
+    expect(artifacts.resources).toContainEqual({
+      path: 'assets/clip.mp4',
+      data: 'AAAA',
+      base64: true,
+      mimeType: 'video/mp4',
+    });
+    const compiled = compileDescriptor(composition);
+    const mediaFill = compiled.layers[0]!.element;
+    expect('fill' in mediaFill && mediaFill.fill).toMatchObject({
+      source: { kind: 'clip', src: 'data:video/mp4;base64,AAAA' },
+    });
+    const packaged = structuredClone(compiled);
+    const packagedElement = packaged.layers[0]!.element;
+    if (
+      !('fill' in packagedElement) ||
+      !packagedElement.fill ||
+      typeof packagedElement.fill !== 'object'
+    )
+      throw new Error('Expected media fill');
+    (packagedElement.fill as ReturnType<typeof createMediaPaint>).source = {
+      kind: 'clip',
+      src: 'assets/clip.mp4',
+    };
+    const Graphic = evaluate('https://renderer.example/package/main.js', packaged, [
+      'assets/clip.mp4',
+    ]);
+    expect(Graphic.descriptor.layers[0]!.element).toMatchObject({
+      fill: {
+        type: 'media',
+        source: { kind: 'clip', src: 'https://renderer.example/package/assets/clip.mp4' },
+      },
+    });
   });
 });

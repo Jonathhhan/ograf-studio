@@ -8,15 +8,46 @@ import {
   createLayerKeyframe,
   createLayerOfKind,
   createLayerPropertyKeyframe,
+  createMediaPaint,
   createProject,
   createTransition,
   defaultTransformForRole,
   syncShaderParameterFields,
+  createAsset,
 } from '@ograf-editor/scene-model';
 import { validateManifest } from './validateManifest';
 import { validateProject } from './validateProject';
 
 describe('canonical OGraf validation', () => {
+  it('validates media clip assets and keeps live sources realtime-only', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const layer = createLayerOfKind('rectangle');
+    layer.keyframes = composition.keyframes.map((keyframe, index) =>
+      createLayerKeyframe(
+        computeKeyframeFrames(composition)[index]!.frame,
+        defaultTransformForRole('rectangle', keyframe.role),
+      ),
+    );
+    const clip = createAsset({
+      id: 'clip',
+      kind: 'media',
+      mimeType: 'video/mp4',
+      dataUri: 'data:video/mp4;base64,AAAA',
+    });
+    composition.assets.push(clip);
+    if (!('fill' in layer.element)) throw new Error('Expected fill');
+    layer.element.fill = createMediaPaint({ source: { kind: 'clip', src: 'asset:clip' } });
+    composition.layers.push(layer);
+    expect(validateProject(project).errors.join(' ')).toContain(
+      'initial runtime is real-time-only',
+    );
+    project.supportsNonRealTime = false;
+    expect(validateProject(project).errors).toEqual([]);
+
+    layer.element.fill = createMediaPaint({ source: { kind: 'live', tag: 'camera.program' } });
+    expect(validateProject(project).errors).toEqual([]);
+  });
   it('accepts typed vector object bindings and rejects mismatched shader parameter field types', () => {
     const project = createProject();
     const composition = project.compositions[0]!;

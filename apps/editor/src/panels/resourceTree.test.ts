@@ -5,11 +5,13 @@ import { partitionResourceAssets, resourceTreeBranchCounts } from './resourceTre
 describe('Resources tree model', () => {
   it('partitions each asset into one compact tree branch', () => {
     const image = createAsset({ id: 'image', kind: 'image' });
+    const media = createAsset({ id: 'media', kind: 'media' });
     const font = createAsset({ id: 'font', kind: 'font' });
     const source = createAsset({ id: 'source', kind: 'source' });
 
-    expect(partitionResourceAssets([source, image, font])).toEqual({
+    expect(partitionResourceAssets([source, media, image, font])).toEqual({
       images: [image],
+      media: [media],
       fonts: [font],
       sources: [source],
     });
@@ -19,6 +21,7 @@ describe('Resources tree model', () => {
     const composition = createComposition({
       assets: [
         createAsset({ kind: 'image' }),
+        createAsset({ kind: 'media' }),
         createAsset({ kind: 'image' }),
         createAsset({ kind: 'font' }),
       ],
@@ -41,6 +44,7 @@ describe('Resources tree model', () => {
       brandKit: 1,
       components: 0,
       images: 2,
+      media: 1,
       fonts: 1,
       sources: 0,
     });
