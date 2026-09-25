@@ -35,6 +35,7 @@ import {
   effectEnabled,
   getEffectStack,
   getShaderAnimationValue,
+  hasElementMediaPaint,
   parseShaderAnimationProperty,
   shaderAnimationPropertySpec,
   hasElementShaderPaint,
@@ -72,7 +73,7 @@ function contentOptions(layer: CompiledGraphicDescriptor['layers'][number]) {
     ...(layer.element.type === 'lottie'
       ? { lottieBackingSize: lottieBackingSizeForLayer(layer) }
       : {}),
-    ...(hasElementShaderPaint(layer.element)
+    ...(hasElementShaderPaint(layer.element) || hasElementMediaPaint(layer.element)
       ? {
           shaderBackingSize: shaderBackingSizeForLayer(layer),
           shaderStrokePadding: shaderStrokePaddingForLayer(layer),
@@ -653,6 +654,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     for (const layer of this.activeDescriptor.layers) {
       if (
         !hasElementShaderPaint(layer.element) &&
+        !hasElementMediaPaint(layer.element) &&
         (layer.element.type !== 'lottie' || !layer.element.animationData)
       )
         continue;
@@ -674,6 +676,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         (layer.element.type === 'image-sequence' && layer.element.frames.length > 0) ||
         (layer.element.type === 'lottie' && !!layer.element.animationData) ||
         hasElementShaderPaint(layer.element) ||
+        hasElementMediaPaint(layer.element) ||
         getEffectStack(layer.effects).some(
           (effect) => effect.type === 'shader' && effectEnabled(effect, layer.effects),
         ),
@@ -698,6 +701,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         if (
           element.type === 'lottie' ||
           hasElementShaderPaint(element) ||
+          hasElementMediaPaint(element) ||
           getEffectStack(layer.effects).some(
             (effect) => effect.type === 'shader' && effectEnabled(effect, layer.effects),
           )
@@ -720,6 +724,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         layer.element.type !== 'image-sequence' &&
         layer.element.type !== 'lottie' &&
         !hasElementShaderPaint(layer.element) &&
+        !hasElementMediaPaint(layer.element) &&
         !shaderEffect
       )
         continue;
@@ -730,7 +735,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       if (
         layer.element.type === 'image-sequence' ||
         layer.element.type === 'lottie' ||
-        hasElementShaderPaint(layer.element)
+        hasElementShaderPaint(layer.element) ||
+        hasElementMediaPaint(layer.element)
       )
         renderAnimatedElementAtTime(el, layer.element, timestampMs);
       if (shaderEffect) {

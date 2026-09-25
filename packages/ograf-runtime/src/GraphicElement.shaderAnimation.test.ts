@@ -5,6 +5,7 @@ import {
   createDefaultTransform,
   createLayerEffects,
   createLayerLoopClip,
+  createMediaPaint,
   createRectangleLayer,
   createShaderPaint,
   resolveShaderParameters,
@@ -14,6 +15,8 @@ import {
 } from '@ograf-editor/scene-model';
 
 const mock = vi.hoisted(() => {
+  const frames: FrameRequestCallback[] = [];
+  let nextFrameId = 0;
   class Host {
     style = {};
     dataset: Record<string, string> = {};
@@ -34,7 +37,12 @@ const mock = vi.hoisted(() => {
   }
   vi.stubGlobal('HTMLElement', Host);
   vi.stubGlobal('document', { createElement: () => new Host() });
-  return { paint: vi.fn(), content: vi.fn() };
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return ++nextFrameId;
+  });
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  return { paint: vi.fn(), content: vi.fn(), frames };
 });
 vi.mock('./buildRuntimeTimeline', () => ({
   buildRuntimeTimeline: () => {
@@ -135,8 +143,57 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(gain); }`,
   };
 }
 
+function mediaDescriptor(): CompiledGraphicDescriptor {
+  const result = descriptor();
+  const authored = createRectangleLayer();
+  if (authored.element.type !== 'rectangle') throw Error('Expected rectangle');
+  return {
+    ...result,
+    layers: [
+      {
+        ...result.layers[0]!,
+        id: 'media',
+        element: {
+          ...authored.element,
+          fill: createMediaPaint({ source: { kind: 'clip', src: 'asset:clip' } }),
+        },
+        bindings: [],
+        loop: null,
+      },
+    ],
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mock.frames.length = 0;
+});
+
+describe('realtime Media paint playback', () => {
+  it('keeps rendering Media frames after load', async () => {
+    class Graphic extends GraphicElement {
+      static descriptor = mediaDescriptor();
+    }
+    const graphic = new Graphic();
+    graphic.connectedCallback();
+
+    expect(
+      await graphic.load({
+        renderType: 'realtime',
+        renderCharacteristics: { resolution: { width: 640, height: 360 }, frameRate: 10 },
+        data: {},
+      }),
+    ).toMatchObject({ statusCode: 200 });
+    expect(mock.frames.filter((frame) => frame.name === 'invoke')).toHaveLength(1);
+
+    const rendersAfterLoad = mock.content.mock.calls.length;
+    const scheduled = mock.frames.findIndex((frame) => frame.name === 'invoke');
+    mock.frames.splice(scheduled, 1)[0]!(performance.now());
+    expect(mock.content.mock.calls.length).toBeGreaterThan(rendersAfterLoad);
+    expect(mock.frames.filter((frame) => frame.name === 'invoke')).toHaveLength(1);
+
+    expect(await graphic.dispose()).toMatchObject({ statusCode: 200 });
+  });
 });
 
 describe('scheduled shader lifecycle replay', () => {
