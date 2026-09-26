@@ -39,14 +39,14 @@ export function installEditorShortcuts(owner: Window) {
     if (
       modifier &&
       !e.altKey &&
-      !e.shiftKey &&
       !e.repeat &&
       key === 'd' &&
       !insideModal &&
       (!interactiveTarget || toolbarButtonAllowsShortcut)
     ) {
       e.preventDefault();
-      duplicateSelectedLayers();
+      if (e.shiftKey) duplicateSelectedLayers();
+      else useSelectionStore.getState().select(null);
       return;
     }
     if (interactiveTarget) return;

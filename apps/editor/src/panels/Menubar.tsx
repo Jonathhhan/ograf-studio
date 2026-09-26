@@ -119,6 +119,12 @@ export function Menubar({
     }
   };
 
+  const handleDeselect = () => {
+    select(null);
+    setEditMenuOpen(false);
+    setStatus('Selection cleared');
+  };
+
   const handleNew = () => {
     if (!confirm('Start a new project? Unsaved changes in the current project will be lost.'))
       return;
@@ -292,10 +298,19 @@ export function Menubar({
                 type="button"
                 role="menuitem"
                 disabled={selectedLayerIds.length === 0}
+                onClick={handleDeselect}
+              >
+                <span>Deselect all</span>
+                <kbd>Ctrl+D</kbd>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={selectedLayerIds.length === 0}
                 onClick={handleDuplicate}
               >
                 <span>Duplicate</span>
-                <kbd>Ctrl+D</kbd>
+                <kbd>Ctrl+Shift+D</kbd>
               </button>
               <div className="menubar-history-heading" role="presentation">
                 History

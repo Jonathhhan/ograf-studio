@@ -950,6 +950,16 @@ export function Stage({ style }: { style?: CSSProperties }) {
           onAuxClick={(event) => {
             if (event.button === 1) event.preventDefault();
           }}
+          onMouseDown={(event) => {
+            if (event.button !== 0 || editingPath) return;
+            const target = event.target as HTMLElement;
+            if (
+              target.closest?.('.canvas-stage-frame') ||
+              target.closest?.('.moveable-control-box')
+            )
+              return;
+            select(null);
+          }}
           onContextMenu={handleCanvasContextMenu}
           onScroll={(event) => {
             syncStageCameraCss(event.currentTarget);
