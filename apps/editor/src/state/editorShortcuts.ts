@@ -46,7 +46,7 @@ export function installEditorShortcuts(owner: Window) {
       (!interactiveTarget || targetTagName === 'BUTTON');
     if (deselectShortcut) {
       e.preventDefault();
-      useSelectionStore.getState().select(null);
+      useSelectionStore.getState().deselectAll();
       return;
     }
     if (
@@ -60,6 +60,17 @@ export function installEditorShortcuts(owner: Window) {
     ) {
       e.preventDefault();
       duplicateSelectedLayers();
+      return;
+    }
+    if (
+      modifier &&
+      !e.altKey &&
+      (key === 'z' || key === 'y') &&
+      (!interactiveTarget || targetTagName === 'BUTTON')
+    ) {
+      e.preventDefault();
+      if (key === 'y' || e.shiftKey) redo();
+      else undo();
       return;
     }
     if (interactiveTarget) return;
@@ -81,10 +92,6 @@ export function installEditorShortcuts(owner: Window) {
       useSelectionStore.getState().selectMany(composition ? selectableLayerIds(composition) : []);
       return;
     }
-    if (!modifier || (key !== 'z' && key !== 'y')) return;
-    e.preventDefault();
-    if (key === 'y' || e.shiftKey) redo();
-    else undo();
   };
   owner.addEventListener('keydown', handleKeyDown);
   return () => owner.removeEventListener('keydown', handleKeyDown);

@@ -205,6 +205,7 @@ function reconcileLayerSelection(): void {
 }
 
 export function undo(steps = 1): void {
+  if (steps === 1 && useSelectionStore.getState().undoDeselectAll()) return;
   window.clearTimeout(debounceTimer);
   flushPending();
   let restored = useProjectStore.getState().project;

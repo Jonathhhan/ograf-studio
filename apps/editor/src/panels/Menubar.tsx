@@ -49,6 +49,7 @@ export function Menubar({
   const project = useProjectStore((s) => s.project);
   const activeCompositionId = useProjectStore((s) => s.activeCompositionId);
   const select = useSelectionStore((s) => s.select);
+  const deselectAll = useSelectionStore((s) => s.deselectAll);
   const selectMany = useSelectionStore((s) => s.selectMany);
   const selectedLayerIds = useSelectionStore((s) => s.selectedLayerIds);
   const [status, setStatus] = useState('');
@@ -120,7 +121,7 @@ export function Menubar({
   };
 
   const handleDeselect = () => {
-    select(null);
+    deselectAll();
     setEditMenuOpen(false);
     setStatus('Selection cleared');
   };

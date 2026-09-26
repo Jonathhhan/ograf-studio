@@ -114,6 +114,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
   const selectedLayerKeyframeId = useSelectionStore((s) => s.selectedLayerKeyframeId);
   const select = useSelectionStore((s) => s.select);
   const selectMany = useSelectionStore((s) => s.selectMany);
+  const deselectAll = useSelectionStore((s) => s.deselectAll);
   const toggleManyLayerSelection = useSelectionStore((s) => s.toggleManyLayerSelection);
   const clearLayerKeyframe = useSelectionStore((s) => s.clearLayerKeyframe);
   const setLiveTransform = useSelectionStore((s) => s.setLiveTransform);
@@ -958,7 +959,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
               target.closest?.('.moveable-control-box')
             )
               return;
-            select(null);
+            deselectAll();
           }}
           onContextMenu={handleCanvasContextMenu}
           onScroll={(event) => {

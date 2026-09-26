@@ -182,7 +182,7 @@ describe('editor selection shortcuts', () => {
     uninstall();
   });
 
-  it('keeps selection empty when Ctrl+Z follows Ctrl+D', () => {
+  it('restores deselected layers before Ctrl+Z continues into project history', () => {
     const sourceId = useProjectStore.getState().addLayer('rectangle');
     resetHistory();
     useProjectStore.getState().updateLayerTransform(sourceId, 0, { x: 320 });
@@ -192,15 +192,18 @@ describe('editor selection shortcuts', () => {
     const uninstall = installEditorShortcuts(owner as unknown as Window);
 
     owner.dispatch({ target: { tagName: 'BUTTON' } });
-    owner.dispatch({ key: 'z', code: 'KeyZ' });
+    owner.dispatch({ key: 'z', code: 'KeyZ', target: { tagName: 'BUTTON' } });
 
     expect(activeComposition().layers).toHaveLength(1);
     expect(useSelectionStore.getState()).toMatchObject({
-      selectedLayerId: null,
-      selectedLayerIds: [],
+      selectedLayerId: sourceId,
+      selectedLayerIds: [sourceId],
       selectedLayerKeyframeId: null,
       selectedLayerKeyframes: [],
     });
+    expect(getLayerTransformAtFrame(activeComposition().layers[0]!, 0).x).toBe(320);
+    owner.dispatch({ key: 'z', code: 'KeyZ' });
+    expect(getLayerTransformAtFrame(activeComposition().layers[0]!, 0).x).not.toBe(320);
     uninstall();
   });
 });
