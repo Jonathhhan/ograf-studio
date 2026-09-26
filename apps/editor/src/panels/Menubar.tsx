@@ -389,8 +389,15 @@ export function Menubar({
                   </button>
                 );
               })}
-              <div className="menubar-build-info" role="menuitem" aria-disabled="true">
-                <span>OGraf Studio v{STUDIO_VERSION}</span>
+              <div className="menubar-build-info" role="presentation">
+                <a
+                  href="https://github.com/zerodensity/ograf-studio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  role="menuitem"
+                >
+                  OGraf Studio v{STUDIO_VERSION}
+                </a>
                 <time dateTime={STUDIO_BUILD_DATE}>Build {STUDIO_BUILD_DATE}</time>
               </div>
             </div>

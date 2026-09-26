@@ -15,4 +15,17 @@ describe('Studio build metadata', () => {
     expect(STUDIO_VERSION).toBe(rootPackage.version);
     expect(STUDIO_BUILD_DATE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
+
+  it('stacks version and build date on separate Window-menu rows', () => {
+    const css = readFileSync(new URL('../panels/Menubar.css', import.meta.url), 'utf8');
+    const menu = readFileSync(new URL('../panels/Menubar.tsx', import.meta.url), 'utf8');
+
+    expect(css).toMatch(
+      /\.menubar-build-info\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+    );
+    expect(css).toMatch(/\.menubar-build-info time\s*\{[^}]*display:\s*block;/s);
+    expect(menu).toContain('href="https://github.com/zerodensity/ograf-studio"');
+    expect(menu).toContain('target="_blank"');
+    expect(menu).toContain('rel="noopener noreferrer"');
+  });
 });

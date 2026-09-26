@@ -153,10 +153,9 @@
 }
 
 .menubar-build-info {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
   margin-top: 2px;
   padding: 5px 6px 3px;
   border-top: 1px solid var(--border);
@@ -166,8 +165,20 @@
 }
 
 .menubar-build-info time {
+  display: block;
   color: color-mix(in srgb, var(--text-dim) 72%, transparent);
   font: inherit;
+}
+
+.menubar-build-info a {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.menubar-build-info a:is(:hover, :focus-visible) {
+  color: var(--accent-focus);
+  text-decoration: underline;
+  outline: none;
 }
 
 .menubar-status {
