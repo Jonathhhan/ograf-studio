@@ -169,7 +169,7 @@ describe('editor selection shortcuts', () => {
     const owner = new ShortcutWindow();
     const uninstall = installEditorShortcuts(owner as unknown as Window);
 
-    const preventDefault = owner.dispatch();
+    const preventDefault = owner.dispatch({ target: { tagName: 'BUTTON' } });
 
     expect(preventDefault).toHaveBeenCalledOnce();
     expect(useSelectionStore.getState()).toMatchObject({
@@ -179,6 +179,28 @@ describe('editor selection shortcuts', () => {
       selectedLayerKeyframes: [],
     });
     expect(activeComposition().layers).toHaveLength(1);
+    uninstall();
+  });
+
+  it('keeps selection empty when Ctrl+Z follows Ctrl+D', () => {
+    const sourceId = useProjectStore.getState().addLayer('rectangle');
+    resetHistory();
+    useProjectStore.getState().updateLayerTransform(sourceId, 0, { x: 320 });
+    vi.runAllTimers();
+    useSelectionStore.getState().select(sourceId);
+    const owner = new ShortcutWindow();
+    const uninstall = installEditorShortcuts(owner as unknown as Window);
+
+    owner.dispatch({ target: { tagName: 'BUTTON' } });
+    owner.dispatch({ key: 'z', code: 'KeyZ' });
+
+    expect(activeComposition().layers).toHaveLength(1);
+    expect(useSelectionStore.getState()).toMatchObject({
+      selectedLayerId: null,
+      selectedLayerIds: [],
+      selectedLayerKeyframeId: null,
+      selectedLayerKeyframes: [],
+    });
     uninstall();
   });
 });

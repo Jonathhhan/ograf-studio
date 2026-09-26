@@ -36,17 +36,30 @@ export function installEditorShortcuts(owner: Window) {
     const toolbarButtonAllowsShortcut =
       targetTagName === 'BUTTON' && target?.getAttribute?.('data-editor-shortcuts') === 'allow';
     const insideModal = Boolean(target?.closest?.('[role="dialog"], dialog, [aria-modal="true"]'));
+    const deselectShortcut =
+      modifier &&
+      !e.altKey &&
+      !e.repeat &&
+      key === 'd' &&
+      !e.shiftKey &&
+      !insideModal &&
+      (!interactiveTarget || targetTagName === 'BUTTON');
+    if (deselectShortcut) {
+      e.preventDefault();
+      useSelectionStore.getState().select(null);
+      return;
+    }
     if (
       modifier &&
       !e.altKey &&
+      e.shiftKey &&
       !e.repeat &&
       key === 'd' &&
       !insideModal &&
       (!interactiveTarget || toolbarButtonAllowsShortcut)
     ) {
       e.preventDefault();
-      if (e.shiftKey) duplicateSelectedLayers();
-      else useSelectionStore.getState().select(null);
+      duplicateSelectedLayers();
       return;
     }
     if (interactiveTarget) return;
