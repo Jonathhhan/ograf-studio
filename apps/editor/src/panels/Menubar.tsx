@@ -25,6 +25,7 @@ import { selectableLayerIds } from '../state/selectAllLayers';
 import './Menubar.css';
 import { useDetachedWindows } from '../layout/detachedWindowContext';
 import { duplicateSelectedLayers } from '../state/editorShortcuts';
+import { STUDIO_BUILD_DATE, STUDIO_VERSION } from '../state/buildInfo';
 
 const historyTime = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString([], {
@@ -388,6 +389,10 @@ export function Menubar({
                   </button>
                 );
               })}
+              <div className="menubar-build-info" role="menuitem" aria-disabled="true">
+                <span>OGraf Studio v{STUDIO_VERSION}</span>
+                <time dateTime={STUDIO_BUILD_DATE}>Build {STUDIO_BUILD_DATE}</time>
+              </div>
             </div>
           ) : null}
         </div>

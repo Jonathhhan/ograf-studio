@@ -10,7 +10,7 @@ describe('Studio UI typography contract', () => {
       match[1]!.trim(),
     );
 
-    expect(sizes).toEqual(['11px', '10px']);
+    expect(sizes).toEqual(['12px', '11px']);
     expect(css).toContain('--ui-control-height: 22px;');
     expect(css).toContain('--ui-row-height: 24px;');
     expect(css).toContain('--ui-header-height: 27px;');
