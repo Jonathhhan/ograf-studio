@@ -15,8 +15,8 @@
   min-height: var(--ui-row-height);
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 5px;
+  gap: 4px;
+  padding: 0 4px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
 }
@@ -28,7 +28,7 @@
 
 .effect-stack-add button {
   flex: none;
-  padding: 2px 8px;
+  padding: 1px 6px;
 }
 
 .effect-stack-editor.is-shader-drag-over {
@@ -59,8 +59,8 @@
   min-height: var(--ui-row-height);
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 5px 0 4px;
+  gap: 4px;
+  padding: 0 4px;
   border-bottom: 1px solid var(--border);
   background: #252525;
   cursor: default;
