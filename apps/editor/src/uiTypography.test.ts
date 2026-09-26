@@ -29,6 +29,15 @@ describe('Studio UI typography contract', () => {
     );
   });
 
+  it('keeps shader parameter controls on the shared compact row contract', () => {
+    const css = source('./panels/ShaderSourceEditor.css');
+
+    expect(css).toMatch(
+      /\.shader-number-control\s*\{[^}]*min-height: var\(--ui-control-height\);[^}]*grid-template-columns: minmax\(40px, 1fr\) 60px;[^}]*gap: 4px;[^}]*padding: 0;/s,
+    );
+    expect(css).toMatch(/\.inspector-row > \.shader-number-control\s*\{[^}]*margin: 1px 4px;/s);
+  });
+
   it('bundles the RealityHub Nunito UI face locally', () => {
     const main = source('./main.tsx');
     const css = source('./index.css');
