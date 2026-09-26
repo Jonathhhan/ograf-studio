@@ -1,18 +1,18 @@
 .inspector {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .paint-editor {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .paint-stops {
   display: grid;
   gap: 6px;
-  padding: 8px;
+  padding: 6px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
 }
@@ -322,11 +322,11 @@
 }
 
 .inspector-section {
-  min-height: 30px;
+  min-height: var(--ui-row-height);
   display: flex;
   align-items: center;
   margin: 0;
-  padding: 0 8px;
+  padding: 0 6px;
   border-top: 0;
   border-bottom: 1px solid var(--border);
   background: #252525;
@@ -346,7 +346,7 @@
 
 .inspector-row,
 .inspector-row-stacked {
-  min-height: 30px;
+  min-height: var(--ui-row-height);
   display: grid;
   grid-template-columns: var(--property-label-width, minmax(118px, 42%)) minmax(0, 1fr);
   align-items: stretch;
@@ -364,7 +364,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 6px;
   overflow: hidden;
   border-right: 1px solid var(--border);
   color: var(--text);
@@ -373,11 +373,11 @@
 }
 
 .inspector-row > :is(input, select, textarea, button, .inspector-z-order-control) {
-  width: calc(100% - 12px);
+  width: calc(100% - 10px);
   min-width: 0;
   align-self: center;
   justify-self: stretch;
-  margin: 3px 6px;
+  margin: 2px 5px;
 }
 
 .inspector-row > textarea {
@@ -399,11 +399,11 @@
 }
 
 .inspector-alpha-control {
-  min-height: 32px;
+  min-height: 28px;
   grid-template-columns: var(--property-label-width, minmax(118px, 42%)) minmax(0, 1fr) 72px;
-  gap: 6px;
+  gap: 5px;
   margin: 0;
-  padding: 0 6px 0 0;
+  padding: 0 5px 0 0;
   border: 0;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
@@ -414,7 +414,7 @@
   height: 100%;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 6px;
   border-right: 1px solid var(--border);
   color: var(--text);
 }

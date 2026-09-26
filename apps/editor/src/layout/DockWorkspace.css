@@ -123,7 +123,7 @@ body.is-resizing .dock-group-resize-handle::after {
   display: flex;
   overflow-x: auto;
   overflow-y: hidden;
-  min-height: 35px;
+  min-height: var(--ui-header-height);
   background: var(--bg-header);
   border-bottom: 1px solid var(--border);
   scrollbar-width: none;
@@ -145,11 +145,11 @@ body.is-resizing .dock-group-resize-handle::after {
   position: relative;
   flex: 0 0 auto;
   min-width: 0;
-  height: 35px;
+  height: var(--ui-header-height);
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 0 10px;
+  padding: 0 8px;
   color: #989898;
   background: transparent;
   border: 0;
@@ -188,7 +188,7 @@ body.is-resizing .dock-group-resize-handle::after {
 .dock-tabs .dock-pane-close {
   position: sticky;
   right: 0;
-  flex: 0 0 32px;
+  flex: 0 0 28px;
   margin-left: auto;
   padding: 0;
   justify-content: center;
@@ -197,7 +197,7 @@ body.is-resizing .dock-group-resize-handle::after {
   border-left: 1px solid var(--border);
   border-bottom: 0;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .dock-tabs .dock-pane-close:hover {
@@ -280,11 +280,11 @@ body.is-reordering-dock-tab * {
 
 .dock-floating-title {
   flex: none;
-  height: 32px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4px 0 10px;
+  padding: 0 3px 0 8px;
   color: var(--text-heading);
   background: var(--bg-header);
   border-top: 2px solid var(--accent);
@@ -305,8 +305,8 @@ body.is-reordering-dock-tab * {
 }
 
 .dock-floating-title button {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   color: var(--text-dim);
   background: transparent;
@@ -317,7 +317,7 @@ body.is-reordering-dock-tab * {
 
 .dock-floating-title select {
   width: 54px;
-  height: 24px;
+  height: 22px;
   padding: 0 2px;
   color: var(--text-dim);
   background: transparent;

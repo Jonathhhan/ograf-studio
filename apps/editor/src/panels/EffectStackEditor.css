@@ -12,11 +12,11 @@
 }
 
 .effect-stack-add {
-  min-height: 30px;
+  min-height: var(--ui-row-height);
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 6px;
+  padding: 0 5px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
 }
@@ -28,7 +28,7 @@
 
 .effect-stack-add button {
   flex: none;
-  padding: 3px 10px;
+  padding: 2px 8px;
 }
 
 .effect-stack-editor.is-shader-drag-over {
@@ -56,11 +56,11 @@
 }
 
 .effect-stack-item > summary {
-  min-height: 30px;
+  min-height: var(--ui-row-height);
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 6px 0 4px;
+  padding: 0 5px 0 4px;
   border-bottom: 1px solid var(--border);
   background: #252525;
   cursor: default;

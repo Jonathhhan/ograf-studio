@@ -313,7 +313,7 @@
 }
 
 .preview-data-row {
-  min-height: 30px;
+  min-height: var(--ui-row-height);
   display: grid;
   grid-template-columns: var(--property-label-width, minmax(118px, 42%)) minmax(0, 1fr);
   gap: 0;
@@ -325,12 +325,12 @@
   height: 100%;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 6px;
   border-right: 1px solid var(--border);
   color: var(--text);
 }
 
 .preview-data-row > input {
-  width: calc(100% - 12px);
-  margin: 3px 6px;
+  width: calc(100% - 10px);
+  margin: 2px 5px;
 }
