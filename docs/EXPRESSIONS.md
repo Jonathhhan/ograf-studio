@@ -8,20 +8,11 @@ the checkbox itself is activated; clicking the property name does not toggle it.
 
 ## Property expressions
 
-Open **Scripts > Layer expressions** for the layer selected in Layers. **Add expression...**
-contains the layer's numeric animation targets, grouped as Transform, Text, Appearance and
-Effects: position, size, rotation, opacity, transform origins, text stroke width, gradient
-stop positions, numeric effect parameters, and shader parameter channels. Non-numeric settings
-such as text content and full color strings are not expression targets.
-
-Only added expressions appear, in a fixed property order. Click a property's disclosure button
-to expand its JavaScript editor; the separate checkbox enables it and Remove deletes it.
-Collapsed and empty expressions remain saved. Removing an effect or changing the paint type
-keeps its expressions available for recovery/removal, with an unavailable-property diagnostic.
-Panel order does not determine evaluation order.
-
-Return a finite number, either as a
-formula or from a JavaScript statement body:
+Open **Scripts > Layer expressions** for a selected layer. An expression controls `x`, `y`,
+`width`, `height`, `rotation`, or `opacity` (0 to 1). Return a finite number, either as a
+formula or from a JavaScript statement body. Use **Add expression** to add a property;
+its editor can be collapsed, expanded, or removed. Transform origins and non-transform
+properties are not expression targets:
 
 ```js
 layer('Background').x + 20;
@@ -46,23 +37,7 @@ value + data.layout.padding;
 `thisLayer.id/name` identify the expression's layer. `layer("Title").id/name` and
 `layerById(id).id/name` identify a referenced layer without evaluating its transforms.
 Metadata is read-only and non-enumerable on layer objects, so spreading a layer still copies
-the available numeric property values. Collection references report the evaluated item's runtime ID.
-
-Canonical animation paths containing dots or brackets use bracket notation or `property()`:
-
-```js
-layer('Title').property('strokeWidth').valueAtTime(0.5);
-layer('Backdrop')['fill.stops[0].offset'];
-```
-
-Composition scripts can assign those paths, for example
-`layer('Backdrop')['fill.stops[0].offset'] = 0.25`. `property(name).value` remains read-only.
-`thisLayer.property(name).value` reads the authored sample; `layer(name).property(path).value`
-resolves expressions. The bare transform aliases stay unchanged; use `value` for a new target
-or `thisLayer.property(path)` to avoid collisions with helper-module names.
-Shader values use their existing bounds and integer/toggle normalization, effect parameters
-use their declared bounds, gradient offsets and shadow alpha clamp to 0�1, and stroke/blur
-sizes cannot become negative. Layer references read these normalized values.
+only transform values. Collection references report the evaluated item's runtime ID.
 
 ## Composition script and shared files
 
@@ -79,7 +54,7 @@ title.x += 20;
 layer('Background').width = title.width + 40;
 ```
 
-The same available numeric properties are writable. Reads observe earlier script assignments; property
+The same six properties are writable. Reads observe earlier script assignments; property
 expressions are not rerun after writes. Each evaluation starts from a fresh animation pose,
 so assignments do not edit keyframes or accumulate between frames. If the script throws or
 writes an invalid value, all of its layer writes are discarded. Errors appear in Scripts.
@@ -182,7 +157,7 @@ valueAtTime(time - 0.2);
 
 Use `layer("Title").property("x").valueAtTime(time - 0.2)` for another property.
 `property(name).value` reads that reference's current value; `valueAtTime` always reads authored
-animation. All numeric expression targets on the layer are available. Sampling does not seek the
+animation. The six supported transform properties are available. Sampling does not seek the
 playhead or replay OGraf lifecycle actions, held loops, or previous data updates.
 
 `layer("Title").sourceRectAtTime(seconds = time, includeExtents = false)` returns a read-only

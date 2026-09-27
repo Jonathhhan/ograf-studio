@@ -102,7 +102,7 @@ export function isAnimatableLayerProperty(property: string): property is Animata
 }
 
 export function isAnimatableLayerPropertyApplicable(
-  layer: Pick<Layer, 'element' | 'effects'>,
+  layer: Layer,
   property: AnimatableLayerProperty,
 ): boolean {
   if (parseShaderAnimationProperty(property))
@@ -131,9 +131,7 @@ export function animatablePropertyLabel(property: AnimatableLayerProperty, layer
     : `Gradient stop ${stopIndex + 1} position`;
 }
 
-export function getLayerAnimatableProperties(
-  layer: Pick<Layer, 'element' | 'effects' | 'animationTracks' | 'loop'>,
-): AnimatableLayerProperty[] {
+export function getLayerAnimatableProperties(layer: Layer): AnimatableLayerProperty[] {
   const properties = new Set<AnimatableLayerProperty>(
     ANIMATABLE_LAYER_PROPERTIES.filter((property) =>
       isAnimatableLayerPropertyApplicable(layer, property),

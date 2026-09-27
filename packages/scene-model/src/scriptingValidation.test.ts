@@ -28,6 +28,10 @@ describe('serialized scripting validation', () => {
     { layers: [{ expressions: { x: 7 } }] },
     { layers: [{ expressionsEnabled: { x: 'true' } }] },
     { components: [{ layers: [{ expressions: { unsupported: '1' } }] }] },
+    { layers: [{ expressions: { transformOriginX: '0.25' } }] },
+    { layers: [{ expressions: { transformOriginY: '0.75' } }] },
+    { layers: [{ expressions: { strokeWidth: '4' } }] },
+    { layers: [{ expressions: { 'fill.stops.0.position': '0.5' } }] },
   ])('rejects malformed new fields: %j', (input) => {
     expect(scriptingErrors(input).length).toBeGreaterThan(0);
   });

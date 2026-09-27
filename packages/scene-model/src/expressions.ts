@@ -1,5 +1,5 @@
 import { scriptConsole, withScriptLogContext } from './scriptConsole';
-import { easedProgress, isAnimatableLayerProperty } from './layerAnimation';
+import { easedProgress } from './layerAnimation';
 import type { EasingPreset, KeyframeRole } from './types';
 
 export type ExpressionScope = Record<string, unknown>;
@@ -22,9 +22,6 @@ export interface ExpressionEvaluationOptions {
   currentProperty?: { name: string; value: number; layerId: string };
   resolveLayerMetadata?: (reference: string, byId: boolean) => { id: string; name: string };
   currentSampling?: ExpressionLayerSampling;
-  currentProperties?: readonly string[];
-  currentValues?: Partial<Record<string, number>>;
-  resolveLayerProperties?: (reference: string, byId: boolean) => readonly string[];
   resolveLayerSampling?: (reference: string, byId: boolean) => ExpressionLayerSampling;
   modules?: Record<string, object>;
   /** Stable authored expression map; compiled entries live only as long as their owner. */
@@ -117,9 +114,9 @@ function sampledProperty(
   resolve: (property: string) => number,
   property: string,
   sampling?: () => ExpressionLayerSampling,
-  properties: readonly string[] = EXPRESSION_PROPERTIES,
 ) {
-  if (!properties.includes(property)) throw new Error('Unknown layer property: ' + property);
+  if (!(EXPRESSION_PROPERTIES as readonly string[]).includes(property))
+    throw new Error('Unknown layer property: ' + property);
   return Object.freeze({
     name: property,
     get value() {
@@ -145,10 +142,9 @@ function layerReference(
   metadata?: () => { id: string; name: string },
   sampling?: () => ExpressionLayerSampling,
   time = 0,
-  properties: readonly string[] = EXPRESSION_PROPERTIES,
 ): Record<string, unknown> {
   const target = Object.create(null);
-  for (const property of properties)
+  for (const property of EXPRESSION_PROPERTIES)
     Object.defineProperty(target, property, {
       enumerable: true,
       get: () => resolve(property),
@@ -158,7 +154,7 @@ function layerReference(
     for (const key of ['id', 'name'] as const)
       Object.defineProperty(target, key, { get: () => metadata()[key] });
   Object.defineProperty(target, 'property', {
-    value: (name: string) => sampledProperty(resolve, name, sampling, properties),
+    value: (name: string) => sampledProperty(resolve, name, sampling),
   });
   if (sampling)
     Object.defineProperty(target, 'sourceRectAtTime', { value: sourceRectMethod(sampling, time) });
@@ -189,10 +185,7 @@ function evaluationScope(
       Object.defineProperty(context[name], key.slice(dot + 1), descriptor);
     }
   }
-  for (const [key, value] of Object.entries(options.currentValues ?? {}))
-    if (!Object.hasOwn(thisLayer, key))
-      Object.defineProperty(thisLayer, key, { value, enumerable: true });
-  // Metadata does not introduce property dependencies or change property enumeration.
+  // Metadata does not introduce transform dependencies or change transform enumeration.
   if (options.currentLayer)
     for (const [key, value] of Object.entries(options.currentLayer))
       Object.defineProperty(thisLayer, key, { value });
@@ -201,12 +194,7 @@ function evaluationScope(
     const time = typeof scope.time === 'number' ? scope.time : 0;
     Object.defineProperty(thisLayer, 'property', {
       value: (name: string) =>
-        sampledProperty(
-          (property) => numeric(options.currentValues?.[property] ?? scope[property]),
-          name,
-          sampling,
-          options.currentProperties,
-        ),
+        sampledProperty((property) => numeric(scope[property]), name, sampling),
     });
     Object.defineProperty(thisLayer, 'sourceRectAtTime', {
       value: sourceRectMethod(sampling, time),
@@ -244,7 +232,6 @@ function evaluationScope(
         options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(id, true) : undefined,
         options.resolveLayerSampling ? () => options.resolveLayerSampling!(id, true) : undefined,
         typeof scope.time === 'number' ? scope.time : 0,
-        options.resolveLayerProperties?.(id, true),
       ),
     layer: (name: string) =>
       layerReference(
@@ -260,7 +247,6 @@ function evaluationScope(
         options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(name, false) : undefined,
         options.resolveLayerSampling ? () => options.resolveLayerSampling!(name, false) : undefined,
         typeof scope.time === 'number' ? scope.time : 0,
-        options.resolveLayerProperties?.(name, false),
       ),
     lerp: (...args: unknown[]) => helper('lerp', ...args),
     clamp: (...args: unknown[]) => helper('clamp', ...args),
@@ -321,13 +307,12 @@ const ownedExpressions = new WeakMap<
   Map<string, { source: string; compilation: ExpressionCompilation }>
 >();
 function compiledExpression(source: string, owner?: object, property?: string): CompiledExpression {
-  // Retain the active layer's authored properties independently of the bounded shared cache.
+  // Retain the active layer's six properties independently of the bounded shared cache.
   // Compare sources as callers outside the editor may mutate an expression map in place.
   let owned: Map<string, { source: string; compilation: ExpressionCompilation }> | undefined;
-  if (owner && property && isAnimatableLayerProperty(property)) {
+  if (owner && property && EXPRESSION_PROPERTIES.some((name) => name === property)) {
     owned = ownedExpressions.get(owner);
     if (!owned) ownedExpressions.set(owner, (owned = new Map()));
-    for (const key of owned.keys()) if (!Object.hasOwn(owner, key)) owned.delete(key);
   }
   const entry = property ? owned?.get(property) : undefined;
   let compilation = entry?.source === source ? entry.compilation : compiledExpressions.get(source);
