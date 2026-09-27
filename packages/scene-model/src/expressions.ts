@@ -18,6 +18,7 @@ export interface ExpressionLayerSampling {
 }
 export interface ExpressionEvaluationOptions {
   apiVersion?: number;
+  resolveScriptLayer?: (reference: string, byId: boolean) => object;
   currentLayer?: { id: string; name: string };
   currentProperty?: { name: string; value: number; layerId: string };
   resolveLayerMetadata?: (reference: string, byId: boolean) => { id: string; name: string };
@@ -221,6 +222,7 @@ function evaluationScope(
     thisLayer,
     console: scriptConsole,
     layerById: (id: string) =>
+      options.resolveScriptLayer?.(id, true) ??
       layerReference(
         (property) => {
           if (!options.resolveLayerById) throw new Error('Layer ID lookup is unavailable.');
@@ -234,6 +236,7 @@ function evaluationScope(
         typeof scope.time === 'number' ? scope.time : 0,
       ),
     layer: (name: string) =>
+      options.resolveScriptLayer?.(name, false) ??
       layerReference(
         (property) => {
           if (resolveLayer) return resolveLayer(name, property);

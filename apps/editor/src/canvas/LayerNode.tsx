@@ -1,3 +1,4 @@
+import { useActiveComposition } from '../state/projectStore';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   applyElementDataValue,
@@ -75,6 +76,8 @@ export function LayerNode({
   shaderPreviewClock,
   patterns,
 }: LayerNodeProps) {
+  const scriptingEnabled = useActiveComposition().scripting?.enabled;
+  const renderLayer = layer.isVisible || Boolean(scriptingEnabled);
   const testValues = useTestDataStore((s) => s.values);
   const contentRef = useRef<HTMLDivElement>(null);
   const readinessGeneration = useRef(0);
@@ -136,7 +139,7 @@ export function LayerNode({
     element,
     hasShaderPaint,
     layer.animationTracks,
-    layer.isVisible,
+    renderLayer,
     lottieBackingSize,
     shaderBackingSize,
     shaderStrokePadding,
@@ -148,7 +151,7 @@ export function LayerNode({
     return () => {
       if (host) disposeLayerEffects(host);
     };
-  }, [layer.isVisible]);
+  }, [renderLayer]);
 
   useLayoutEffect(() => {
     const host = contentRef.current;
@@ -185,6 +188,7 @@ export function LayerNode({
     hasShaderPaint,
     layer.animationTracks,
     layer.id,
+    renderLayer,
     shaderBackingSize,
     shaderStrokePadding,
   ]);
@@ -196,7 +200,7 @@ export function LayerNode({
     return () => {
       if (host) disposeElementContent(host);
     };
-  }, [layer.isVisible]);
+  }, [renderLayer]);
 
   useLayoutEffect(() => {
     if (hasShaderPaint) {
@@ -256,7 +260,7 @@ export function LayerNode({
     compositionFrameRate,
     element,
     hasShaderPaint,
-    layer.isVisible,
+    renderLayer,
     lottieBackingSize,
     shaderBackingSize,
     shaderPreviewClock,
@@ -294,12 +298,21 @@ export function LayerNode({
       unsubscribe();
       if (animationFrame !== null) cancelAnimationFrame(animationFrame);
     };
-  }, [layer, testValues, dataFields, transform.width, transform.height, shaderPreviewClock]);
+  }, [
+    layer,
+    testValues,
+    dataFields,
+    transform.width,
+    transform.height,
+    shaderPreviewClock,
+    renderLayer,
+  ]);
 
-  if (!layer.isVisible) return null;
+  if (!renderLayer) return null;
 
   const style: CSSProperties = {
     position: 'absolute',
+    display: layer.isVisible ? undefined : 'none',
     left: 0,
     top: 0,
     width: transform.width,

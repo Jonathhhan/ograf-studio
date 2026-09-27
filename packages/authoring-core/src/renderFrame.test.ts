@@ -438,3 +438,28 @@ describe('renderCompositionFrameSvg', () => {
     expect(svg).toContain('translate(100 122)');
   });
 });
+
+it('renders script text, typography, paint and visibility after data bindings in SVG captures', () => {
+  const project = createProject();
+  const comp = project.compositions[0]!;
+  const title = createLayerOfKind('text');
+  title.name = 'Title';
+  title.keyframes = [createLayerKeyframe(0, createDefaultTransform())];
+  const field = createFieldDefinition('text', { key: 'headline', defaultValue: 'Bound text' });
+  title.bindings = [{ fieldId: field.id, targetProperty: 'content' }];
+  comp.layers = [title];
+  comp.dataFields = [field];
+  comp.scripting = {
+    enabled: true,
+    source: `const t = layer('Title'); t.content += ' scripted'; t.fontSize = 72; t.color = '#ff0000';`,
+    modules: [],
+  };
+  const svg = renderCompositionFrameSvg(project, comp.id, 0).svg;
+  expect(svg).toContain('Bound text scripted');
+  expect(svg).toContain('72');
+  expect(svg).toContain('#ff0000');
+  comp.scripting.source = `layer('Title').isVisible = false;`;
+  expect(renderCompositionFrameSvg(project, comp.id, 0).svg).not.toContain('Bound text');
+  comp.scripting.enabled = false;
+  expect(renderCompositionFrameSvg(project, comp.id, 0).svg).toContain('Bound text');
+});

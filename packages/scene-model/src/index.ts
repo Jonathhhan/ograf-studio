@@ -54,3 +54,5 @@ export * from './expressionBounds';
 export { SCRIPT_LOG_EVENT, type ScriptLogEntry, type ScriptLogLevel } from './scriptConsole';
 
 export * from './scriptingValidation';
+
+export * from './scriptLayerProperties';

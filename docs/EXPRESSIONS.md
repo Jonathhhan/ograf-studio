@@ -37,7 +37,8 @@ value + data.layout.padding;
 `thisLayer.id/name` identify the expression's layer. `layer("Title").id/name` and
 `layerById(id).id/name` identify a referenced layer without evaluating its transforms.
 Metadata is read-only and non-enumerable on layer objects, so spreading a layer still copies
-only transform values. Collection references report the evaluated item's runtime ID.
+only transform values in property expressions. Composition-script references also expose visual
+properties. Collection references report the evaluated item's runtime ID.
 
 ## Composition script and shared files
 
@@ -54,7 +55,8 @@ title.x += 20;
 layer('Background').width = title.width + 40;
 ```
 
-The same six properties are writable. Reads observe earlier script assignments; property
+Composition scripts can write transforms and rendered visual properties, including text,
+paint, effects and media settings. See the [complete property reference](SCRIPT_PROPERTIES.md). Reads observe earlier script assignments; property
 expressions are not rerun after writes. Each evaluation starts from a fresh animation pose,
 so assignments do not edit keyframes or accumulate between frames. If the script throws or
 writes an invalid value, all of its layer writes are discarded. Errors appear in Scripts.

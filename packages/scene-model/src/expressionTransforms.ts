@@ -1,4 +1,9 @@
 import {
+  scriptLayerReference,
+  type ScriptLayerVisuals,
+  type ScriptLayerTransform,
+} from './scriptLayerProperties';
+import {
   evaluateExpression,
   evaluateCompositionScript,
   EXPRESSION_PROPERTIES,
@@ -23,6 +28,7 @@ export interface ExpressionLayerState {
   id: string;
   name?: string;
   transform: LayerTransform;
+  scriptVisuals?: ScriptLayerVisuals;
   sampleTransform?: (seconds: number) => LayerTransform;
   sourceRectAtTime?: (seconds: number, includeExtents: boolean) => ExpressionRect;
   /** Authored identity of a layer expanded into a collection item. */
@@ -41,7 +47,7 @@ export function resolveExpressionTransforms(
   diagnostics?: ExpressionDiagnostic[],
   apiVersion = 1,
   scripting?: CompositionScripting,
-): Map<string, LayerTransform> {
+): Map<string, ScriptLayerTransform> {
   let modules: Record<string, object> = Object.create(null);
   try {
     modules = scriptModules(scripting);
@@ -194,7 +200,9 @@ export function resolveExpressionTransforms(
   }
   if (!scripting.source.trim()) return result;
   // A transaction prevents failed scripts (including late async writes) from changing a frame.
-  const draft = new Map([...result].map(([id, transform]) => [id, { ...transform }]));
+  const draft = new Map<string, ScriptLayerTransform>(
+    [...result].map(([id, transform]) => [id, { ...transform }]),
+  );
   let active = true;
   const names = new Map<string, string | null>();
   for (const layer of layers)
@@ -206,12 +214,57 @@ export function resolveExpressionTransforms(
     if (!transform) throw new Error('Unknown layer ' + (byIdentity ? 'ID: ' : 'name: ') + name);
     return transform;
   };
-  const write = (name: string, property: string, value: number, byIdentity = false) => {
-    if (!active)
-      throw new Error('Layer writes are only valid during the synchronous composition script.');
-    if (typeof value !== 'number' || !Number.isFinite(value))
-      throw new Error(property + ' must be a finite number.');
-    find(name, byIdentity)[property as ExpressionProperty] = value;
+  const references = new Map<string, ReturnType<typeof scriptLayerReference>>();
+  const reference = (name: string, byIdentity: boolean) => {
+    const transform = find(name, byIdentity);
+    const id = byIdentity ? name : names.get(name)!;
+    let entry = references.get(id!);
+    if (!entry) {
+      const layer = byId.get(id!)!;
+      const sample = sampling(layer);
+      entry = scriptLayerReference(
+        transform,
+        layer.scriptVisuals,
+        metadata(layer),
+        () => {
+          if (!active)
+            throw new Error(
+              'Layer writes are only valid during the synchronous composition script.',
+            );
+        },
+        {
+          property: (property: string) => {
+            if (!(EXPRESSION_PROPERTIES as readonly string[]).includes(property))
+              throw new Error('Time sampling supports the six expression properties only.');
+            return Object.freeze({
+              name: property,
+              get value() {
+                return transform[property as ExpressionProperty];
+              },
+              valueAtTime: (seconds: number) => {
+                if (typeof seconds !== 'number' || !Number.isFinite(seconds))
+                  throw new Error('Sample time must be finite seconds.');
+                return sample.valueAtTime(property, seconds);
+              },
+            });
+          },
+          sourceRectAtTime: (
+            seconds = typeof scope.time === 'number' ? scope.time : 0,
+            includeExtents = false,
+          ) => {
+            if (
+              typeof seconds !== 'number' ||
+              !Number.isFinite(seconds) ||
+              typeof includeExtents !== 'boolean'
+            )
+              throw new Error('Invalid sourceRectAtTime arguments.');
+            return Object.freeze({ ...sample.sourceRectAtTime(seconds, includeExtents) });
+          },
+        },
+      );
+      references.set(id!, entry);
+    }
+    return entry.reference;
   };
   try {
     evaluateCompositionScript(
@@ -232,10 +285,13 @@ export function resolveExpressionTransforms(
           return metadata(byId.get(id!)!);
         },
         resolveLayerById: (id, property) => find(id, true)[property as ExpressionProperty],
-        writeLayer: (name, property, value) => write(name, property, value),
-        writeLayerById: (id, property, value) => write(id, property, value, true),
+        resolveScriptLayer: reference,
       },
     );
+    for (const [id, entry] of references) {
+      const visuals = entry.finish();
+      if (visuals) draft.get(id)!.scriptVisuals = visuals;
+    }
     return draft;
   } catch (error) {
     diagnostics?.push({
