@@ -1,3 +1,4 @@
+import { ExpressionInput } from './ExpressionInput';
 import { useEditorWindow } from '../layout/EditorWindow';
 import { useExpressionDiagnosticsStore } from '../state/expressionDiagnosticsStore';
 import { TRANSFORM_HELP } from './propertyHelp';
@@ -651,7 +652,7 @@ export function InspectorPanel() {
                   {label}
                 </label>
                 <div className="inspector-expression-value">
-                  <textarea
+                  <ExpressionInput
                     rows={4}
                     spellCheck={false}
                     aria-invalid={Boolean(error)}
@@ -660,11 +661,10 @@ export function InspectorPanel() {
                     placeholder="Use authored value"
                     value={source}
                     disabled={layer.isLocked}
-                    onChange={(event) => {
-                      const expression = event.target.value;
+                    onValueChange={(expression) => {
                       const expressions = { ...(layer.expressions ?? {}) };
                       const expressionKey = key as keyof NonNullable<typeof layer.expressions>;
-                      if (expression.trim()) expressions[expressionKey] = expression;
+                      if (expression.length) expressions[expressionKey] = expression;
                       else delete expressions[expressionKey];
                       updateLayerExpressions(
                         layer.id,

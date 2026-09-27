@@ -51,7 +51,6 @@ export function resolveExpressionTransforms(
   const values = new Map<string, number>();
   const visiting = new Set<string>();
   const failures = new Map<string, unknown>();
-  const referenceDescriptors = new Map<string | undefined, PropertyDescriptorMap>();
   const resolveLayer = (owner: ExpressionLayerState, name: string, property: string): number => {
     const local =
       owner.referenceScope === undefined ? undefined : byScope.get(owner.referenceScope);
@@ -68,35 +67,50 @@ export function resolveExpressionTransforms(
     if (failures.has(key)) throw failures.get(key);
     const layer = byId.get(id)!;
     const expression = layer.expressions?.[property];
-    if (!expression || layer.expressionsEnabled?.[property] === false)
+    if (!expression?.trim() || layer.expressionsEnabled?.[property] === false)
       return layer.transform[property];
-    if (visiting.has(key)) throw new Error('Circular expression dependency: ' + key);
+    if (visiting.has(key)) {
+      const path = [...visiting, key];
+      const start = path.indexOf(key);
+      const labels = path.slice(start).map((entry) => {
+        const split = entry.lastIndexOf(':');
+        const target = byId.get(entry.slice(0, split));
+        return (target?.name || target?.id || entry.slice(0, split)) + '.' + entry.slice(split + 1);
+      });
+      throw new Error('Circular expression dependency: ' + labels.join(' -> '));
+    }
     if (visiting.size >= 128) throw new Error('Expression dependency chain is too deep.');
     visiting.add(key);
     try {
-      // Bare names and layer() share the same item-local lookup rules.
-      let references = referenceDescriptors.get(layer.referenceScope);
-      if (!references) {
-        references = Object.create(null) as PropertyDescriptorMap;
-        const local =
-          layer.referenceScope === undefined ? undefined : byScope.get(layer.referenceScope);
-        for (const name of new Set([...byName.keys(), ...(local?.keys() ?? [])])) {
-          for (const property of EXPRESSION_PROPERTIES) {
-            references[name + '.' + property] = {
-              configurable: true,
-              get: () => resolveLayer(layer, name, property),
-            };
-          }
+      // Bare layer aliases must not shadow API values or native JavaScript globals.
+      const suppliedValues = { ...scope, ...layer.scope, ...layer.transform };
+      const reservedNames = new Set([
+        'data',
+        'comp',
+        'timeline',
+        'thisLayer',
+        'layer',
+        'layerById',
+        'lerp',
+        'clamp',
+        'ease',
+        ...Object.keys(suppliedValues).map((name) => name.split('.')[0]!),
+      ]);
+      const references: PropertyDescriptorMap = Object.create(null);
+      const local =
+        layer.referenceScope === undefined ? undefined : byScope.get(layer.referenceScope);
+      for (const name of new Set([...byName.keys(), ...(local?.keys() ?? [])])) {
+        if (reservedNames.has(name) || Object.hasOwn(globalThis, name)) continue;
+        for (const property of EXPRESSION_PROPERTIES) {
+          references[name + '.' + property] = {
+            configurable: true,
+            get: () => resolveLayer(layer, name, property),
+          };
         }
-        referenceDescriptors.set(layer.referenceScope, references);
       }
       const context = Object.create(null, references) as ExpressionScope;
       // Define instead of assigning so a layer named "data" cannot intercept data.x, for example.
-      for (const [name, value] of Object.entries({
-        ...scope,
-        ...layer.scope,
-        ...layer.transform,
-      })) {
+      for (const [name, value] of Object.entries(suppliedValues)) {
         Object.defineProperty(context, name, { value, configurable: true });
       }
       const value = evaluateExpression(

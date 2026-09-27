@@ -44,6 +44,16 @@ Local variables and helper context are recreated for every evaluation. The API i
 return a finite number, never a Promise. External side effects are possible but are not part of
 the playback contract. Use pure calculations from supplied values for repeatable seeking.
 
+### Editing
+
+Expression fields use a monospace font. Tab indents, Shift+Tab outdents selected lines,
+and Enter continues the current indentation. Press Escape followed by Tab to move keyboard
+focus out of an expression field. Syntax and evaluation errors stay beside the property.
+A missing return reports that no value was returned; circular dependencies show their layer
+and property path. Layer names matching API namespaces or JavaScript globals (for example,
+`Math`, `console` or `data`) must be accessed through `layer()` or `layerById()`; they never
+replace those built-in values through a bare alias.
+
 ## Start with a formula
 
 In a text layer's X expression:

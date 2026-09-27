@@ -27,6 +27,13 @@ function layer(
 }
 
 describe('resolveExpressionTransforms', () => {
+  it('treats indentation-only drafts as empty expressions', () => {
+    const diagnostics: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms([layer('Draft', { x: '  \n  ' })], {}, diagnostics);
+    expect(result.get('Draft')!.x).toBe(10);
+    expect(diagnostics).toEqual([]);
+  });
+
   it('retains v1 behavior for legacy expressions and rejects future versions before execution', () => {
     const legacy = layer('legacy', { x: 'Math.max(x, 42)' });
     const future = layer('future', { x: 'throw new Error("executed")' });
@@ -158,6 +165,30 @@ describe('resolveExpressionTransforms', () => {
       'comp.width': 1920,
     });
     expect(result.get('Text')).toMatchObject({ x: 35, width: 1960 });
+  });
+
+  it('keeps native globals and API namespaces independent of layer names', () => {
+    const globals = ['Math', 'console', 'Number', 'data', 'timeline'].map((name) =>
+      layer(name, { width: '75' }),
+    );
+    const target = layer('Target', {
+      x: 'Math.max(2, 8) + Number("2") + layer("Math").width',
+      y: 'typeof console.log === "function" ? 50 : 0',
+      width: 'data.width',
+    });
+    const diagnostics: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms([...globals, target], {}, diagnostics);
+    expect(result.get('Target')).toMatchObject({ x: 85, y: 50, width: 100 });
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]!.property).toBe('width');
+  });
+
+  it('reports a readable dependency path for circular references', () => {
+    const a = layer('A', { x: 'layer("B").width' });
+    const b = layer('B', { width: 'layer("A").x' });
+    const diagnostics: ExpressionDiagnostic[] = [];
+    resolveExpressionTransforms([a, b], {}, diagnostics);
+    expect(diagnostics[0]!.message).toBe('Circular expression dependency: A.x -> B.width -> A.x');
   });
 
   it('rejects every reference to duplicate names, including three duplicates', () => {

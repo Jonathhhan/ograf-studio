@@ -147,7 +147,16 @@ function compileExpression(source: string): CompiledExpression {
   }
   return (scope, resolveLayer, options) => {
     const result = execute(evaluationScope(scope, resolveLayer, options));
-    if (typeof result !== 'number') throw new Error('Expression result must be a number.');
+    if (result === undefined)
+      throw new Error(
+        'Expression result must be a number. No value was returned; use return in a statement body.',
+      );
+    if (typeof result !== 'number')
+      throw new Error(
+        'Expression result must be a number; received ' +
+          (result === null ? 'null' : typeof result) +
+          '.',
+      );
     if (!Number.isFinite(result)) throw new Error('Expression result is not finite.');
     return result;
   };
