@@ -31,7 +31,8 @@ export function applyCompiledMasks(
   for (const layer of descriptor.layers) {
     const target = elements.get(layer.id);
     const state = states.get(layer.id);
-    if (layer.expressions && target && state) applyCompiledLayerTransform(target, state.transform);
+    if ((layer.expressions || descriptor.scripting?.enabled) && target && state)
+      applyCompiledLayerTransform(target, state.transform);
   }
   applyCompiledClipPaths(descriptor, elements, states);
   const hasMasks = descriptor.layers.some((layer) => layer.mask);

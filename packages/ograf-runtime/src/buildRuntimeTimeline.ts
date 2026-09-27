@@ -187,22 +187,24 @@ export function buildRuntimeTimeline(
       onDiagnostics,
     );
   };
-  const hasDynamicRendering = descriptor.layers.some(
-    (layer) =>
-      layer.clipParentId ||
-      layer.expressions ||
-      layer.mask ||
-      layer.element.type === 'pattern' ||
-      layer.lighting ||
-      layer.effects.stack?.some((e) => !e.legacy) ||
-      layer.isMaskOnly ||
-      Object.keys(layer.animationTracks).some(
-        (property) =>
-          isGradientStopOffsetProperty(property) ||
-          property === 'strokeWidth' ||
-          !!parseShaderAnimationProperty(property),
-      ),
-  );
+  const hasDynamicRendering =
+    descriptor.scripting?.enabled ||
+    descriptor.layers.some(
+      (layer) =>
+        layer.clipParentId ||
+        layer.expressions ||
+        layer.mask ||
+        layer.element.type === 'pattern' ||
+        layer.lighting ||
+        layer.effects.stack?.some((e) => !e.legacy) ||
+        layer.isMaskOnly ||
+        Object.keys(layer.animationTracks).some(
+          (property) =>
+            isGradientStopOffsetProperty(property) ||
+            property === 'strokeWidth' ||
+            !!parseShaderAnimationProperty(property),
+        ),
+    );
   if (!hasDynamicRendering) onDiagnostics?.([]);
   if (hasDynamicRendering) {
     // A timeline callback runs after all property tweens for this tick. A child tween at a

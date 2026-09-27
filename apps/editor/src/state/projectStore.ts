@@ -201,7 +201,13 @@ interface ProjectActions {
     patch: Partial<
       Pick<
         Composition,
-        'name' | 'width' | 'height' | 'frameRate' | 'updateTransitionFrames' | 'backgroundColor'
+        | 'name'
+        | 'width'
+        | 'height'
+        | 'frameRate'
+        | 'updateTransitionFrames'
+        | 'backgroundColor'
+        | 'scripting'
       >
     >,
   ) => void;

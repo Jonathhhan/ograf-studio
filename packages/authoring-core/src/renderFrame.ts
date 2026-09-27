@@ -370,13 +370,17 @@ export function renderCompositionFrameSvg(
     expressionScope,
     undefined,
     composition.expressionApiVersion,
+    composition.scripting,
   );
   composition.layers = composition.layers.map((candidate) => {
-    if (!candidate.expressions) return candidate;
+    if (!candidate.expressions && !composition.scripting?.enabled) return candidate;
     const transform = expressionTransforms.get(candidate.id)!;
     const animationTracks = { ...candidate.animationTracks };
     for (const property of EXPRESSION_PROPERTIES) {
-      if (!candidate.expressions[property] || candidate.expressionsEnabled?.[property] === false)
+      if (
+        !composition.scripting?.enabled &&
+        (!candidate.expressions?.[property] || candidate.expressionsEnabled?.[property] === false)
+      )
         continue;
       animationTracks[property] = [
         {

@@ -229,6 +229,25 @@ describe('runtime timeline boundary seeking', () => {
     expect(Number(gsap.getProperty(element, 'y'))).toBe(20);
     timeline.kill();
   });
+  it('applies a composition-only script to the DOM on seeks and data updates', () => {
+    const compiled = descriptor();
+    compiled.scripting = {
+      enabled: true,
+      modules: [{ fileName: 'helpers.js', source: 'export const offset = x => x + 10;' }],
+      source: 'layerById("layer").x = helpers.offset(frame) + data.gap;',
+    };
+    const element = { style: {} } as HTMLElement;
+    let data = { gap: 5 };
+    const timeline = buildRuntimeTimeline(compiled, new Map([['layer', element]]), () => data);
+    timeline.seek(5 / 25, true);
+    expect(Number(gsap.getProperty(element, 'x'))).toBe(20);
+    data = { gap: 20 };
+    timeline.time(8 / 25, false);
+    expect(Number(gsap.getProperty(element, 'x'))).toBe(38);
+    timeline.seek(5 / 25, true);
+    expect(Number(gsap.getProperty(element, 'x'))).toBe(35);
+    timeline.kill();
+  });
   it('combines numeric preview fields with another layer position', () => {
     const compiled = descriptor();
     const rectangle = compiled.layers[0]!;

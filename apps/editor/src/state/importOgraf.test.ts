@@ -201,6 +201,11 @@ describe('best-effort OGraf import', () => {
     };
     text.expressionsEnabled = { x: true, opacity: false };
     composition.expressionApiVersion = 23;
+    composition.scripting = {
+      enabled: true,
+      source: 'layer("Rectangle").x = helpers.offset(10);',
+      modules: [{ fileName: 'helpers.js', source: 'export const offset = x => x + 20;' }],
+    };
     composition.layers = [rectangle, text];
     const descriptor = compileDescriptor(composition);
     const manifest = assembleManifest(project, composition, descriptor);
@@ -215,6 +220,8 @@ describe('best-effort OGraf import', () => {
     expect(imported.mode).toBe('compiled-descriptor');
     const restored = imported.project.compositions[0]!;
     expect(restored.expressionApiVersion).toBe(23);
+    expect(restored.scripting).toEqual(composition.scripting);
+    expect(compileDescriptor(restored).scripting).toEqual(composition.scripting);
     expect(compileDescriptor(restored).expressionApiVersion).toBe(23);
     expect(restored.layers.find((layer) => layer.id === rectangle.id)?.name).toBe('Rectangle');
     expect(restored.layers.find((layer) => layer.id === text.id)).toMatchObject({

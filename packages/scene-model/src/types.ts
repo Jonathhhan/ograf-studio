@@ -1,3 +1,6 @@
+import type { CompositionScripting } from '@ograf-editor/ograf-types';
+export type { CompositionScripting, ScriptModule } from '@ograf-editor/ograf-types';
+
 export interface LayerTransform {
   x: number;
   y: number;
@@ -818,6 +821,7 @@ export interface CompositionLayout {
 }
 
 export interface Composition {
+  scripting?: CompositionScripting;
   /** Missing means API v1; unknown versions must not be reinterpreted. */
   expressionApiVersion?: number;
   id: string;

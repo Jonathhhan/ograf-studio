@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createFieldDefinition,
+  createDefaultTransform,
   createCornerRadii,
   createLayerKeyframe,
   createLayerOfKind,
@@ -10,6 +11,22 @@ import {
 import { renderCompositionFrameSvg } from './renderFrame';
 
 describe('renderCompositionFrameSvg', () => {
+  it('renders composition scripts and embedded libraries without property expressions', () => {
+    const project = createProject();
+    const comp = project.compositions[0]!;
+    const rectangle = createLayerOfKind('rectangle');
+    rectangle.name = 'Rectangle';
+    rectangle.keyframes = [createLayerKeyframe(0, createDefaultTransform())];
+    comp.layers = [rectangle];
+    comp.scripting = {
+      enabled: true,
+      modules: [{ fileName: 'helpers.js', source: 'export const offset = x => x + 20;' }],
+      source: 'layer("Rectangle").x = helpers.offset(100); layer("Rectangle").y = 30;',
+    };
+    const before = JSON.stringify(project);
+    expect(renderCompositionFrameSvg(project, comp.id, 0).svg).toContain('translate(120 30)');
+    expect(JSON.stringify(project)).toBe(before);
+  });
   it('uses seconds, computed layer dependencies and pre-expression thisLayer values', () => {
     const project = createProject();
     const composition = project.compositions[0]!;

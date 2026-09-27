@@ -889,6 +889,7 @@ function projectFromDescriptor(
     height: descriptor.height,
     frameRate: descriptor.frameRate,
     expressionApiVersion: descriptor.expressionApiVersion ?? 1,
+    ...(descriptor.scripting ? { scripting: clone(descriptor.scripting) } : {}),
     backgroundColor: descriptor.backgroundColor,
     layers,
     keyframes: lifecycle.keyframes,

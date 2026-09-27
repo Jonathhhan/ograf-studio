@@ -125,8 +125,20 @@ export interface CompiledCustomActionRef {
   name: string;
 }
 
+export interface ScriptModule {
+  fileName: string;
+  source: string;
+}
+
+export interface CompositionScripting {
+  modules: ScriptModule[];
+  source: string;
+  enabled: boolean;
+}
+
 /** A flattened, runtime-ready representation of a Composition — what `GraphicElement` interprets. */
 export interface CompiledGraphicDescriptor {
+  scripting?: CompositionScripting;
   /** Missing means API v1; unknown versions must not be reinterpreted. */
   expressionApiVersion?: number;
   width: number;

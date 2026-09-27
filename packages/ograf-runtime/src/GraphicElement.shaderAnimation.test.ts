@@ -160,6 +160,11 @@ describe('scheduled shader lifecycle replay', () => {
       y: 'clamp((frame - timeline.lastStepFrame) / (timeline.endFrame - timeline.lastStepFrame), 0, 1)',
       width: 'timeline.exitProgress',
     };
+    Graphic.descriptor.scripting = {
+      enabled: true,
+      modules: [],
+      source: 'layerById("shader").height = frame + timeline.exitProgress;',
+    };
     const graphic = new Graphic();
     graphic.connectedCallback();
     await graphic.load({
@@ -192,6 +197,7 @@ describe('scheduled shader lifecycle replay', () => {
         x: expectedFrame,
         y: exitProgress,
         width: lifecycleExit,
+        height: expectedFrame! + lifecycleExit!,
       });
     }
     await graphic.dispose();

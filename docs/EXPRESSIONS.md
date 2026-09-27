@@ -1,4 +1,4 @@
-# Property expressions
+# JavaScript expressions and composition scripts
 
 [Using Studio](USER_GUIDE.md) · [Development](DEVELOPMENT.md)
 
@@ -7,10 +7,76 @@ property: **X**, **Y**, **W** (width), **H** (height), **Rotation**, or **Opacit
 beside a property to disable its expression without deleting it. An empty expression uses the
 normal sampled value from the layer and its animation.
 
-Expressions run in the editor's browser preview and in exported OGraf graphics. They use a
+Expressions run in the editor's browser preview and in exported OGraf graphics. They use
 real JavaScript. Expressions are trusted project code and can access the host environment.
 Use expressions only from projects you trust. They run synchronously; an infinite loop can
 block rendering. Return a finite number for the property value.
+
+## Shared modules and composition scripts
+
+Open the **Scripts** tab (or reopen it from the panel menu). Select **Composition (each frame)**
+to edit the composition script, or use **Import .js files** / **New module** for reusable functions.
+Changes remain drafts until **Apply**; **Revert** restores the applied version. Enable
+**Run composition script** to execute its body. Disabling that body leaves shared modules
+available to property expressions. There is no separate log window; `console.log` uses the host console.
+
+For example, import `helpers.js`:
+
+```js
+export function spacing(index, gap) {
+  return index * gap;
+}
+
+export function place(target, x, y) {
+  target.x = x;
+  target.y = y;
+}
+```
+
+A property expression can return `helpers.spacing(3, data.gap)`. The composition script can
+change several layers together:
+
+```js
+const title = layer('Title');
+const background = layer('Background');
+helpers.place(title, helpers.spacing(3, data.gap), 100);
+background.x = title.x - 20;
+background.width = title.width + 40;
+```
+
+The evaluation order is animation/data binding and text measurement, property expressions,
+then the composition script, followed by transform/mask application. `layer()` and `layerById()`
+in the composition script read the computed values and permit writes to `x`, `y`, `width`,
+`height`, `rotation`, and `opacity`. Writes are visible to subsequent script statements;
+property expressions are not reevaluated after script writes. Their own layer references stay
+read-only. The script has `data`, `comp`, `timeline`, `frame`, `time`, and the interpolation
+helpers; there is no current layer. Composition script references must have unique names or
+exact evaluated layer IDs. A collection's duplicated names are ambiguous here; the item-local
+prototype lookup described below applies only inside property expressions.
+
+Every evaluation starts from a fresh sampled frame. Assignments affect that frame, not saved
+keyframes. A thrown error or invalid numeric assignment discards all of the script's writes,
+while retaining successful property expression results. Errors appear in Scripts. Calculating
+from `frame`, `time`, and data rather than persistent counters keeps seeking repeatable.
+Scripts and property results must be synchronous; asynchronous layer writes are rejected.
+This is trusted JavaScript with host access, not a sandbox or a timeout mechanism.
+
+Module files are embedded as source in `.ogs` projects and the exported graphic descriptor;
+no original disk path or network fetch is needed for playback. Modules use ordinary ES
+`export` syntax. Named/default imports and re-exports between included files work with explicit
+relative paths, for example `import { spacing } from "./helpers.js"`. The module's basename is
+its expression namespace (`helpers`), also available through `modules.helpers`. Use a valid
+JavaScript identifier as the basename, with `.js` or `.mjs`, and avoid API/global names. This
+initial version uses a flat file list: directory imports, npm/network imports, import cycles,
+and top-level await are unsupported. Import statements belong in module files; expression
+and composition script bodies use the exposed namespaces.
+
+Modules initialize lazily on first use and retain their state for that applied scripting
+configuration. Applying changed settings or loading a project creates a new module instance;
+compilation is cached. Exported bindings are read-only to callers, but modules can update their
+own state using normal JavaScript. Prefer pure helper functions for deterministic playout.
+Module syntax is transformed by [Sucrase](https://github.com/alangpierce/sucrase); execution
+uses the host JavaScript engine, as it does for property expressions.
 
 ## API compatibility and stable references
 

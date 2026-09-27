@@ -15,7 +15,8 @@ export function resolveFrameExpressions(
   data: Record<string, unknown> = {},
   diagnostics?: ExpressionDiagnostic[],
 ): Map<string, MaskRenderState> {
-  if (!descriptor.layers.some((layer) => layer.expressions)) return new Map(states);
+  if (!descriptor.scripting?.enabled && !descriptor.layers.some((layer) => layer.expressions))
+    return new Map(states);
   const base = new Map(states);
   for (const layer of descriptor.layers) {
     const state = base.get(layer.id);
@@ -36,6 +37,9 @@ export function resolveFrameExpressions(
       base.set(layer.id, { ...state, transform: { ...state.transform, width, height } });
     }
   }
+  const clock = [...states.values()][0] as
+    (MaskRenderState & { expressionFrame?: number; expressionExitProgress?: number }) | undefined;
+  const frame = clock?.expressionFrame ?? 0;
   const transforms = resolveExpressionTransforms(
     descriptor.layers.flatMap((layer) => {
       const state = base.get(layer.id);
@@ -72,13 +76,19 @@ export function resolveFrameExpressions(
       ];
     }),
     {
+      frame,
+      time: frame / descriptor.frameRate,
       'comp.width': descriptor.width,
       'comp.height': descriptor.height,
       ...expressionDataScope(data),
-      ...expressionTimelineScope(descriptor.keyframes),
+      ...expressionTimelineScope(descriptor.keyframes, frame),
+      ...(clock?.expressionExitProgress === undefined
+        ? {}
+        : { 'timeline.exitProgress': clock.expressionExitProgress }),
     },
     diagnostics,
     descriptor.expressionApiVersion,
+    descriptor.scripting,
   );
   return new Map(
     [...base].map(([id, state]) => [

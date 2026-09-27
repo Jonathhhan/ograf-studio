@@ -1,0 +1,42 @@
+.scripts-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 320px;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow: auto;
+}
+.scripts-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.scripts-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.scripts-file-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.scripts-file-select select,
+.scripts-file-select input {
+  flex: 1;
+  min-width: 0;
+}
+.scripts-panel textarea {
+  flex: 1;
+  min-height: 220px;
+  resize: vertical;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}

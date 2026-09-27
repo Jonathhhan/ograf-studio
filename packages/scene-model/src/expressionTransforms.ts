@@ -1,12 +1,18 @@
-import { evaluateExpression, EXPRESSION_PROPERTIES, type ExpressionScope } from './expressions';
-import type { Layer, LayerTransform } from './types';
+import {
+  evaluateExpression,
+  evaluateCompositionScript,
+  EXPRESSION_PROPERTIES,
+  type ExpressionScope,
+} from './expressions';
+import { scriptModules } from './scriptModules';
+import type { CompositionScripting, Layer, LayerTransform } from './types';
 
 export { EXPRESSION_PROPERTIES } from './expressions';
 type ExpressionProperty = (typeof EXPRESSION_PROPERTIES)[number];
 
 export interface ExpressionDiagnostic {
   layerId: string;
-  property: ExpressionProperty;
+  property: ExpressionProperty | 'script';
   source: string;
   message: string;
 }
@@ -30,7 +36,19 @@ export function resolveExpressionTransforms(
   scope: ExpressionScope,
   diagnostics?: ExpressionDiagnostic[],
   apiVersion = 1,
+  scripting?: CompositionScripting,
 ): Map<string, LayerTransform> {
+  let modules: Record<string, object> = Object.create(null);
+  try {
+    modules = scriptModules(scripting);
+  } catch (error) {
+    diagnostics?.push({
+      layerId: '',
+      property: 'script',
+      source: '',
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
   const byId = new Map(layers.map((layer) => [layer.id, layer]));
   const byName = new Map<string, ExpressionLayerState | null>();
   const byScope = new Map<string, Map<string, ExpressionLayerState | null>>();
@@ -93,6 +111,7 @@ export function resolveExpressionTransforms(
         (name, property) => resolveLayer(layer, name, property),
         {
           apiVersion,
+          modules,
           hasLayer: (name) => Boolean(local?.has(name) || byName.has(name)),
           resolveLayerById: (targetId, targetProperty) => {
             const target =
@@ -114,7 +133,7 @@ export function resolveExpressionTransforms(
       visiting.delete(key);
     }
   };
-  return new Map(
+  const result = new Map(
     layers.map((layer) => {
       const transform = { ...layer.transform };
       for (const property of EXPRESSION_PROPERTIES) {
@@ -133,4 +152,50 @@ export function resolveExpressionTransforms(
       return [layer.id, transform];
     }),
   );
+  if (!scripting?.enabled || !scripting.source.trim()) return result;
+  // A transaction prevents failed scripts (including late async writes) from changing a frame.
+  const draft = new Map([...result].map(([id, transform]) => [id, { ...transform }]));
+  let active = true;
+  const names = new Map<string, string | null>();
+  for (const layer of layers)
+    if (layer.name) names.set(layer.name, names.has(layer.name) ? null : layer.id);
+  const find = (name: string, byIdentity = false) => {
+    const id = byIdentity ? name : names.get(name);
+    if (id === null) throw new Error('Ambiguous layer name: ' + name);
+    const transform = id === undefined ? undefined : draft.get(id);
+    if (!transform) throw new Error('Unknown layer ' + (byIdentity ? 'ID: ' : 'name: ') + name);
+    return transform;
+  };
+  const write = (name: string, property: string, value: number, byIdentity = false) => {
+    if (!active)
+      throw new Error('Layer writes are only valid during the synchronous composition script.');
+    if (typeof value !== 'number' || !Number.isFinite(value))
+      throw new Error(property + ' must be a finite number.');
+    find(name, byIdentity)[property as ExpressionProperty] = value;
+  };
+  try {
+    evaluateCompositionScript(
+      scripting.source,
+      scope,
+      (name, property) => find(name)[property as ExpressionProperty],
+      {
+        apiVersion,
+        modules,
+        resolveLayerById: (id, property) => find(id, true)[property as ExpressionProperty],
+        writeLayer: (name, property, value) => write(name, property, value),
+        writeLayerById: (id, property, value) => write(id, property, value, true),
+      },
+    );
+    return draft;
+  } catch (error) {
+    diagnostics?.push({
+      layerId: '',
+      property: 'script',
+      source: scripting.source,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return result;
+  } finally {
+    active = false;
+  }
 }

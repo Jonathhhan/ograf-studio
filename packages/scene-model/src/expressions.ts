@@ -7,6 +7,9 @@ export const EXPRESSION_API_VERSION = 1;
 export const EXPRESSION_PROPERTIES = ['x', 'y', 'width', 'height', 'rotation', 'opacity'] as const;
 export interface ExpressionEvaluationOptions {
   apiVersion?: number;
+  modules?: Record<string, object>;
+  writeLayer?: (name: string, property: string, value: number) => void;
+  writeLayerById?: (id: string, property: string, value: number) => void;
   resolveLayerById?: ExpressionLayerResolver;
   /** Constant-time membership check; must not evaluate a layer property. */
   hasLayer?: (name: string) => boolean;
@@ -83,11 +86,18 @@ function helper(name: 'lerp' | 'clamp' | 'ease', ...args: unknown[]): number {
 }
 
 /** Enumerable getters support normal object operations without eagerly resolving dependencies. */
-function layerReference(resolve: (property: string) => number): Record<string, number> {
+function layerReference(
+  resolve: (property: string) => number,
+  write?: (property: string, value: number) => void,
+): Record<string, number> {
   const target = Object.create(null);
   for (const property of EXPRESSION_PROPERTIES)
-    Object.defineProperty(target, property, { enumerable: true, get: () => resolve(property) });
-  return target;
+    Object.defineProperty(target, property, {
+      enumerable: true,
+      get: () => resolve(property),
+      ...(write ? { set: (value: number) => write(property, value) } : {}),
+    });
+  return Object.preventExtensions(target);
 }
 
 /** Preserve lazy getters: copying their values would eagerly evaluate unrelated dependencies. */
@@ -117,21 +127,38 @@ function evaluationScope(
   Object.assign(context, {
     thisLayer,
     layerById: (id: string) =>
-      layerReference((property) => {
-        if (!options.resolveLayerById) throw new Error('Layer ID lookup is unavailable.');
-        return options.resolveLayerById(id, property);
-      }),
+      layerReference(
+        (property) => {
+          if (!options.resolveLayerById) throw new Error('Layer ID lookup is unavailable.');
+          return options.resolveLayerById(id, property);
+        },
+        options.writeLayerById
+          ? (property, value) => options.writeLayerById!(id, property, value)
+          : undefined,
+      ),
     layer: (name: string) =>
-      layerReference((property) => {
-        if (resolveLayer) return resolveLayer(name, property);
-        const key = name + '.' + property;
-        if (!Object.hasOwn(scope, key)) throw new Error('Unknown layer property "' + key + '".');
-        return numeric(scope[key]);
-      }),
+      layerReference(
+        (property) => {
+          if (resolveLayer) return resolveLayer(name, property);
+          const key = name + '.' + property;
+          if (!Object.hasOwn(scope, key)) throw new Error('Unknown layer property "' + key + '".');
+          return numeric(scope[key]);
+        },
+        options.writeLayer
+          ? (property, value) => options.writeLayer!(name, property, value)
+          : undefined,
+      ),
     lerp: (...args: unknown[]) => helper('lerp', ...args),
     clamp: (...args: unknown[]) => helper('clamp', ...args),
     ease: (...args: unknown[]) => helper('ease', ...args),
   });
+  if (options.modules) {
+    context.modules = options.modules;
+    for (const [name, descriptor] of Object.entries(
+      Object.getOwnPropertyDescriptors(options.modules),
+    ))
+      if (!Object.hasOwn(context, name)) Object.defineProperty(context, name, descriptor);
+  }
   if (!options.hasLayer || !resolveLayer) return context;
   const aliases = new Map<string, object>();
   const isAlias = (name: PropertyKey): name is string =>
@@ -145,7 +172,12 @@ function evaluationScope(
       if (!isAlias(name)) return Reflect.get(target, name, receiver);
       let reference = aliases.get(name);
       if (!reference) {
-        reference = layerReference((property) => resolveLayer(name, property));
+        reference = layerReference(
+          (property) => resolveLayer(name, property),
+          options.writeLayer
+            ? (property, value) => options.writeLayer!(name, property, value)
+            : undefined,
+        );
         aliases.set(name, reference);
       }
       return reference;
@@ -223,4 +255,41 @@ export function evaluateExpression(
   if (version !== EXPRESSION_API_VERSION)
     throw new Error('Unsupported expression API version: ' + version);
   return compiledExpression(source)(scope, resolveLayer, options);
+}
+
+const compiledScripts = new Map<string, (scope: object) => unknown>();
+function compiledScript(source: string) {
+  const cached = compiledScripts.get(source);
+  if (cached) return cached;
+  const execute = new Function(
+    'scope',
+    'with (scope) { return (function () { "use strict";\n' + source + '\n}).call(undefined); }',
+  ) as (scope: object) => unknown;
+  if (compiledScripts.size >= 128) compiledScripts.delete(compiledScripts.keys().next().value!);
+  compiledScripts.set(source, execute);
+  return execute;
+}
+
+export function compositionScriptSyntaxError(source: string): string | undefined {
+  try {
+    compiledScript(source);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return undefined;
+}
+
+export function evaluateCompositionScript(
+  source: string,
+  scope: ExpressionScope,
+  resolveLayer: ExpressionLayerResolver,
+  options: ExpressionEvaluationOptions,
+): void {
+  if ((options.apiVersion ?? 1) !== EXPRESSION_API_VERSION)
+    throw new Error('Unsupported expression API version: ' + options.apiVersion);
+  const result = compiledScript(source)(evaluationScope(scope, resolveLayer, options));
+  if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+    void Promise.resolve(result).catch(() => undefined);
+    throw new Error('Composition scripts must finish synchronously.');
+  }
 }
