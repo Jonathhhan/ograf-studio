@@ -24,6 +24,22 @@ export function applyCompiledMasks(
   data?: Record<string, unknown>,
   onDiagnostics?: (diagnostics: ExpressionDiagnostic[]) => void,
 ): void {
+  // Text measurement runs after data/font updates. Use its live box before
+  // resolving scripts, clipping and masks, without changing authored keyframes.
+  states = new Map(states);
+  for (const layer of descriptor.layers) {
+    if (layer.element.type !== 'text' || layer.element.autoFit !== 'auto-size') continue;
+    const state = states.get(layer.id);
+    const element = elements.get(layer.id);
+    const host = element?.firstElementChild?.classList.contains('layer-content-host')
+      ? (element.firstElementChild as HTMLElement)
+      : element;
+    if (!state || !host) continue;
+    const width = Number.parseFloat(host.style.width);
+    const height = Number.parseFloat(host.style.height);
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)
+      states.set(layer.id, { ...state, transform: { ...state.transform, width, height } });
+  }
   const diagnostics: ExpressionDiagnostic[] | undefined = onDiagnostics ? [] : undefined;
   states = resolveFrameExpressions(descriptor, states, data, diagnostics);
   if (diagnostics) onDiagnostics?.(diagnostics);

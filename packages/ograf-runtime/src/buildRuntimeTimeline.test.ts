@@ -93,6 +93,37 @@ function descriptor(): CompiledGraphicDescriptor {
 }
 
 describe('runtime timeline boundary seeking', () => {
+  it('uses updated auto-size text bounds for expressions without changing authored dimensions', () => {
+    const compiled = descriptor();
+    const text = compiled.layers[0]!;
+    text.name = 'Title';
+    text.element = { ...createTextElement(), autoFit: 'auto-size' };
+    const rectangle = structuredClone(text);
+    rectangle.id = 'background';
+    rectangle.name = 'Background';
+    rectangle.element = descriptor().layers[0]!.element;
+    rectangle.expressions = { width: 'layer("Title").width + 20' };
+    compiled.layers.push(rectangle);
+    const host = { style: { width: '200px', height: '40px' } } as HTMLElement;
+    const background = { style: {} } as HTMLElement;
+    const elements = new Map([
+      ['layer', host],
+      ['background', background],
+    ]);
+    const states = new Map(
+      compiled.layers.map((layer) => [layer.id, sampleCompiledLayerVisualState(layer, 0)]),
+    );
+    for (const width of [200, 480, 120]) {
+      host.style.width = `${width}px`;
+      applyCompiledMasks(compiled, elements, states);
+      expect(Number(gsap.getProperty(background, 'width'))).toBe(width + 20);
+      expect(states.get('layer')!.transform.width).toBe(100);
+    }
+    text.expressions = { width: '300' };
+    applyCompiledMasks(compiled, elements, states);
+    expect(Number(gsap.getProperty(background, 'width'))).toBe(320);
+  });
+
   it('publishes runtime diagnostics on data changes and clears disabled expressions', () => {
     const compiled = descriptor();
     compiled.layers[0]!.expressions = { x: 'data.position' };
@@ -480,6 +511,7 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(gain); }`,
     ];
     const content = { style: {} };
     const contentHost = {
+      style: {},
       dataset: {},
       firstElementChild: content,
       classList: { contains: (name: string) => name === 'layer-content-host' },
