@@ -1,4 +1,3 @@
-import { runDiscreteHistoryStep } from '../state/historyStore';
 import { useState } from 'react';
 import {
   expressionSyntaxError,
@@ -10,8 +9,6 @@ import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useSelectionStore } from '../state/selectionStore';
 import { useExpressionDiagnosticsStore } from '../state/expressionDiagnosticsStore';
 
-type ExpressionProperty = (typeof EXPRESSION_PROPERTIES)[number];
-
 export function LayerExpressionsEditor() {
   const composition = useActiveComposition();
   const selectedLayerId = useSelectionStore((s) => s.selectedLayerId);
@@ -21,36 +18,10 @@ export function LayerExpressionsEditor() {
   const setLayerExpressionEnabled = useProjectStore((s) => s.setLayerExpressionEnabled);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   if (!layer || layer.isGuide) return <p>Select a layer to edit its expressions.</p>;
-  const supported = [...EXPRESSION_PROPERTIES];
-  const authored = Object.keys(layer.expressions ?? {}) as ExpressionProperty[];
-  const ordered = supported.filter((key) => authored.includes(key));
-  const available = supported.filter((key) => !authored.includes(key));
   return (
     <section className="scripts-expressions">
       <h3>Expressions: {layer.name}</h3>
-      <select
-        aria-label="Add expression"
-        value=""
-        disabled={layer.isLocked || !available.length}
-        onChange={(event) => {
-          const key = event.target.value as ExpressionProperty;
-          if (!available.includes(key)) return;
-          runDiscreteHistoryStep(
-            () => updateLayerExpressions(layer.id, { ...layer.expressions, [key]: '' }),
-            'Add expression',
-          );
-          setExpanded((current) => ({ ...current, [`${layer.id}:${key}`]: true }));
-        }}
-      >
-        <option value="">Add expression...</option>
-        {available.map((key) => (
-          <option key={key} value={key}>
-            {animatablePropertyLabel(key, layer)}
-          </option>
-        ))}
-      </select>
-      {!ordered.length && <p>No expressions added.</p>}
-      {ordered.map((key) => {
+      {EXPRESSION_PROPERTIES.map((key) => {
         const label = animatablePropertyLabel(key, layer);
         const source = layer.expressions?.[key] ?? '';
         const runtimeError =
@@ -67,7 +38,7 @@ export function LayerExpressionsEditor() {
         const errorId = `expression-error-${identity}`;
         const open = expanded[identity] ?? false;
         return (
-          <section key={identity} className="scripts-expression-row">
+          <section key={identity} className="scripts-expression-row" data-empty={!source.trim()}>
             <div className="scripts-expression-header">
               <input
                 type="checkbox"
@@ -85,25 +56,6 @@ export function LayerExpressionsEditor() {
               >
                 {open ? '\u25be' : '\u25b8'} {label}
                 {error ? ' (error)' : ''}
-              </button>
-              <button
-                type="button"
-                aria-label={`Remove ${label} expression`}
-                disabled={layer.isLocked}
-                onClick={() => {
-                  const expressions = { ...layer.expressions };
-                  delete expressions[key];
-                  runDiscreteHistoryStep(
-                    () =>
-                      updateLayerExpressions(
-                        layer.id,
-                        Object.keys(expressions).length ? expressions : undefined,
-                      ),
-                    'Remove expression',
-                  );
-                }}
-              >
-                Remove
               </button>
             </div>
             <div id={bodyId} className="scripts-expression-value" hidden={!open}>
