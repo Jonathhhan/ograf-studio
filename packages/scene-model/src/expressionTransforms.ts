@@ -70,6 +70,7 @@ export function resolveExpressionTransforms(
     ids.set(layer.prototypeLayerId ?? layer.id, layer);
     referenceIds.set(layer.referenceScope, ids);
   }
+  const contexts = new Map<string, ExpressionScope>();
   const values = new Map<string, number>();
   const visiting = new Set<string>();
   const failures = new Map<string, unknown>();
@@ -125,9 +126,17 @@ export function resolveExpressionTransforms(
     if (visiting.size >= 128) throw new Error('Expression dependency chain is too deep.');
     visiting.add(key);
     try {
-      const context = Object.create(null) as ExpressionScope;
-      for (const [name, value] of Object.entries({ ...scope, ...layer.scope, ...layer.transform }))
-        Object.defineProperty(context, name, { value, configurable: true, enumerable: true });
+      let context = contexts.get(id);
+      if (!context) {
+        context = Object.create(null) as ExpressionScope;
+        for (const [name, value] of Object.entries({
+          ...scope,
+          ...layer.scope,
+          ...layer.transform,
+        }))
+          Object.defineProperty(context, name, { value, configurable: true, enumerable: true });
+        contexts.set(id, context);
+      }
       const value = evaluateExpression(
         expression,
         context,

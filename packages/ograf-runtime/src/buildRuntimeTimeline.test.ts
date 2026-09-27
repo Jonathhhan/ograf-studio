@@ -6,6 +6,7 @@ import { buildRuntimeTimeline } from './buildRuntimeTimeline';
 import * as shaderAnimationRendering from './shaderAnimationRendering';
 import { applyCompiledMasks } from './maskRendering';
 import { sampleCompiledLayerVisualState } from './loopRendering';
+import * as loopRendering from './loopRendering';
 import { resolveFrameExpressions } from './expressionRendering';
 import * as effectCompositing from './effectCompositing';
 import * as elementRendering from './renderElement';
@@ -93,6 +94,40 @@ function descriptor(): CompiledGraphicDescriptor {
 }
 
 describe('runtime timeline boundary seeking', () => {
+  it('shares authored samples within a frame but refreshes them after edits', () => {
+    const compiled = descriptor();
+    const layer = compiled.layers[0]!;
+    layer.name = 'Title';
+    layer.expressions = {
+      x: 'thisLayer.property("width").valueAtTime(0.2)',
+      width: 'sourceRectAtTime(0.2).width',
+    };
+    compiled.scripting = {
+      enabled: true,
+      modules: [],
+      source: 'layer("Title").y = layer("Title").property("width").valueAtTime(0.2);',
+    };
+    const states = new Map([['layer', sampleCompiledLayerVisualState(layer, 0)]]);
+    const sample = vi.spyOn(loopRendering, 'sampleCompiledLayerVisualState');
+    try {
+      expect(resolveFrameExpressions(compiled, states).get('layer')!.transform).toMatchObject({
+        x: 100,
+        y: 100,
+        width: 100,
+      });
+      expect(sample).toHaveBeenCalledTimes(1);
+      layer.animationTracks.width = [{ id: 'width', frame: 0, value: 200, easing: 'linear' }];
+      expect(resolveFrameExpressions(compiled, states).get('layer')!.transform).toMatchObject({
+        x: 200,
+        y: 200,
+        width: 200,
+      });
+      expect(sample).toHaveBeenCalledTimes(2);
+    } finally {
+      sample.mockRestore();
+    }
+  });
+
   it('samples authored values and local bounds at fractional seconds without evaluating expressions', () => {
     const compiled = descriptor();
     const layer = compiled.layers[0]!;

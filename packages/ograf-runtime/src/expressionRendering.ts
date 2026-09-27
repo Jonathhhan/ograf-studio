@@ -25,14 +25,9 @@ export function resolveFrameExpressions(
     (MaskRenderState & { expressionFrame?: number; expressionExitProgress?: number }) | undefined;
   const frame = clock?.expressionFrame ?? 0;
   const boundsCache = new Map<string, ReturnType<typeof expressionSourceRect>>();
+  const lastFrame = Math.max(0, ...descriptor.keyframes.map((key) => key.frame));
   const sampleFrame = (seconds: number) =>
-    Math.max(
-      0,
-      Math.min(
-        seconds * descriptor.frameRate,
-        Math.max(0, ...descriptor.keyframes.map((key) => key.frame)),
-      ),
-    );
+    Math.max(0, Math.min(seconds * descriptor.frameRate, lastFrame));
   const transforms = resolveExpressionTransforms(
     descriptor.layers.flatMap((layer) => {
       const state = states.get(layer.id);
@@ -42,6 +37,18 @@ export function resolveFrameExpressions(
         expressionExitProgress?: number;
       };
       const frame = expressionState.expressionFrame ?? 0;
+      const samples = new Map<number, MaskRenderState['transform']>();
+      const sampleTransform = (seconds: number) => {
+        const at = sampleFrame(seconds);
+        let sampled = samples.get(at);
+        if (!sampled) {
+          sampled = sampleCompiledLayerVisualState(layer, at, undefined, data).transform;
+          // Bound memory even when a user script requests many distinct times.
+          if (samples.size >= 128) samples.delete(samples.keys().next().value!);
+          samples.set(at, sampled);
+        }
+        return sampled;
+      };
       return [
         {
           ...layer,
@@ -55,8 +62,7 @@ export function resolveFrameExpressions(
               }
             : {}),
           transform: state.transform,
-          sampleTransform: (seconds: number) =>
-            sampleCompiledLayerVisualState(layer, sampleFrame(seconds), undefined, data).transform,
+          sampleTransform,
           sourceRectAtTime: (seconds: number, includeExtents: boolean) => {
             const at = sampleFrame(seconds);
             const key = JSON.stringify([layer.id, at, includeExtents]);
@@ -74,7 +80,7 @@ export function resolveFrameExpressions(
               };
             const bounds = expressionSourceRect(
               element,
-              sampleCompiledLayerVisualState(layer, at, undefined, data).transform,
+              sampleTransform(seconds),
               includeExtents,
               measureExpressionText,
             );
