@@ -126,3 +126,14 @@
 .scripts-expression-value:not([hidden]) {
   margin-top: 8px;
 }
+
+.scripts-expression-row[data-empty='true'] {
+  border-color: #383838;
+}
+.scripts-expression-row[data-empty='true'] .scripts-expression-header {
+  opacity: 0.55;
+}
+.scripts-expression-row[data-empty='true']:focus-within .scripts-expression-header,
+.scripts-expression-row[data-empty='true'] .scripts-expression-header:hover {
+  opacity: 1;
+}

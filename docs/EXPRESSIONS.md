@@ -10,8 +10,8 @@ the checkbox itself is activated; clicking the property name does not toggle it.
 
 Open **Scripts > Layer expressions** for a selected layer. An expression controls `x`, `y`,
 `width`, `height`, `rotation`, or `opacity` (0 to 1). Return a finite number, either as a
-formula or from a JavaScript statement body. Use **Add expression** to add a property;
-its editor can be collapsed, expanded, or removed. Transform origins and non-transform
+formula or from a JavaScript statement body. All six property fields are always shown;
+their editors can be collapsed or expanded. Empty fields appear greyed out and remain editable. Transform origins and non-transform
 properties are not expression targets:
 
 ```js
