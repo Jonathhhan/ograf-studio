@@ -195,6 +195,7 @@ export function buildRuntimeTimeline(
         layer.expressions ||
         layer.mask ||
         layer.element.type === 'pattern' ||
+        (layer.element.type === 'text' && layer.element.autoFit === 'auto-size') ||
         layer.lighting ||
         layer.effects.stack?.some((e) => !e.legacy) ||
         layer.isMaskOnly ||

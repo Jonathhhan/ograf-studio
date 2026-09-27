@@ -94,6 +94,28 @@ function descriptor(): CompiledGraphicDescriptor {
 }
 
 describe('runtime timeline boundary seeking', () => {
+  it('refreshes ordinary auto-size text after initial state and animation writes', () => {
+    const compiled = descriptor();
+    compiled.layers[0]!.element = { ...createTextElement(), autoFit: 'auto-size' };
+    const element = { style: {} } as HTMLElement;
+    const fit = vi.spyOn(elementRendering, 'applyAnimatedPaint').mockImplementation((host) => {
+      host.style.width = '240px';
+      host.style.height = '60px';
+    });
+    try {
+      const timeline = buildRuntimeTimeline(compiled, new Map([['layer', element]]));
+      expect(fit).toHaveBeenCalled();
+      expect(element.style.width).toBe('240px');
+      expect(timeline.eventCallback('onUpdate')).toBeTypeOf('function');
+      fit.mockClear();
+      timeline.time(0.2, false);
+      expect(fit).toHaveBeenCalled();
+      expect(element.style.width).toBe('240px');
+      timeline.kill();
+    } finally {
+      fit.mockRestore();
+    }
+  });
   it('shares authored samples within a frame but refreshes them after edits', () => {
     const compiled = descriptor();
     const layer = compiled.layers[0]!;

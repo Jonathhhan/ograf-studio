@@ -420,8 +420,8 @@ export function Stage({ style }: { style?: CSSProperties }) {
     new Map<
       string,
       {
-        authored: { x: number; y: number };
-        displayed: { x: number; y: number };
+        authored: Pick<LayerTransform, 'x' | 'y' | 'width' | 'height' | 'rotation'>;
+        displayed: Pick<LayerTransform, 'x' | 'y' | 'width' | 'height' | 'rotation'>;
       }
     >(),
   );
@@ -431,14 +431,17 @@ export function Stage({ style }: { style?: CSSProperties }) {
     );
     if (!layer) return;
     const authored = getLayerTransformAtFrame(layer, useTimelineStore.getState().currentFrame);
-    const displayed = parseCssTransform((target as HTMLElement).style.transform);
+    const displayed = {
+      ...renderedLayerGeometry(target as HTMLElement, authored),
+      rotation: parseCssTransform((target as HTMLElement).style.transform).rotation,
+    };
     transformStartRef.current.set(layer.id, { authored, displayed });
   };
   const compensateScriptedDrag = (layerId: string, patch: Partial<LayerTransform>) => {
     const start = transformStartRef.current.get(layerId);
     const layer = composition.layers.find((candidate) => candidate.id === layerId);
     if (start && layer) {
-      for (const property of ['x', 'y'] as const) {
+      for (const property of ['x', 'y', 'width', 'height', 'rotation'] as const) {
         if (
           patch[property] === undefined ||
           (!composition.scripting?.enabled &&
@@ -1189,6 +1192,10 @@ export function Stage({ style }: { style?: CSSProperties }) {
                 if (primaryEvent) previewTransform(primaryEvent.target);
               }}
               onDragGroupEnd={({ events }) => commitGroupTransforms(events)}
+              onResizeGroupStart={({ events }) => {
+                transformStartRef.current.clear();
+                for (const event of events) captureTransformStart(event.target);
+              }}
               onResizeGroup={({ events }) => {
                 for (const event of events) {
                   const target = event.target as HTMLElement;
@@ -1244,6 +1251,10 @@ export function Stage({ style }: { style?: CSSProperties }) {
                 previewTransform(target);
               }}
               onRotateEnd={({ target }) => commitTransform(target)}
+              onRotateGroupStart={({ events }) => {
+                transformStartRef.current.clear();
+                for (const event of events) captureTransformStart(event.target);
+              }}
               onRotateGroup={({ events }) => {
                 for (const event of events) {
                   (event.target as HTMLElement).style.transform = event.drag.transform;

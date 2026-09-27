@@ -2,6 +2,10 @@
 
 [Using Studio](USER_GUIDE.md)
 
+The Scripts tab provides JavaScript syntax highlighting, line numbers, indentation, and bracket
+matching. Edits save directly with Studio's Undo/Redo. Expression checkboxes toggle only when
+the checkbox itself is activated; clicking the property name does not toggle it.
+
 ## Property expressions
 
 Open **Scripts > Layer expressions** for a selected layer. An expression controls `x`, `y`,
@@ -91,7 +95,12 @@ that host global in expressions and composition scripts. The file list is flat; 
 npm and network imports, import cycles, and top-level
 await are unsupported. `import` statements belong in module files; script bodies use namespaces.
 Modules initialize on first use. Playback instances keep their own module state until the next
-load; SVG snapshots start with fresh modules. Editing scripting settings also resets state. Prefer pure functions so seeking remains repeatable.
+dispose/reload; SVG snapshots start with fresh modules. Editing scripting settings also resets state.
+Prefer pure functions so seeking remains repeatable. Variables declared inside an expression or
+composition script are local to that evaluation; share constants and functions through module exports.
+
+Project recovery preserves incomplete or duplicate module filenames so interrupted edits can be
+corrected. The Scripts tab reports these errors, and export requires valid, unique module names.
 
 ## API
 

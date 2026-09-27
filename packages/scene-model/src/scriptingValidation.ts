@@ -5,7 +5,7 @@ const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /** Validate serialized scripting fields without compiling or executing user code. */
-export function scriptingErrors(value: unknown): string[] {
+export function scriptingErrors(value: unknown, validateModuleNames = true): string[] {
   if (!record(value)) return [];
   const errors: string[] = [];
   if (
@@ -34,6 +34,7 @@ export function scriptingErrors(value: unknown): string[] {
             errors.push('Script modules must have string fileName and source fields.');
             continue;
           }
+          if (!validateModuleNames) continue;
           try {
             const name = scriptModuleName(file.fileName);
             if (names.has(name)) errors.push('Duplicate module name: ' + name);
@@ -70,8 +71,9 @@ export function scriptingErrors(value: unknown): string[] {
     }
   }
   for (const component of Array.isArray(value.components) ? value.components : [])
-    errors.push(...scriptingErrors(component));
+    errors.push(...scriptingErrors(component, validateModuleNames));
   for (const collection of Array.isArray(value.collections) ? value.collections : [])
-    if (record(collection)) errors.push(...scriptingErrors({ layers: collection.prototypeLayers }));
+    if (record(collection))
+      errors.push(...scriptingErrors({ layers: collection.prototypeLayers }, validateModuleNames));
   return errors;
 }

@@ -5,6 +5,7 @@ import {
   renderedLayerGeometry,
 } from './transformGeometry';
 import { snapLayerPosition } from './layoutGeometry';
+import { evaluateExpression } from '@ograf-editor/scene-model';
 
 describe('parseCssTransform', () => {
   it('reads the translate3d format emitted by GSAP', () => {
@@ -59,4 +60,17 @@ describe('dragging a layer with a position expression', () => {
     expect(authoredPositionAfterDrag(200, 900, 930)).toBe(230);
     expect(authoredPositionAfterDrag(200, 900, 870)).toBe(170);
   });
+  it.each([
+    ['width', 100, 100, 30],
+    ['height', 50, 20, -10],
+    ['rotation', 15, 45, 20],
+  ])(
+    'keeps an additive %s expression stable after a canvas edit',
+    (_property, authored, offset, delta) => {
+      const source = `value + ${offset}`;
+      const before = evaluateExpression(source, { value: authored });
+      const edited = authoredPositionAfterDrag(authored, before, before + delta);
+      expect(evaluateExpression(source, { value: edited })).toBe(before + delta);
+    },
+  );
 });

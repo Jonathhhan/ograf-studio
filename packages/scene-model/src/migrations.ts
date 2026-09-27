@@ -487,7 +487,9 @@ function normalizeComposition(composition: LegacyComposition): Composition {
 
 /** Upgrade an editor project without mutating the parsed/autosaved source object. */
 export function migrateProject(project: Project | LegacyProject): Project {
-  const errors = project.compositions.flatMap(scriptingErrors);
+  // Recover editable filename errors (including autosaved partial edits). Export validation
+  // and runtime diagnostics still enforce valid, unique module names.
+  const errors = project.compositions.flatMap((composition) => scriptingErrors(composition, false));
   if (errors.length) throw new Error(errors.join('\n'));
   const cloned = cloneProject(project as LegacyProject);
   if (cloned.shaders !== undefined && !Array.isArray(cloned.shaders))
