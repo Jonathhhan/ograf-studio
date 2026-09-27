@@ -24,6 +24,8 @@ export interface ExpressionEvaluationOptions {
   currentSampling?: ExpressionLayerSampling;
   resolveLayerSampling?: (reference: string, byId: boolean) => ExpressionLayerSampling;
   modules?: Record<string, object>;
+  /** Stable authored expression map; compiled entries live only as long as their owner. */
+  expressionSources?: object;
   writeLayer?: (name: string, property: string, value: number) => void;
   writeLayerById?: (id: string, property: string, value: number) => void;
   resolveLayerById?: ExpressionLayerResolver;
@@ -281,6 +283,7 @@ function compileExpression(source: string): CompiledExpression {
   }
   return (scope, resolveLayer, options) => {
     const result = execute(evaluationScope(scope, resolveLayer, options));
+    requireSynchronousResult(result, 'Expressions');
     if (result === undefined)
       throw new Error(
         'Expression result must be a number. No value was returned; use return in a statement body.',
@@ -297,15 +300,35 @@ function compileExpression(source: string): CompiledExpression {
 }
 
 // Bound retained source/closures while avoiding parsing unchanged formulas on every frame.
-const compiledExpressions = new Map<string, CompiledExpression>();
-function compiledExpression(source: string): CompiledExpression {
-  const cached = compiledExpressions.get(source);
-  if (cached) return cached;
-  const compiled = compileExpression(source);
-  if (compiledExpressions.size >= 256)
-    compiledExpressions.delete(compiledExpressions.keys().next().value!);
-  compiledExpressions.set(source, compiled);
-  return compiled;
+type ExpressionCompilation = { execute: CompiledExpression } | { error: unknown };
+const compiledExpressions = new Map<string, ExpressionCompilation>();
+const ownedExpressions = new WeakMap<
+  object,
+  Map<string, { source: string; compilation: ExpressionCompilation }>
+>();
+function compiledExpression(source: string, owner?: object, property?: string): CompiledExpression {
+  // Retain the active layer's six properties independently of the bounded shared cache.
+  // Compare sources as callers outside the editor may mutate an expression map in place.
+  let owned: Map<string, { source: string; compilation: ExpressionCompilation }> | undefined;
+  if (owner && property && EXPRESSION_PROPERTIES.some((name) => name === property)) {
+    owned = ownedExpressions.get(owner);
+    if (!owned) ownedExpressions.set(owner, (owned = new Map()));
+  }
+  const entry = property ? owned?.get(property) : undefined;
+  let compilation = entry?.source === source ? entry.compilation : compiledExpressions.get(source);
+  if (!compilation) {
+    try {
+      compilation = { execute: compileExpression(source) };
+    } catch (error) {
+      compilation = { error };
+    }
+    if (compiledExpressions.size >= 256)
+      compiledExpressions.delete(compiledExpressions.keys().next().value!);
+    compiledExpressions.set(source, compilation);
+  }
+  if (owned && property && entry?.source !== source) owned.set(property, { source, compilation });
+  if ('error' in compilation) throw compilation.error;
+  return compilation.execute;
 }
 
 /** Checks grammar without reading data or evaluating layer dependencies. */
@@ -333,7 +356,11 @@ export function evaluateExpression(
     ? `${options.currentLayer.name || options.currentLayer.id}.${options.currentProperty?.name ?? 'expression'}`
     : 'Expression';
   return withScriptLogContext(label, scope.frame, () =>
-    compiledExpression(source)(scope, resolveLayer, options),
+    compiledExpression(source, options.expressionSources, options.currentProperty?.name)(
+      scope,
+      resolveLayer,
+      options,
+    ),
   );
 }
 
@@ -370,8 +397,12 @@ export function evaluateCompositionScript(
   const result = withScriptLogContext('Composition', scope.frame, () =>
     compiledScript(source)(evaluationScope(scope, resolveLayer, options)),
   );
+  requireSynchronousResult(result, 'Composition scripts');
+}
+
+function requireSynchronousResult(result: unknown, label: string): void {
   if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
     void Promise.resolve(result).catch(() => undefined);
-    throw new Error('Composition scripts must finish synchronously.');
+    throw new Error(label + ' must finish synchronously.');
   }
 }

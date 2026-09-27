@@ -100,7 +100,17 @@ describe('evaluateExpression', () => {
     expect(evaluateExpression('const name = "A"; return layer(name).x;', { 'A.x': 7 })).toBe(7);
     expect(expressionSyntaxError('throw new Error("not executed")')).toBeUndefined();
     expect(() => evaluateExpression('return {};', {})).toThrow('must be a number');
-    expect(() => evaluateExpression('return Promise.resolve(1);', {})).toThrow('must be a number');
+    expect(() => evaluateExpression('return Promise.resolve(1);', {})).toThrow('synchronously');
+  });
+
+  it.each([
+    'Promise.reject(new Error("rejected expression"))',
+    '(async () => { throw new Error("rejected async expression"); })()',
+    '({ then(_resolve, reject) { reject(new Error("rejected thenable")); } })',
+  ])('contains returned async failures: %s', async (source) => {
+    expect(() => evaluateExpression(source, {})).toThrow('Expressions must finish synchronously');
+    // An unhandled rejection here also fails the test run, after the evaluator has returned.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
   it('accepts a trailing semicolon on a formula and supports JavaScript statement bodies', () => {

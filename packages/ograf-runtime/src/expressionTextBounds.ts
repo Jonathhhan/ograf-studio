@@ -1,10 +1,14 @@
-import type { ExpressionRect, LayerTransform, TextElement } from '@ograf-editor/scene-model';
+import type {
+  ExpressionTextMeasurement,
+  LayerTransform,
+  TextElement,
+} from '@ograf-editor/scene-model';
 import { disposeElementContent, renderElementContent } from './renderElement';
 
 const measurementCaches = new WeakMap<
   Document,
   {
-    bounds: Map<string, ExpressionRect>;
+    bounds: Map<string, ExpressionTextMeasurement>;
     fonts: FontFace[];
     statuses: string[];
   }
@@ -36,7 +40,7 @@ function measurementCache(doc: Document) {
 export function measureExpressionText(
   element: TextElement,
   transform: LayerTransform,
-): ExpressionRect {
+): ExpressionTextMeasurement {
   if (typeof document === 'undefined' || !document.body)
     throw new Error('Text bounds require a browser renderer.');
   // Paint is excluded both from the key and the probe; it cannot change text layout.
@@ -69,11 +73,22 @@ export function measureExpressionText(
     range.selectNodeContents(content);
     const bounds = range.getBoundingClientRect();
     const origin = probe.getBoundingClientRect();
+    const strokeScale = (value: string | undefined) => {
+      const scale = Number.parseFloat(value ?? '');
+      return Number.isFinite(scale) && scale >= 0 ? scale : 1;
+    };
+    const dataset = (content as HTMLElement).dataset;
     const measured = {
       left: bounds.left - origin.left,
       top: bounds.top - origin.top,
       width: bounds.width,
       height: bounds.height,
+      ...(element.autoFit === 'squeeze'
+        ? {
+            strokeScaleX: strokeScale(dataset?.ografSqueezeScaleX),
+            strokeScaleY: strokeScale(dataset?.ografSqueezeScaleY),
+          }
+        : {}),
     };
     // Font loading may have started during measurement. Never retain fallback-font geometry.
     if (document.fonts?.status !== 'loading') {

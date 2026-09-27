@@ -1,3 +1,4 @@
+import { scriptingErrors } from './scriptingValidation';
 import {
   createFieldDefinition,
   createDefaultTransform,
@@ -486,6 +487,8 @@ function normalizeComposition(composition: LegacyComposition): Composition {
 
 /** Upgrade an editor project without mutating the parsed/autosaved source object. */
 export function migrateProject(project: Project | LegacyProject): Project {
+  const errors = project.compositions.flatMap(scriptingErrors);
+  if (errors.length) throw new Error(errors.join('\n'));
   const cloned = cloneProject(project as LegacyProject);
   if (cloned.shaders !== undefined && !Array.isArray(cloned.shaders))
     throw new Error('Project shader library must be an array.');

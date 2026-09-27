@@ -84,8 +84,11 @@ export const offset = (index) => spacing(index, 40);
 ```
 
 The filename's basename is its namespace, also available as `modules.helpers`. Filenames must
-use a JavaScript identifier followed by `.js` or `.mjs`, and cannot conflict with API/global
-names. The file list is flat; directory, npm and network imports, import cycles, and top-level
+use a JavaScript identifier followed by `.js` or `.mjs`, and cannot conflict with API names or
+the fixed reserved list of standard JavaScript globals and `console`. Host-specific globals
+such as `window` and `process` do not affect filename validity; a matching module alias shadows
+that host global in expressions and composition scripts. The file list is flat; directory,
+npm and network imports, import cycles, and top-level
 await are unsupported. `import` statements belong in module files; script bodies use namespaces.
 Modules initialize on first use. Playback instances keep their own module state until the next
 load; SVG snapshots start with fresh modules. Editing scripting settings also resets state. Prefer pure functions so seeking remains repeatable.
@@ -99,7 +102,7 @@ load; SVG snapshots start with fresh modules. Editing scripting settings also re
 | `thisLayer`                                         | Sampled transform before expressions; property expressions only.                 |
 | `x`, `y`, `width`, `height`, `rotation`, `opacity`  | Shorthand for the sampled transform in a property expression.                    |
 | `layer("Name")`                                     | Computed transform of a uniquely named layer. Read-only in property expressions. |
-| `layerById("id")`                                   | Same lookup by stable ID; use the Scripts reference selector to obtain the code. |
+| `layerById("id")`                                   | Same lookup by stable layer ID.                                                  |
 | `frame`, `time`                                     | Composition playhead in frames and seconds.                                      |
 | `comp.width`, `comp.height`                         | Composition dimensions.                                                          |
 | `data.key`                                          | Read-only input data, including objects, arrays, booleans and null.              |
@@ -161,7 +164,8 @@ other sources use their authored source box, not a pixel-alpha scan. `includeExt
 stroke expansion; it does not include shadows, filters or masks. These semantics are not a
 complete clone of AE's method.
 
-Measurements are cached for the current evaluation and never alter live layers. The lightweight
+Measurements are cached by text layout and authored box, invalidated when fonts change, and
+never alter live layers. The lightweight
 SVG overview lacks browser font metrics and uses the authored text box; Studio and exported
 browser graphics measure text. Use browser capture for accurate text-dependent output.
 
@@ -171,6 +175,12 @@ Expressions and scripts are trusted JavaScript executed synchronously by the hos
 without a sandbox or timeout. `console.log`, `info`, `warn`, `error`, and `debug` appear in the Scripts tab console and the native console. The Studio log shows the source and frame, groups consecutive repeats, and retains the latest 200 entries. Clear removes the history; Pause logs stops collection without pausing playback. Log history is not saved with the project. Infinite loops can block
 the host, and async work is unsupported for frame calculations. Use current frame/data values
 rather than persistent counters or external side effects for deterministic playback.
+
+Returned promises are rejected with a synchronous-only diagnostic and their rejections are
+consumed. This does not contain detached asynchronous work started by trusted JavaScript.
+Failed composition scripts discard their layer writes; module state and external side effects
+are not rolled back. Active layer expressions retain compiled code (or syntax errors) until
+their source changes, independently of the bounded cache used for standalone evaluations.
 
 Source, enable flags, and modules survive `.ogs` reload and compiled `.ograf` export/import.
 The exported descriptor embeds module source; the original files are not needed at playback.

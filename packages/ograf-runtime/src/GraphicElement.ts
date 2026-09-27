@@ -31,6 +31,7 @@ import {
   waitForElementContentReady,
 } from './renderElement';
 import {
+  scriptingErrors,
   getElementShaderPaints,
   effectEnabled,
   getEffectStack,
@@ -569,6 +570,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     const shadow = this.shadowRoot;
     if (!shadow) return;
     const descriptor = this.descriptor;
+    const errors = scriptingErrors(descriptor);
+    if (errors.length) throw new Error(errors.join('\n'));
     this.#documentFontsReady = registerDocumentFonts(this.ownerDocument, descriptor.fonts ?? []);
     // Source/factories may be shared, but initialized module state belongs to this load.
     this.#renderDescriptor = expandRuntimeCollections({

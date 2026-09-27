@@ -33,6 +33,16 @@ const reservedNames = new Set([
   'transformOriginY',
   'modules',
   'scope',
+  // A fixed vocabulary keeps project filenames portable across browser and Node hosts.
+  ...(
+    'globalThis Infinity NaN undefined Object Function Boolean Symbol Error AggregateError ' +
+    'EvalError RangeError ReferenceError SyntaxError TypeError URIError Number BigInt Math Date ' +
+    'String RegExp Array Int8Array Uint8Array Uint8ClampedArray Int16Array Uint16Array ' +
+    'Int32Array Uint32Array BigInt64Array BigUint64Array Float32Array Float64Array Map Set ' +
+    'WeakMap WeakSet ArrayBuffer SharedArrayBuffer DataView Atomics JSON Promise Reflect Proxy ' +
+    'Intl WebAssembly WeakRef FinalizationRegistry console eval parseInt parseFloat isNaN ' +
+    'isFinite decodeURI decodeURIComponent encodeURI encodeURIComponent'
+  ).split(' '),
 ]);
 
 /** Flat project files use their basename as the expression namespace. */
@@ -40,8 +50,7 @@ export function scriptModuleName(fileName: string): string {
   if (!/^[A-Za-z_$][\w$]*\.(?:m?js)$/.test(fileName))
     throw new Error('Use a JavaScript filename such as helpers.js (letters, digits, _ or $).');
   const name = fileName.replace(/\.(?:m?js)$/, '');
-  if (reservedNames.has(name) || Object.hasOwn(globalThis, name))
-    throw new Error('Reserved module name: ' + name);
+  if (reservedNames.has(name)) throw new Error('Reserved module name: ' + name);
   // Let the host reject reserved JavaScript words, rather than maintaining a keyword parser.
   new Function('"use strict"; const ' + name + ' = 0;');
   return name;

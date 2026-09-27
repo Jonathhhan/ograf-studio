@@ -144,6 +144,7 @@ export function resolveExpressionTransforms(
         {
           apiVersion,
           modules,
+          expressionSources: layer.expressions!,
           currentLayer: metadata(layer),
           currentSampling: sampling(layer),
           resolveLayerSampling: (reference, byId) => sampling(findLayer(layer, reference, byId)),
@@ -181,7 +182,17 @@ export function resolveExpressionTransforms(
       return [layer.id, transform];
     }),
   );
-  if (!scripting?.enabled || !scripting.source.trim()) return result;
+  if (!scripting?.enabled) return result;
+  if (typeof scripting.enabled !== 'boolean' || typeof scripting.source !== 'string') {
+    diagnostics?.push({
+      layerId: '',
+      property: 'script',
+      source: '',
+      message: 'Invalid scripting settings: enabled must be a boolean and source must be a string.',
+    });
+    return result;
+  }
+  if (!scripting.source.trim()) return result;
   // A transaction prevents failed scripts (including late async writes) from changing a frame.
   const draft = new Map([...result].map(([id, transform]) => [id, { ...transform }]));
   let active = true;

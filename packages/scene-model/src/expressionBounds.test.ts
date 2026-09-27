@@ -35,4 +35,31 @@ describe('expression source bounds', () => {
     ).toEqual({ left: 0, top: 0, width: 0, height: 0 });
     expect(measure).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    [2, 1.5],
+    [0.5, 0.25],
+  ])('scales fitted text stroke extents by %s horizontally and %s vertically', (x, y) => {
+    const text = createTextElement({ content: 'Hello', autoFit: 'squeeze', strokeWidth: 20 });
+    const measure = () => ({
+      left: 10,
+      top: 5,
+      width: 80,
+      height: 20,
+      strokeScaleX: x,
+      strokeScaleY: y,
+    });
+    expect(expressionSourceRect(text, createDefaultTransform(), false, measure)).toEqual({
+      left: 10,
+      top: 5,
+      width: 80,
+      height: 20,
+    });
+    expect(expressionSourceRect(text, createDefaultTransform(), true, measure)).toEqual({
+      left: 10 - 10 * x,
+      top: 5 - 10 * y,
+      width: 80 + 20 * x,
+      height: 20 + 20 * y,
+    });
+  });
 });

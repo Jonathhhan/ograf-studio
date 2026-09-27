@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LayerTransform, TextElement } from '@ograf-editor/scene-model';
+import { expressionSourceRect } from '@ograf-editor/scene-model';
 import { measureExpressionText } from './expressionTextBounds';
 import { renderElementContent } from './renderElement';
 
@@ -34,7 +35,7 @@ function fakeDocument() {
     body: { appendChild: vi.fn() },
     createElement: vi.fn(() => ({
       style: {},
-      firstElementChild: {},
+      firstElementChild: { dataset: {} as Record<string, string> },
       remove,
       getBoundingClientRect: () => ({ left: 0, top: 0 }),
     })),
@@ -90,6 +91,34 @@ describe('expression text measurement cache', () => {
     measureExpressionText(text, { ...transform, width: 200 });
     measureExpressionText(text, { ...transform, height: 200 });
     expect(measure).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    [2, 1.5],
+    [0.5, 0.25],
+  ])('retains squeeze stroke scaling (%s, %s) through cached measurements', (x, y) => {
+    const { doc, measure } = fakeDocument();
+    vi.mocked(renderElementContent).mockImplementationOnce(() => {
+      Object.assign(doc.createElement.mock.results.at(-1)!.value.firstElementChild.dataset, {
+        ografSqueezeScaleX: String(x),
+        ografSqueezeScaleY: String(y),
+      });
+    });
+    const squeezed = { ...text, autoFit: 'squeeze', strokeWidth: 20 } as TextElement;
+    // The first query populates the cache without asking for stroke extents.
+    expect(expressionSourceRect(squeezed, transform, false, measureExpressionText)).toEqual({
+      left: 3,
+      top: 4,
+      width: 80,
+      height: 40,
+    });
+    expect(expressionSourceRect(squeezed, transform, true, measureExpressionText)).toEqual({
+      left: 3 - 10 * x,
+      top: 4 - 10 * y,
+      width: 80 + 20 * x,
+      height: 40 + 20 * y,
+    });
+    expect(measure).toHaveBeenCalledTimes(1);
   });
 
   it('invalidates added, removed, replaced and loaded fonts', () => {
