@@ -1,3 +1,4 @@
+import { ScriptLogWindow } from './ScriptLogWindow';
 import { useRef, useState } from 'react';
 import {
   compositionScriptSyntaxError,
@@ -35,6 +36,7 @@ export function ScriptsPanel() {
       <div className="scripts-editor-view" hidden={view !== 'scripts'}>
         <ScriptEditor key={composition.id} composition={composition} />
       </div>
+      <ScriptLogWindow />
     </div>
   );
 }

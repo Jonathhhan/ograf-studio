@@ -75,3 +75,39 @@
 .scripts-expression-value textarea[aria-invalid='true'] {
   border-color: #ff7b86;
 }
+
+.scripts-log {
+  flex: 0 0 auto;
+  border-top: 1px solid #444;
+  padding-top: 10px;
+}
+.scripts-log-output {
+  margin-top: 8px;
+  height: 160px;
+  min-height: 80px;
+  overflow: auto;
+  resize: vertical;
+  background: #191919;
+  border: 1px solid #444;
+  padding: 6px;
+  font: 12px/1.4 monospace;
+}
+.scripts-log-row {
+  border-bottom: 1px solid #333;
+  padding: 4px 0;
+}
+.scripts-log-row small {
+  opacity: 0.65;
+}
+.scripts-log-row pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 2px 0;
+  font: inherit;
+}
+.scripts-log-warn {
+  color: #f1c75b;
+}
+.scripts-log-error {
+  color: #ff7b86;
+}

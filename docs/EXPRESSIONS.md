@@ -168,7 +168,7 @@ browser graphics measure text. Use browser capture for accurate text-dependent o
 ## Execution and portability
 
 Expressions and scripts are trusted JavaScript executed synchronously by the host engine,
-without a sandbox or timeout. `console.log` uses the native console. Infinite loops can block
+without a sandbox or timeout. `console.log`, `info`, `warn`, `error`, and `debug` appear in the Scripts tab console and the native console. The Studio log shows the source and frame, groups consecutive repeats, and retains the latest 200 entries. Clear removes the history; Pause logs stops collection without pausing playback. Log history is not saved with the project. Infinite loops can block
 the host, and async work is unsupported for frame calculations. Use current frame/data values
 rather than persistent counters or external side effects for deterministic playback.
 

@@ -1,7 +1,11 @@
+import { createScriptConsole } from './scriptConsole';
 import { transform } from 'sucrase';
 import type { CompositionScripting } from './types';
 
-const factories = new Map<string, (exports: object, require: (path: string) => object) => void>();
+const factories = new Map<
+  string,
+  (exports: object, require: (path: string) => object, console: Console) => void
+>();
 const libraries = new WeakMap<CompositionScripting, Record<string, object>>();
 const reservedNames = new Set([
   'data',
@@ -50,9 +54,10 @@ function factory(source: string) {
     transforms: ['imports'],
     disableESTransforms: true,
   }).code;
-  const execute = new Function('exports', 'require', code) as (
+  const execute = new Function('exports', 'require', 'console', code) as (
     exports: object,
     require: (path: string) => object,
+    console: Console,
   ) => void;
   if (factories.size >= 128) factories.delete(factories.keys().next().value!);
   factories.set(source, execute);
@@ -95,11 +100,15 @@ export function scriptModules(settings?: CompositionScripting): Record<string, o
     loading.add(fileName);
     try {
       const exports = Object.create(null);
-      factory(source)(exports, (path) => {
-        if (!/^\.\/[A-Za-z_$][\w$]*\.(?:m?js)$/.test(path))
-          throw new Error('Import a bundled file with a relative path, such as ./helpers.js.');
-        return load(path.slice(2));
-      });
+      factory(source)(
+        exports,
+        (path) => {
+          if (!/^\.\/[A-Za-z_$][\w$]*\.(?:m?js)$/.test(path))
+            throw new Error('Import a bundled file with a relative path, such as ./helpers.js.');
+          return load(path.slice(2));
+        },
+        createScriptConsole(fileName),
+      );
       const namespace = new Proxy(exports, {
         set: () => false,
         defineProperty: () => false,

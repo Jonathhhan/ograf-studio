@@ -1,3 +1,4 @@
+import { scriptConsole, withScriptLogContext } from './scriptConsole';
 import { easedProgress } from './layerAnimation';
 import type { EasingPreset, KeyframeRole } from './types';
 
@@ -216,6 +217,7 @@ function evaluationScope(
   }
   Object.assign(context, {
     thisLayer,
+    console: scriptConsole,
     layerById: (id: string) =>
       layerReference(
         (property) => {
@@ -327,7 +329,12 @@ export function evaluateExpression(
   const version = options.apiVersion ?? 1;
   if (version !== EXPRESSION_API_VERSION)
     throw new Error('Unsupported expression API version: ' + version);
-  return compiledExpression(source)(scope, resolveLayer, options);
+  const label = options.currentLayer
+    ? `${options.currentLayer.name || options.currentLayer.id}.${options.currentProperty?.name ?? 'expression'}`
+    : 'Expression';
+  return withScriptLogContext(label, scope.frame, () =>
+    compiledExpression(source)(scope, resolveLayer, options),
+  );
 }
 
 const compiledScripts = new Map<string, (scope: object) => unknown>();
@@ -360,7 +367,9 @@ export function evaluateCompositionScript(
 ): void {
   if ((options.apiVersion ?? 1) !== EXPRESSION_API_VERSION)
     throw new Error('Unsupported expression API version: ' + options.apiVersion);
-  const result = compiledScript(source)(evaluationScope(scope, resolveLayer, options));
+  const result = withScriptLogContext('Composition', scope.frame, () =>
+    compiledScript(source)(evaluationScope(scope, resolveLayer, options)),
+  );
   if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
     void Promise.resolve(result).catch(() => undefined);
     throw new Error('Composition scripts must finish synchronously.');
