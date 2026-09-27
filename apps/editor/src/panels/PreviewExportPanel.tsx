@@ -31,6 +31,7 @@ import { useFitZoom } from '../canvas/useFitZoom';
 import { transparencyCheckerboardStyle } from '../canvas/compositionBackground';
 import { buildPreviewFormFromTestValues, resolvePreviewDataRecord } from '../state/previewData';
 import { canReusePreviewForShaderParameters } from '../state/shaderPreviewReuse';
+import { PreviewDataUpdates } from '../state/previewDataUpdates';
 import { enterPreviewFullscreen, installPreviewShortcuts } from '../state/previewPresentation';
 import { measureAgentText } from '../state/agentCapture';
 import { Panel } from './Panel';
@@ -176,7 +177,7 @@ export function PreviewExportPanel() {
     [composition, dataForm],
   );
   const latestPreviewDataRef = useRef(previewData);
-  const lastAttemptedDataSignatureRef = useRef<string | null>(null);
+  const previewUpdatesRef = useRef(new WeakMap<Graphic, PreviewDataUpdates>());
   latestPreviewDataRef.current = previewData;
   const manifest = useMemo(
     () => assembleManifest(project, composition, descriptor),
@@ -242,17 +243,18 @@ export function PreviewExportPanel() {
 
   const applyLatestPreviewData = useCallback(
     async (graphic: HTMLElement & Graphic): Promise<boolean> => {
-      const data = latestPreviewDataRef.current;
-      const signature = JSON.stringify(data);
-      if (lastAttemptedDataSignatureRef.current === signature) return true;
-      const params = { data, skipAnimation: true };
-      const result = await graphic.updateAction(params);
-      appendLog('updateAction', params, result);
-      if (!successful(result)) return false;
-      lastAttemptedDataSignatureRef.current = signature;
-      return true;
+      const updates = previewUpdatesRef.current.get(graphic);
+      if (!updates) return false;
+      while (graphicRef.current === graphic) {
+        const data = latestPreviewDataRef.current;
+        const signature = JSON.stringify(data);
+        if (!(await updates.apply(data, true))) return false;
+        if (graphicRef.current !== graphic) return false;
+        if (signature === JSON.stringify(latestPreviewDataRef.current)) return true;
+      }
+      return false;
     },
-    [appendLog],
+    [],
   );
 
   // Public shader value changes flow through the normal updateAction data path below. Retaining
@@ -271,7 +273,6 @@ export function PreviewExportPanel() {
     setLog([]);
 
     const data = latestPreviewDataRef.current;
-    const dataSignature = JSON.stringify(data);
     const params = {
       data,
       renderType,
@@ -287,7 +288,24 @@ export function PreviewExportPanel() {
         if (graphicRef.current !== el) return;
         appendLog('load', params, result);
         if (!successful(result)) return;
-        lastAttemptedDataSignatureRef.current = dataSignature;
+        previewUpdatesRef.current.set(
+          el,
+          new PreviewDataUpdates(data, async (params) => {
+            try {
+              const result = await el.updateAction(params);
+              if (graphicRef.current !== el) return false;
+              appendLog('updateAction', params, result);
+              return successful(result);
+            } catch (error) {
+              if (graphicRef.current === el)
+                appendLog('updateAction', params, {
+                  statusCode: 550,
+                  statusMessage: error instanceof Error ? error.message : String(error),
+                });
+              return false;
+            }
+          }),
+        );
         setIsPreviewLoaded(true);
       })
       .catch((error) => {
@@ -299,6 +317,7 @@ export function PreviewExportPanel() {
       });
 
     return () => {
+      previewUpdatesRef.current.get(el)?.dispose();
       if (graphicRef.current === el) graphicRef.current = null;
       void el.dispose({});
       el.remove();
@@ -323,17 +342,15 @@ export function PreviewExportPanel() {
 
   useEffect(() => {
     if (!isPreviewLoaded) return;
-    const signature = JSON.stringify(previewData);
-    if (lastAttemptedDataSignatureRef.current === signature) return;
-
+    const graphic = graphicRef.current;
+    const updates = graphic && previewUpdatesRef.current.get(graphic);
+    if (!updates) return;
     const timeout = window.setTimeout(() => {
-      lastAttemptedDataSignatureRef.current = signature;
-      const params = { data: previewData };
-      void call('updateAction', params, (graphic) => graphic.updateAction(params));
+      void updates.apply(previewData);
     }, 150);
 
     return () => window.clearTimeout(timeout);
-  }, [call, isPreviewLoaded, previewData, window]);
+  }, [isPreviewLoaded, previewData, window]);
 
   const handlePlayAction = useCallback(
     (params: { delta?: number; goto?: number }) => {

@@ -37,34 +37,14 @@ export function DataFieldInput({
     );
   }
   if (type === 'number' || type === 'integer' || type === 'duration-ms' || type === 'percentage') {
-    const { minimum, maximum, step } = field.constraints;
-    const numericStep = step ?? (type === 'number' || type === 'percentage' ? 'any' : 1);
-    const input = (
-      <input
-        type="number"
-        aria-label={`${label} value`}
-        min={minimum}
-        max={maximum}
-        step={numericStep}
-        value={value === '' ? '' : Number(value)}
-        onChange={(event) => onChange(event.target.value === '' ? '' : Number(event.target.value))}
+    return (
+      <NumericValueInput
+        key={field.id + ':' + type}
+        field={field}
+        value={value}
+        onChange={onChange}
+        interactive={interactive}
       />
-    );
-    return interactive && minimum !== undefined && maximum !== undefined ? (
-      <div className="data-field-range">
-        <input
-          type="range"
-          aria-label={`${label} slider`}
-          min={minimum}
-          max={maximum}
-          step={numericStep}
-          value={value === '' ? minimum : Number(value)}
-          onChange={(event) => onChange(Number(event.target.value))}
-        />
-        {input}
-      </div>
-    ) : (
-      input
     );
   }
   if (type === 'color') {
@@ -150,6 +130,61 @@ export function DataFieldInput({
       value={String(value)}
       onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
     />
+  );
+}
+
+function NumericValueInput({
+  field,
+  value,
+  onChange,
+  interactive,
+}: {
+  field: FieldDefinition;
+  value: TestValue;
+  onChange: (value: TestValue) => void;
+  interactive: boolean;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const { minimum, maximum, step } = field.constraints;
+  const label = field.label || field.key;
+  const numericStep = step ?? (field.type === 'number' || field.type === 'percentage' ? 'any' : 1);
+  const input = (
+    <input
+      type="number"
+      aria-label={`${label} value`}
+      min={minimum}
+      max={maximum}
+      step={numericStep}
+      value={draft}
+      onChange={(event) => {
+        const next = event.target.value;
+        setDraft(next);
+        // Empty/incomplete input belongs to editing state, never persisted numeric data.
+        if (next.trim() && Number.isFinite(event.target.valueAsNumber))
+          onChange(event.target.valueAsNumber);
+      }}
+      onBlur={() => setDraft(String(value))}
+    />
+  );
+  return interactive && minimum !== undefined && maximum !== undefined ? (
+    <div className="data-field-range">
+      <input
+        type="range"
+        aria-label={`${label} slider`}
+        min={minimum}
+        max={maximum}
+        step={numericStep}
+        value={Number(value)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          onChange(event.target.valueAsNumber);
+        }}
+      />
+      {input}
+    </div>
+  ) : (
+    input
   );
 }
 
