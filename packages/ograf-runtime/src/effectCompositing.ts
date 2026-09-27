@@ -18,12 +18,6 @@ const mounted = new WeakMap<
   { svg: SVGSVGElement; filter: SVGFilterElement; signature: string }
 >();
 let nextFilter = 0;
-const effectTimes = new WeakMap<HTMLElement, number>();
-
-/** Change expression-driven parameters without restarting an effect's playback clock. */
-export function reapplyLayerEffectsFilter(host: HTMLElement, effects: LayerEffects): void {
-  applyLayerEffectsFilter(host, effects, effectTimes.get(host) ?? 0);
-}
 
 /** Definitions live with their layer, including inside the exported graphic's shadow root. */
 export function applyLayerEffectsFilter(
@@ -31,7 +25,6 @@ export function applyLayerEffectsFilter(
   effects: LayerEffects,
   elapsedMs = 0,
 ): void {
-  effectTimes.set(host, elapsedMs);
   let entry = mounted.get(host);
   if (
     getEffectStack(effects).some(

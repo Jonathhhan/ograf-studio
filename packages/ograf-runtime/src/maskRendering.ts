@@ -1,5 +1,3 @@
-import { reapplyLayerEffectsFilter } from './effectCompositing';
-import { applyAnimatedPaint } from './renderElement';
 import {
   layerMaskSvg,
   patternRows,
@@ -43,19 +41,13 @@ export function applyCompiledMasks(
       states.set(layer.id, { ...state, transform: { ...state.transform, width, height } });
   }
   const diagnostics: ExpressionDiagnostic[] | undefined = onDiagnostics ? [] : undefined;
-  const sampledStates = states;
   states = resolveFrameExpressions(descriptor, states, data, diagnostics);
   if (diagnostics) onDiagnostics?.(diagnostics);
   for (const layer of descriptor.layers) {
     const target = elements.get(layer.id);
     const state = states.get(layer.id);
-    if ((layer.expressions || descriptor.scripting?.enabled) && target && state) {
+    if ((layer.expressions || descriptor.scripting?.enabled) && target && state)
       applyCompiledLayerTransform(target, state.transform);
-      if (state.effects !== sampledStates.get(layer.id)?.effects)
-        reapplyLayerEffectsFilter(target, state.effects);
-      if (state.paintTracks !== sampledStates.get(layer.id)?.paintTracks)
-        applyAnimatedPaint(target, state.paintTracks, state.paintFrame);
-    }
   }
   applyCompiledClipPaths(descriptor, elements, states);
   const hasMasks = descriptor.layers.some((layer) => layer.mask);

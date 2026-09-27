@@ -7,11 +7,10 @@ import {
   type ExpressionRect,
 } from './expressions';
 import { scriptModules } from './scriptModules';
-import type { AnimatableLayerProperty, CompositionScripting, Layer, LayerTransform } from './types';
+import type { CompositionScripting, Layer, LayerTransform } from './types';
 
 export { EXPRESSION_PROPERTIES } from './expressions';
-type ExpressionProperty = AnimatableLayerProperty;
-export type ExpressionValues = LayerTransform & Partial<Record<ExpressionProperty, number>>;
+type ExpressionProperty = (typeof EXPRESSION_PROPERTIES)[number];
 
 export interface ExpressionDiagnostic {
   layerId: string;
@@ -25,10 +24,6 @@ export interface ExpressionLayerState {
   name?: string;
   transform: LayerTransform;
   sampleTransform?: (seconds: number) => LayerTransform;
-  /** Sampled numeric targets beyond transforms, using canonical animation property paths. */
-  propertyValues?: Partial<Record<ExpressionProperty, number>>;
-  normalizeProperty?: (property: ExpressionProperty, value: number) => number;
-  sampleProperty?: (property: ExpressionProperty, seconds: number) => number;
   sourceRectAtTime?: (seconds: number, includeExtents: boolean) => ExpressionRect;
   /** Authored identity of a layer expanded into a collection item. */
   prototypeLayerId?: string;
@@ -46,7 +41,7 @@ export function resolveExpressionTransforms(
   diagnostics?: ExpressionDiagnostic[],
   apiVersion = 1,
   scripting?: CompositionScripting,
-): Map<string, ExpressionValues> {
+): Map<string, LayerTransform> {
   let modules: Record<string, object> = Object.create(null);
   try {
     modules = scriptModules(scripting);
@@ -98,37 +93,11 @@ export function resolveExpressionTransforms(
     if (!target) throw new Error('Unknown layer: ' + reference);
     return target;
   };
-  const available = new Map(
-    layers.map((layer) => [
-      layer.id,
-      new Set<ExpressionProperty>([
-        ...EXPRESSION_PROPERTIES,
-        ...(Object.keys(layer.propertyValues ?? {}) as ExpressionProperty[]),
-      ]),
-    ]),
-  );
-  const properties = (layer: ExpressionLayerState): ExpressionProperty[] => [
-    ...available.get(layer.id)!,
-  ];
-  const authored = (layer: ExpressionLayerState, property: ExpressionProperty): number => {
-    const value =
-      layer.propertyValues?.[property] ?? layer.transform[property as keyof LayerTransform];
-    if (
-      !available.get(layer.id)!.has(property) ||
-      typeof value !== 'number' ||
-      !Number.isFinite(value)
-    )
-      throw new Error('Unavailable numeric layer property: ' + property);
-    return value;
-  };
   const metadata = (layer: ExpressionLayerState) => ({ id: layer.id, name: layer.name ?? '' });
   const sampling = (layer: ExpressionLayerState): ExpressionLayerSampling => ({
     valueAtTime: (property, seconds) => {
-      authored(layer, property as ExpressionProperty);
-      if (layer.sampleProperty)
-        return layer.sampleProperty(property as ExpressionProperty, seconds);
       if (!layer.sampleTransform) throw new Error('Time sampling is unavailable for this layer.');
-      return layer.sampleTransform(seconds)[property as keyof LayerTransform];
+      return layer.sampleTransform(seconds)[property as ExpressionProperty];
     },
     sourceRectAtTime: (seconds, includeExtents) => {
       if (!layer.sourceRectAtTime)
@@ -141,9 +110,9 @@ export function resolveExpressionTransforms(
     if (values.has(key)) return values.get(key)!;
     if (failures.has(key)) throw failures.get(key);
     const layer = byId.get(id)!;
-    const baseValue = authored(layer, property);
     const expression = layer.expressions?.[property];
-    if (!expression?.trim() || layer.expressionsEnabled?.[property] === false) return baseValue;
+    if (!expression?.trim() || layer.expressionsEnabled?.[property] === false)
+      return layer.transform[property];
     if (visiting.has(key)) {
       const path = [...visiting, key];
       const start = path.indexOf(key);
@@ -168,7 +137,7 @@ export function resolveExpressionTransforms(
           Object.defineProperty(context, name, { value, configurable: true, enumerable: true });
         contexts.set(id, context);
       }
-      const evaluated = evaluateExpression(
+      const value = evaluateExpression(
         expression,
         context,
         (name, property) => resolve(findLayer(layer, name).id, property as ExpressionProperty),
@@ -178,18 +147,13 @@ export function resolveExpressionTransforms(
           expressionSources: layer.expressions!,
           currentLayer: metadata(layer),
           currentSampling: sampling(layer),
-          currentProperties: properties(layer),
-          currentValues: layer.propertyValues ?? {},
-          resolveLayerProperties: (reference, byId) =>
-            properties(findLayer(layer, reference, byId)),
           resolveLayerSampling: (reference, byId) => sampling(findLayer(layer, reference, byId)),
-          currentProperty: { name: property, value: baseValue, layerId: layer.id },
+          currentProperty: { name: property, value: layer.transform[property], layerId: layer.id },
           resolveLayerMetadata: (reference, byId) => metadata(findLayer(layer, reference, byId)),
           resolveLayerById: (targetId, targetProperty) =>
             resolve(findLayer(layer, targetId, true).id, targetProperty as ExpressionProperty),
         },
       );
-      const value = layer.normalizeProperty?.(property, evaluated) ?? evaluated;
       values.set(key, value);
       return value;
     } catch (error) {
@@ -201,11 +165,8 @@ export function resolveExpressionTransforms(
   };
   const result = new Map(
     layers.map((layer) => {
-      const transform: ExpressionValues = { ...layer.transform, ...layer.propertyValues };
-      for (const property of new Set([
-        ...properties(layer),
-        ...(Object.keys(layer.expressions ?? {}) as ExpressionProperty[]),
-      ])) {
+      const transform = { ...layer.transform };
+      for (const property of EXPRESSION_PROPERTIES) {
         try {
           transform[property] = resolve(layer.id, property);
         } catch (error) {
@@ -250,26 +211,16 @@ export function resolveExpressionTransforms(
       throw new Error('Layer writes are only valid during the synchronous composition script.');
     if (typeof value !== 'number' || !Number.isFinite(value))
       throw new Error(property + ' must be a finite number.');
-    const target = find(name, byIdentity);
-    const id = byIdentity ? name : names.get(name)!;
-    const layer = byId.get(id)!;
-    authored(layer, property as ExpressionProperty);
-    target[property as ExpressionProperty] =
-      layer.normalizeProperty?.(property as ExpressionProperty, value) ?? value;
+    find(name, byIdentity)[property as ExpressionProperty] = value;
   };
   try {
     evaluateCompositionScript(
       scripting.source,
       scope,
-      (name, property) => find(name)[property as ExpressionProperty]!,
+      (name, property) => find(name)[property as ExpressionProperty],
       {
         apiVersion,
         modules,
-        resolveLayerProperties: (reference, byIdentity) => {
-          find(reference, byIdentity);
-          const id = byIdentity ? reference : names.get(reference)!;
-          return properties(byId.get(id!)!);
-        },
         resolveLayerSampling: (reference, byIdentity) => {
           find(reference, byIdentity);
           const id = byIdentity ? reference : names.get(reference)!;
@@ -280,7 +231,7 @@ export function resolveExpressionTransforms(
           const id = byIdentity ? reference : names.get(reference)!;
           return metadata(byId.get(id!)!);
         },
-        resolveLayerById: (id, property) => find(id, true)[property as ExpressionProperty]!,
+        resolveLayerById: (id, property) => find(id, true)[property as ExpressionProperty],
         writeLayer: (name, property, value) => write(name, property, value),
         writeLayerById: (id, property, value) => write(id, property, value, true),
       },

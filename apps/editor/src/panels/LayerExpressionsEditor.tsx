@@ -2,16 +2,15 @@ import { runDiscreteHistoryStep } from '../state/historyStore';
 import { useState } from 'react';
 import {
   expressionSyntaxError,
-  getLayerExpressionProperties,
+  EXPRESSION_PROPERTIES,
   animatablePropertyLabel,
-  expressionPropertyGroup,
-  EXPRESSION_GROUPS,
-  type AnimatableLayerProperty,
 } from '@ograf-editor/scene-model';
 import { JavaScriptEditor } from '../components/JavaScriptEditor';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useSelectionStore } from '../state/selectionStore';
 import { useExpressionDiagnosticsStore } from '../state/expressionDiagnosticsStore';
+
+type ExpressionProperty = (typeof EXPRESSION_PROPERTIES)[number];
 
 export function LayerExpressionsEditor() {
   const composition = useActiveComposition();
@@ -22,12 +21,9 @@ export function LayerExpressionsEditor() {
   const setLayerExpressionEnabled = useProjectStore((s) => s.setLayerExpressionEnabled);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   if (!layer || layer.isGuide) return <p>Select a layer to edit its expressions.</p>;
-  const supported = getLayerExpressionProperties(layer);
-  const authored = Object.keys(layer.expressions ?? {}) as AnimatableLayerProperty[];
-  const ordered = [
-    ...supported.filter((key) => authored.includes(key)),
-    ...authored.filter((key) => !supported.includes(key)),
-  ];
+  const supported = [...EXPRESSION_PROPERTIES];
+  const authored = Object.keys(layer.expressions ?? {}) as ExpressionProperty[];
+  const ordered = supported.filter((key) => authored.includes(key));
   const available = supported.filter((key) => !authored.includes(key));
   return (
     <section className="scripts-expressions">
@@ -37,7 +33,7 @@ export function LayerExpressionsEditor() {
         value=""
         disabled={layer.isLocked || !available.length}
         onChange={(event) => {
-          const key = event.target.value as AnimatableLayerProperty;
+          const key = event.target.value as ExpressionProperty;
           if (!available.includes(key)) return;
           runDiscreteHistoryStep(
             () => updateLayerExpressions(layer.id, { ...layer.expressions, [key]: '' }),
@@ -47,115 +43,92 @@ export function LayerExpressionsEditor() {
         }}
       >
         <option value="">Add expression...</option>
-        {EXPRESSION_GROUPS.filter((group) =>
-          available.some((key) => expressionPropertyGroup(key) === group),
-        ).map((group) => (
-          <optgroup key={group} label={group}>
-            {available
-              .filter((key) => expressionPropertyGroup(key) === group)
-              .map((key) => (
-                <option key={key} value={key}>
-                  {animatablePropertyLabel(key, layer)}
-                </option>
-              ))}
-          </optgroup>
+        {available.map((key) => (
+          <option key={key} value={key}>
+            {animatablePropertyLabel(key, layer)}
+          </option>
         ))}
       </select>
       {!ordered.length && <p>No expressions added.</p>}
-      {EXPRESSION_GROUPS.map((group) => {
-        const fields = ordered.filter((key) => expressionPropertyGroup(key) === group);
-        if (!fields.length) return null;
+      {ordered.map((key) => {
+        const label = animatablePropertyLabel(key, layer);
+        const source = layer.expressions?.[key] ?? '';
+        const runtimeError =
+          expressionDiagnostics.compositionId === composition.id &&
+          layer.expressionsEnabled?.[key] !== false
+            ? expressionDiagnostics.diagnostics.find(
+                (entry) =>
+                  entry.layerId === layer.id && entry.property === key && entry.source === source,
+              )?.message
+            : undefined;
+        const error = expressionSyntaxError(source) ?? runtimeError;
+        const identity = `${layer.id}:${key}`;
+        const bodyId = `expression-body-${identity}`;
+        const errorId = `expression-error-${identity}`;
+        const open = expanded[identity] ?? false;
         return (
-          <section key={group} className="scripts-expression-group">
-            <h4>{group}</h4>
-            {fields.map((key) => {
-              const label = animatablePropertyLabel(key, layer);
-              const source = layer.expressions?.[key] ?? '';
-              const runtimeError =
-                expressionDiagnostics.compositionId === composition.id &&
-                layer.expressionsEnabled?.[key] !== false
-                  ? expressionDiagnostics.diagnostics.find(
-                      (entry) =>
-                        entry.layerId === layer.id &&
-                        entry.property === key &&
-                        entry.source === source,
-                    )?.message
-                  : undefined;
-              const error = !supported.includes(key)
-                ? 'This property is no longer available on this layer.'
-                : (expressionSyntaxError(source) ?? runtimeError);
-              const identity = `${layer.id}:${key}`;
-              const bodyId = `expression-body-${identity}`;
-              const errorId = `expression-error-${identity}`;
-              const open = expanded[identity] ?? false;
-              return (
-                <section key={identity} className="scripts-expression-row">
-                  <div className="scripts-expression-header">
-                    <input
-                      type="checkbox"
-                      aria-label={`${label} expression enabled`}
-                      checked={layer.expressionsEnabled?.[key] !== false}
-                      disabled={layer.isLocked}
-                      onChange={(event) =>
-                        setLayerExpressionEnabled(layer.id, key, event.target.checked)
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="scripts-expression-disclosure"
-                      aria-expanded={open}
-                      aria-controls={bodyId}
-                      onClick={() => setExpanded((current) => ({ ...current, [identity]: !open }))}
-                    >
-                      {open ? '\u25be' : '\u25b8'} {label}
-                      {error ? ' (error)' : ''}
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${label} expression`}
-                      disabled={layer.isLocked}
-                      onClick={() => {
-                        const expressions = { ...layer.expressions };
-                        delete expressions[key];
-                        runDiscreteHistoryStep(
-                          () =>
-                            updateLayerExpressions(
-                              layer.id,
-                              Object.keys(expressions).length ? expressions : undefined,
-                            ),
-                          'Remove expression',
-                        );
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                  <div id={bodyId} className="scripts-expression-value" hidden={!open}>
-                    {open && (
-                      <JavaScriptEditor
-                        invalid={Boolean(error)}
-                        describedBy={error ? errorId : undefined}
-                        label={`${label} expression`}
-                        placeholder="Use authored value"
-                        value={source}
-                        readOnly={layer.isLocked}
-                        onChange={(expression) =>
-                          updateLayerExpressions(layer.id, {
-                            ...layer.expressions,
-                            [key]: expression,
-                          })
-                        }
-                      />
-                    )}
-                    {error && (
-                      <p id={errorId} className="inspector-error">
-                        {error}
-                      </p>
-                    )}
-                  </div>
-                </section>
-              );
-            })}
+          <section key={identity} className="scripts-expression-row">
+            <div className="scripts-expression-header">
+              <input
+                type="checkbox"
+                aria-label={`${label} expression enabled`}
+                checked={layer.expressionsEnabled?.[key] !== false}
+                disabled={layer.isLocked}
+                onChange={(event) => setLayerExpressionEnabled(layer.id, key, event.target.checked)}
+              />
+              <button
+                type="button"
+                className="scripts-expression-disclosure"
+                aria-expanded={open}
+                aria-controls={bodyId}
+                onClick={() => setExpanded((current) => ({ ...current, [identity]: !open }))}
+              >
+                {open ? '\u25be' : '\u25b8'} {label}
+                {error ? ' (error)' : ''}
+              </button>
+              <button
+                type="button"
+                aria-label={`Remove ${label} expression`}
+                disabled={layer.isLocked}
+                onClick={() => {
+                  const expressions = { ...layer.expressions };
+                  delete expressions[key];
+                  runDiscreteHistoryStep(
+                    () =>
+                      updateLayerExpressions(
+                        layer.id,
+                        Object.keys(expressions).length ? expressions : undefined,
+                      ),
+                    'Remove expression',
+                  );
+                }}
+              >
+                Remove
+              </button>
+            </div>
+            <div id={bodyId} className="scripts-expression-value" hidden={!open}>
+              {open && (
+                <JavaScriptEditor
+                  invalid={Boolean(error)}
+                  describedBy={error ? errorId : undefined}
+                  label={`${label} expression`}
+                  placeholder="Use authored value"
+                  value={source}
+                  readOnly={layer.isLocked}
+                  onChange={(expression) =>
+                    updateLayerExpressions(layer.id, {
+                      ...layer.expressions,
+                      [key]: expression,
+                    })
+                  }
+                />
+              )}
+              {error && (
+                <p id={errorId} className="inspector-error">
+                  {error}
+                </p>
+              )}
+            </div>
           </section>
         );
       })}

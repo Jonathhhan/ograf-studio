@@ -126,6 +126,3 @@
 .scripts-expression-value:not([hidden]) {
   margin-top: 8px;
 }
-.scripts-expression-group h4 {
-  margin: 12px 0 6px;
-}

@@ -265,11 +265,11 @@ it('retains empty expression editors and removes stale enable flags atomically',
   const id = store.addLayer('text');
   const layer = () =>
     useProjectStore.getState().project.compositions[0]!.layers.find((item) => item.id === id)!;
-  store.updateLayerExpressions(id, { strokeWidth: '' });
-  store.setLayerExpressionEnabled(id, 'strokeWidth', false);
-  expect(layer().expressions).toEqual({ strokeWidth: '' });
+  store.updateLayerExpressions(id, { x: '' });
+  store.setLayerExpressionEnabled(id, 'x', false);
+  expect(layer().expressions).toEqual({ x: '' });
   store.updateLayerExpressions(id, undefined);
   expect(layer().expressionsEnabled).toBeUndefined();
-  store.updateLayerExpressions(id, { strokeWidth: '' });
-  expect(layer().expressionsEnabled?.strokeWidth).not.toBe(false);
+  store.updateLayerExpressions(id, { x: '' });
+  expect(layer().expressionsEnabled?.x).not.toBe(false);
 });
