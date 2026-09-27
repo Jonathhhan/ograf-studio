@@ -4,9 +4,12 @@ import type { EasingPreset, KeyframeRole } from './types';
 export type ExpressionScope = Record<string, number | string>;
 export type ExpressionLayerResolver = (name: string, property: string) => number;
 export const EXPRESSION_API_VERSION = 1;
+export const EXPRESSION_PROPERTIES = ['x', 'y', 'width', 'height', 'rotation', 'opacity'] as const;
 export interface ExpressionEvaluationOptions {
   apiVersion?: number;
   resolveLayerById?: ExpressionLayerResolver;
+  /** Constant-time membership check; must not evaluate a layer property. */
+  hasLayer?: (name: string) => boolean;
 }
 type CompiledExpression = (
   scope: ExpressionScope,
@@ -79,16 +82,28 @@ function helper(name: 'lerp' | 'clamp' | 'ease', ...args: unknown[]): number {
   return a + (b - a) * progress;
 }
 
+/** Enumerable getters support normal object operations without eagerly resolving dependencies. */
+function layerReference(resolve: (property: string) => number): Record<string, number> {
+  const target = Object.create(null);
+  for (const property of EXPRESSION_PROPERTIES)
+    Object.defineProperty(target, property, { enumerable: true, get: () => resolve(property) });
+  return target;
+}
+
 /** Preserve lazy getters: copying their values would eagerly evaluate unrelated dependencies. */
 function evaluationScope(
   scope: ExpressionScope,
   resolveLayer?: ExpressionLayerResolver,
   options: ExpressionEvaluationOptions = {},
 ) {
-  const context = Object.create(null);
+  const context = Object.assign(Object.create(null), {
+    data: Object.create(null),
+    comp: Object.create(null),
+    timeline: Object.create(null),
+  });
   const thisLayer = Object.create(null);
   for (const key of Object.getOwnPropertyNames(scope)) {
-    const descriptor = Object.getOwnPropertyDescriptor(scope, key)!;
+    const descriptor = { ...Object.getOwnPropertyDescriptor(scope, key)!, enumerable: true };
     const dot = key.lastIndexOf('.');
     if (dot < 0) {
       Object.defineProperty(context, key, descriptor);
@@ -102,28 +117,40 @@ function evaluationScope(
   Object.assign(context, {
     thisLayer,
     layerById: (id: string) =>
-      new Proxy(Object.create(null), {
-        get: (_target, property) => {
-          if (typeof property !== 'string') return undefined;
-          if (!options.resolveLayerById) throw new Error('Layer ID lookup is unavailable.');
-          return options.resolveLayerById(id, property);
-        },
+      layerReference((property) => {
+        if (!options.resolveLayerById) throw new Error('Layer ID lookup is unavailable.');
+        return options.resolveLayerById(id, property);
       }),
     layer: (name: string) =>
-      new Proxy(Object.create(null), {
-        get: (_target, property) => {
-          if (typeof property !== 'string') return undefined;
-          if (resolveLayer) return resolveLayer(name, property);
-          const key = name + '.' + property;
-          if (!Object.hasOwn(scope, key)) throw new Error('Unknown layer property "' + key + '".');
-          return scope[key];
-        },
+      layerReference((property) => {
+        if (resolveLayer) return resolveLayer(name, property);
+        const key = name + '.' + property;
+        if (!Object.hasOwn(scope, key)) throw new Error('Unknown layer property "' + key + '".');
+        return numeric(scope[key]);
       }),
     lerp: (...args: unknown[]) => helper('lerp', ...args),
     clamp: (...args: unknown[]) => helper('clamp', ...args),
     ease: (...args: unknown[]) => helper('ease', ...args),
   });
-  return context;
+  if (!options.hasLayer || !resolveLayer) return context;
+  const aliases = new Map<string, object>();
+  const isAlias = (name: PropertyKey): name is string =>
+    typeof name === 'string' &&
+    !Object.hasOwn(context, name) &&
+    !Object.hasOwn(globalThis, name) &&
+    options.hasLayer!(name);
+  return new Proxy(context, {
+    has: (target, name) => Reflect.has(target, name) || isAlias(name),
+    get: (target, name, receiver) => {
+      if (!isAlias(name)) return Reflect.get(target, name, receiver);
+      let reference = aliases.get(name);
+      if (!reference) {
+        reference = layerReference((property) => resolveLayer(name, property));
+        aliases.set(name, reference);
+      }
+      return reference;
+    },
+  });
 }
 
 /** Trusted project JavaScript, compiled by the host engine; this is not a sandbox. */

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   evaluateExpression,
   expressionDataScope,
@@ -68,6 +68,34 @@ describe('expressionTimelineScope', () => {
 });
 
 describe('evaluateExpression', () => {
+  it('enumerates reference keys without evaluating them and resolves only accessed properties', () => {
+    const resolve = vi.fn((_name: string, property: string) => (property === 'width' ? 42 : 1));
+    expect(evaluateExpression('Object.keys(layer("A")).length', {}, resolve)).toBe(6);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(evaluateExpression('layer("A").width', {}, resolve)).toBe(42);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    resolve.mockClear();
+    expect(
+      evaluateExpression('({...layerById("a")}).width', {}, undefined, {
+        resolveLayerById: resolve,
+      }),
+    ).toBe(42);
+    expect(resolve).toHaveBeenCalledTimes(6);
+  });
+
+  it('does not perform alias lookup until a script references a name', () => {
+    const hasLayer = vi.fn((name: string) => name === 'Box');
+    const resolve = vi.fn(() => 12);
+    expect(evaluateExpression('x + Math.max(1, 2)', { x: 3 }, resolve, { hasLayer })).toBe(5);
+    expect(hasLayer).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(evaluateExpression('Box.width + Box.height', {}, resolve, { hasLayer })).toBe(24);
+    expect(resolve.mock.calls).toEqual([
+      ['Box', 'width'],
+      ['Box', 'height'],
+    ]);
+  });
+
   it('supports native JavaScript functions, loops, arrays, objects and Math', () => {
     expect(
       evaluateExpression(

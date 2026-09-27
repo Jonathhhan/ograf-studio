@@ -44,6 +44,13 @@ Local variables and helper context are recreated for every evaluation. The API i
 return a finite number, never a Promise. External side effects are possible but are not part of
 the playback contract. Use pure calculations from supplied values for repeatable seeking.
 
+API objects expose enumerable properties: spread, `Object.keys`, `Object.values` and JSON
+serialization work for `data`, `thisLayer`, `comp`, `timeline`, and layer references.
+Listing a layer's keys does not evaluate its properties. Copying or serializing its values
+resolves those properties and therefore participates in dependency checks. Copying the current
+computed layer while evaluating one of its properties can create a cycle; use `thisLayer` for
+sampled values instead. Bare layer aliases are looked up lazily.
+
 ### Editing
 
 Expression fields use a monospace font. Tab indents, Shift+Tab outdents selected lines,

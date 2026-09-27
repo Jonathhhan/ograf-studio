@@ -1,7 +1,7 @@
-import { evaluateExpression, type ExpressionScope } from './expressions';
+import { evaluateExpression, EXPRESSION_PROPERTIES, type ExpressionScope } from './expressions';
 import type { Layer, LayerTransform } from './types';
 
-export const EXPRESSION_PROPERTIES = ['x', 'y', 'width', 'height', 'rotation', 'opacity'] as const;
+export { EXPRESSION_PROPERTIES } from './expressions';
 type ExpressionProperty = (typeof EXPRESSION_PROPERTIES)[number];
 
 export interface ExpressionDiagnostic {
@@ -82,43 +82,18 @@ export function resolveExpressionTransforms(
     if (visiting.size >= 128) throw new Error('Expression dependency chain is too deep.');
     visiting.add(key);
     try {
-      // Bare layer aliases must not shadow API values or native JavaScript globals.
-      const suppliedValues = { ...scope, ...layer.scope, ...layer.transform };
-      const reservedNames = new Set([
-        'data',
-        'comp',
-        'timeline',
-        'thisLayer',
-        'layer',
-        'layerById',
-        'lerp',
-        'clamp',
-        'ease',
-        ...Object.keys(suppliedValues).map((name) => name.split('.')[0]!),
-      ]);
-      const references: PropertyDescriptorMap = Object.create(null);
+      const context = Object.create(null) as ExpressionScope;
+      for (const [name, value] of Object.entries({ ...scope, ...layer.scope, ...layer.transform }))
+        Object.defineProperty(context, name, { value, configurable: true, enumerable: true });
       const local =
         layer.referenceScope === undefined ? undefined : byScope.get(layer.referenceScope);
-      for (const name of new Set([...byName.keys(), ...(local?.keys() ?? [])])) {
-        if (reservedNames.has(name) || Object.hasOwn(globalThis, name)) continue;
-        for (const property of EXPRESSION_PROPERTIES) {
-          references[name + '.' + property] = {
-            configurable: true,
-            get: () => resolveLayer(layer, name, property),
-          };
-        }
-      }
-      const context = Object.create(null, references) as ExpressionScope;
-      // Define instead of assigning so a layer named "data" cannot intercept data.x, for example.
-      for (const [name, value] of Object.entries(suppliedValues)) {
-        Object.defineProperty(context, name, { value, configurable: true });
-      }
       const value = evaluateExpression(
         expression,
         context,
         (name, property) => resolveLayer(layer, name, property),
         {
           apiVersion,
+          hasLayer: (name) => Boolean(local?.has(name) || byName.has(name)),
           resolveLayerById: (targetId, targetProperty) => {
             const target =
               referenceIds.get(layer.referenceScope)?.get(targetId) ??

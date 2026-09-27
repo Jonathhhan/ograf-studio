@@ -27,6 +27,45 @@ function layer(
 }
 
 describe('resolveExpressionTransforms', () => {
+  it('supports spread, Object.keys and JSON serialization for supplied API values', () => {
+    const target = layer('Target', {
+      x: '({...data}).padding + Object.keys(data).length',
+      y: 'JSON.parse(JSON.stringify(thisLayer)).y',
+      width: 'Object.values(comp).reduce((sum, value) => sum + value, 0)',
+      height: 'Object.keys(timeline).length',
+    });
+    const diagnostics: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms(
+      [target],
+      {
+        'data.padding': 15,
+        'comp.width': 1920,
+        'comp.height': 1080,
+        'timeline.startFrame': 0,
+      },
+      diagnostics,
+    );
+    expect(result.get('Target')).toMatchObject({ x: 16, y: 20, width: 3000, height: 1 });
+    expect(diagnostics).toEqual([]);
+  });
+
+  it('copies computed layer values through names, IDs and lazy bare aliases', () => {
+    const source = layer('Source', { width: '200' });
+    const target = layer('Target', {
+      x: '({...layer("Source")}).width',
+      y: '({...layerById("Source")}).width',
+      width: 'JSON.parse(JSON.stringify(Source)).width',
+    });
+    // Enumerating keys must not create a dependency on Broken.x.
+    const broken = layer('Broken', { x: 'layer("Missing").x' });
+    target.expressions!.height = 'Object.keys(Broken).length';
+    const diagnostics: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms([target, source, broken], {}, diagnostics);
+    expect(result.get('Target')).toMatchObject({ x: 200, y: 200, width: 200, height: 6 });
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]!.layerId).toBe('Broken');
+  });
+
   it('treats indentation-only drafts as empty expressions', () => {
     const diagnostics: ExpressionDiagnostic[] = [];
     const result = resolveExpressionTransforms([layer('Draft', { x: '  \n  ' })], {}, diagnostics);
