@@ -58,6 +58,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
       setSelected(-1);
     }
   }
+  const hasCodeChanges = draft.source !== saved.source || draft.modules !== saved.modules;
   const file = draft.modules[selected];
   let syntaxError = compositionScriptSyntaxError(draft.source);
   const names = new Set<string>();
@@ -110,14 +111,14 @@ function ScriptEditor({ composition }: { composition: Composition }) {
       <div className="scripts-toolbar">
         <button
           type="button"
-          disabled={draft === saved || !!syntaxError}
-          onClick={() => update({ scripting: draft })}
+          disabled={!hasCodeChanges || !!syntaxError}
+          onClick={() => update({ scripting: { ...draft, enabled: saved.enabled } })}
         >
           Apply
         </button>
         <button
           type="button"
-          disabled={draft === saved}
+          disabled={!hasCodeChanges}
           onClick={() => {
             setDraft(saved);
             setSelected(-1);
@@ -126,18 +127,13 @@ function ScriptEditor({ composition }: { composition: Composition }) {
         >
           Revert
         </button>
-        {saved.enabled && (
-          <button type="button" onClick={() => update({ scripting: { ...saved, enabled: false } })}>
-            Disable running script
-          </button>
-        )}
         <label>
           <input
             type="checkbox"
-            checked={draft.enabled}
-            onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })}
+            checked={saved.enabled}
+            onChange={(event) => update({ scripting: { ...saved, enabled: event.target.checked } })}
           />
-          Run composition script
+          Composition script enabled
         </label>
       </div>
       <label className="scripts-file-select">
@@ -229,7 +225,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           {syntaxError}
         </p>
       )}
-      {draft === saved &&
+      {!hasCodeChanges &&
         runtimeErrors.map((message) => (
           <p role="alert" className="inspector-error" key={message}>
             {message}

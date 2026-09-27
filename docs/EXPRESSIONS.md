@@ -23,9 +23,10 @@ Layer dependencies resolve lazily, independently of layer order. Circular depend
 
 ## Composition script and shared files
 
-Open **Scripts**, select **Composition (each frame)**, and enable **Run composition script**.
-**Apply** commits the draft; **Revert** restores the applied code. **Disable running script**
-stops the applied script immediately, even if the draft has errors, and preserves draft source. Scripts run after property
+Open **Scripts > Composition & modules** and select **Composition (each frame)**.
+**Composition script enabled** turns the applied script on or off immediately, even when the
+draft contains errors. It preserves unapplied edits. **Apply** commits code edits;
+**Revert** restores the applied code. Scripts run after property
 expressions, so their assignments win for that frame:
 
 ```js
