@@ -570,7 +570,11 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     if (!shadow) return;
     const descriptor = this.descriptor;
     this.#documentFontsReady = registerDocumentFonts(this.ownerDocument, descriptor.fonts ?? []);
-    this.#renderDescriptor = expandRuntimeCollections(descriptor);
+    // Source/factories may be shared, but initialized module state belongs to this load.
+    this.#renderDescriptor = expandRuntimeCollections({
+      ...descriptor,
+      ...(descriptor.scripting ? { scripting: structuredClone(descriptor.scripting) } : {}),
+    });
     const renderDescriptor = this.activeDescriptor;
     for (const element of this.#layerEls.values()) disposeElementContent(element);
     shadow.replaceChildren();

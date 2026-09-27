@@ -24,7 +24,8 @@ Layer dependencies resolve lazily, independently of layer order. Circular depend
 ## Composition script and shared files
 
 Open **Scripts**, select **Composition (each frame)**, and enable **Run composition script**.
-**Apply** commits the draft; **Revert** restores the applied code. Scripts run after property
+**Apply** commits the draft; **Revert** restores the applied code. **Disable running script**
+stops the applied script immediately, even if the draft has errors, and preserves draft source. Scripts run after property
 expressions, so their assignments win for that frame:
 
 ```js
@@ -47,6 +48,20 @@ export function spacing(index, gap) {
 ```
 
 Both property expressions and the composition script can call `helpers.spacing(3, 100)`.
+Module functions receive frame data and layer references through arguments; they do not inherit
+`layer`, `frame`, or `data` from their caller. For example:
+
+```js
+// helpers.js
+export function move(target, offset) {
+  target.x += offset;
+}
+// Composition script
+helpers.move(layer('Title'), data.offset);
+```
+
+References passed by property expressions remain read-only. Use pure functions for expressions;
+perform layer assignments from the composition script.
 Included files can import and re-export each other with explicit relative paths:
 
 ```js
@@ -58,8 +73,8 @@ The filename's basename is its namespace, also available as `modules.helpers`. F
 use a JavaScript identifier followed by `.js` or `.mjs`, and cannot conflict with API/global
 names. The file list is flat; directory, npm and network imports, import cycles, and top-level
 await are unsupported. `import` statements belong in module files; script bodies use namespaces.
-Modules initialize on first use and retain state until the applied scripting configuration
-changes or the project reloads. Prefer pure functions so seeking remains repeatable.
+Modules initialize on first use. Playback instances keep their own module state until the next
+load; SVG snapshots start with fresh modules. Applying new scripting settings also resets state. Prefer pure functions so seeking remains repeatable.
 
 ## API
 

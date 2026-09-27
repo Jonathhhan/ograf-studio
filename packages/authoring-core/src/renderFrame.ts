@@ -145,6 +145,7 @@ function layerSvg(
   composition: Composition,
   data: Record<string, FieldValue>,
   options: {
+    transform?: LayerTransform;
     itemValue?: FieldValue;
     collectionFieldId?: string;
     offsetX?: number;
@@ -153,9 +154,11 @@ function layerSvg(
   } = {},
 ): string {
   if (!layer.isVisible || layer.isGuide || layer.isMaskOnly) return '';
-  const transform = { ...getLayerTransformAtFrame(layer, frame) };
-  transform.x += options.offsetX ?? 0;
-  transform.y += options.offsetY ?? 0;
+  const transform = { ...(options.transform ?? getLayerTransformAtFrame(layer, frame)) };
+  if (!options.transform) {
+    transform.x += options.offsetX ?? 0;
+    transform.y += options.offsetY ?? 0;
+  }
   let effects = getLayerEffectsAtFrame(layer, frame);
   for (const binding of layer.bindings) {
     if (
@@ -363,18 +366,33 @@ export function renderCompositionFrameSvg(
     ),
   };
   const expressionTransforms = resolveExpressionTransforms(
-    composition.layers.map((layer) => ({
-      ...layer,
-      transform: getLayerTransformAtFrame(layer, normalizedFrame),
-    })),
+    composition.layers.flatMap((layer) => {
+      const collection = composition.runtimeCollections.find((entry) =>
+        entry.prototypeLayerIds.includes(layer.id),
+      );
+      const transform = getLayerTransformAtFrame(layer, normalizedFrame);
+      if (!collection) return [{ ...layer, transform }];
+      return Array.from({ length: collection.capacity }, (_, index) => ({
+        ...layer,
+        id: `${collection.id}::${index}::${layer.id}`,
+        prototypeLayerId: layer.id,
+        referenceScope: JSON.stringify([collection.id, index]),
+        transform: {
+          ...transform,
+          x: transform.x + collection.offsetPerItem.x * index,
+          y: transform.y + collection.offsetPerItem.y * index,
+        },
+      }));
+    }),
     expressionScope,
     undefined,
     composition.expressionApiVersion,
-    composition.scripting,
+    composition.scripting ? structuredClone(composition.scripting) : undefined,
   );
   composition.layers = composition.layers.map((candidate) => {
     if (!candidate.expressions && !composition.scripting?.enabled) return candidate;
-    const transform = expressionTransforms.get(candidate.id)!;
+    const transform = expressionTransforms.get(candidate.id);
+    if (!transform) return candidate;
     const animationTracks = { ...candidate.animationTracks };
     for (const property of EXPRESSION_PROPERTIES) {
       if (
@@ -421,6 +439,7 @@ export function renderCompositionFrameSvg(
               const prototype = composition.layers.find((candidate) => candidate.id === layerId);
               return prototype
                 ? layerSvg(prototype, normalizedFrame, composition.frameRate, composition, data, {
+                    transform: expressionTransforms.get(`${collection.id}::${index}::${layerId}`)!,
                     itemValue,
                     collectionFieldId: collection.fieldId,
                     offsetX: collection.offsetPerItem.x * index,

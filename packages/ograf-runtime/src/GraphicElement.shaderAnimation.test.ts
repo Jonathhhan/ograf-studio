@@ -151,6 +151,39 @@ beforeEach(() => {
 });
 
 describe('scheduled shader lifecycle replay', () => {
+  it('isolates module state between instances of the same graphic and resets it on reload', async () => {
+    class Graphic extends GraphicElement {
+      static descriptor = descriptor();
+    }
+    Graphic.descriptor.scripting = {
+      enabled: true,
+      source: 'layerById("shader").x = counter.next();',
+      modules: [{ fileName: 'counter.js', source: 'let n = 0; export const next = () => ++n;' }],
+    };
+    const a = new Graphic(),
+      b = new Graphic();
+    const load = async (graphic: Graphic) => {
+      graphic.connectedCallback();
+      await graphic.load({
+        renderType: 'non-realtime',
+        renderCharacteristics: { resolution: { width: 640, height: 360 }, frameRate: 10 },
+      });
+      return vi.mocked(applyCompiledMasks).mock.calls.at(-1)!;
+    };
+    const first = await load(a);
+    const second = await load(b);
+    const evaluate = (call: typeof first) =>
+      resolveFrameExpressions(call[0], call[2], call[3]).get('shader')!.transform.x;
+    expect(first[0].scripting).not.toBe(second[0].scripting);
+    expect(evaluate(first)).toBe(1);
+    expect(evaluate(first)).toBe(2);
+    expect(evaluate(second)).toBe(1);
+    await a.dispose();
+    expect(evaluate(await load(a))).toBe(1);
+    await a.dispose();
+    await b.dispose();
+  });
+
   it('keeps composition-frame semantics when stopAction exits from an earlier Step', async () => {
     class Graphic extends GraphicElement {
       static descriptor = descriptor();

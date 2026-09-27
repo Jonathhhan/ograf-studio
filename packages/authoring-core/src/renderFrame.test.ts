@@ -11,6 +11,59 @@ import {
 import { renderCompositionFrameSvg } from './renderFrame';
 
 describe('renderCompositionFrameSvg', () => {
+  it('evaluates collection expressions after item offsets and scopes sibling references', () => {
+    const project = createProject();
+    const comp = project.compositions[0]!;
+    const a = createLayerOfKind('rectangle');
+    const b = createLayerOfKind('rectangle');
+    a.name = 'A';
+    b.name = 'B';
+    for (const layer of [a, b])
+      layer.keyframes = [
+        createLayerKeyframe(0, createDefaultTransform({ x: 10, y: 0, opacity: 1 })),
+      ];
+    a.expressions = { x: 'thisLayer.x * 2' };
+    b.expressions = { x: 'layer("A").x + 5' };
+    comp.layers = [a, b];
+    const field = createFieldDefinition('array', { key: 'rows', defaultValue: [{}, {}] });
+    comp.dataFields = [field];
+    comp.runtimeCollections = [
+      {
+        id: 'rows',
+        name: 'Rows',
+        fieldId: field.id,
+        prototypeLayerIds: [a.id, b.id],
+        offsetPerItem: { x: 100, y: 0 },
+        capacity: 2,
+        overflow: 'truncate',
+      },
+    ];
+    const svg = renderCompositionFrameSvg(project, comp.id).svg;
+    for (const x of [20, 25, 220, 225]) expect(svg).toContain(`translate(${x} 0)`);
+    comp.scripting = {
+      enabled: true,
+      modules: [],
+      source: `layerById(${JSON.stringify(`rows::1::${a.id}`)}).x = 999;`,
+    };
+    expect(renderCompositionFrameSvg(project, comp.id).svg).toContain('translate(999 0)');
+  });
+
+  it('starts each SVG snapshot with fresh module state', () => {
+    const project = createProject();
+    const comp = project.compositions[0]!;
+    const layer = createLayerOfKind('rectangle');
+    layer.name = 'Title';
+    layer.keyframes = [createLayerKeyframe(0, createDefaultTransform({ y: 0, opacity: 1 }))];
+    comp.layers = [layer];
+    comp.scripting = {
+      enabled: true,
+      source: 'layer("Title").x = counter.next();',
+      modules: [{ fileName: 'counter.js', source: 'let n = 0; export const next = () => ++n;' }],
+    };
+    for (let i = 0; i < 2; i++)
+      expect(renderCompositionFrameSvg(project, comp.id).svg).toContain('translate(1 0)');
+  });
+
   it('renders composition scripts and embedded libraries without property expressions', () => {
     const project = createProject();
     const comp = project.compositions[0]!;

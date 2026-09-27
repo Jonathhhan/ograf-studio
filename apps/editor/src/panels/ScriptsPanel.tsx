@@ -51,8 +51,12 @@ function ScriptEditor({ composition }: { composition: Composition }) {
   // External edits and undo/redo replace the immutable settings object.
   if (baseline !== saved) {
     setBaseline(saved);
-    setDraft(saved);
-    setSelected(-1);
+    if (baseline.source === saved.source && baseline.modules === saved.modules) {
+      setDraft({ ...draft, enabled: saved.enabled });
+    } else {
+      setDraft(saved);
+      setSelected(-1);
+    }
   }
   const file = draft.modules[selected];
   let syntaxError = compositionScriptSyntaxError(draft.source);
@@ -122,6 +126,11 @@ function ScriptEditor({ composition }: { composition: Composition }) {
         >
           Revert
         </button>
+        {saved.enabled && (
+          <button type="button" onClick={() => update({ scripting: { ...saved, enabled: false } })}>
+            Disable running script
+          </button>
+        )}
         <label>
           <input
             type="checkbox"

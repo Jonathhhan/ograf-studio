@@ -99,6 +99,34 @@ describe('shared JavaScript modules', () => {
 });
 
 describe('composition scripts', () => {
+  it('passes explicit frame data and writable layer references to imported functions', () => {
+    const config = settings('helpers.move(layer("Title"), frame, data.gap);', [
+      {
+        fileName: 'helpers.js',
+        source: 'export function move(target, frame, gap) { target.x += frame * gap; }',
+      },
+    ]);
+    expect(
+      resolveExpressionTransforms([layer()], { frame: 3, 'data.gap': 5 }, [], 1, config).get(
+        'Title',
+      )!.x,
+    ).toBe(25);
+    const diagnostics: ExpressionDiagnostic[] = [];
+    resolveExpressionTransforms(
+      [
+        {
+          ...layer(),
+          expressions: { x: 'helpers.move(layer("Title"), frame, data.gap); return 1;' },
+        },
+      ],
+      { frame: 3, 'data.gap': 5 },
+      diagnostics,
+      1,
+      { ...config, enabled: false },
+    );
+    expect(diagnostics[0]?.property).toBe('x');
+  });
+
   it('runs after expressions, reads its writes, and never changes authored poses', () => {
     const title = { ...layer(), expressions: { x: 'helpers.offset(thisLayer.x)' } };
     const background = layer('Background');

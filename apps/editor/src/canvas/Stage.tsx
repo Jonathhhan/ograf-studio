@@ -416,19 +416,45 @@ export function Stage({ style }: { style?: CSSProperties }) {
     return [x, y];
   };
 
-  const transformStartRef = useRef<{
-    layerId: string;
-    authored: { x: number; y: number };
-    displayed: { x: number; y: number };
-  } | null>(null);
+  const transformStartRef = useRef(
+    new Map<
+      string,
+      {
+        authored: { x: number; y: number };
+        displayed: { x: number; y: number };
+      }
+    >(),
+  );
   const captureTransformStart = (target: HTMLElement | SVGElement) => {
-    if (!selectedLayer) return;
-    const authored = getLayerTransformAtFrame(
-      selectedLayer,
-      useTimelineStore.getState().currentFrame,
+    const layer = composition.layers.find(
+      (candidate) => candidate.id === (target as HTMLElement).dataset.layerId,
     );
+    if (!layer) return;
+    const authored = getLayerTransformAtFrame(layer, useTimelineStore.getState().currentFrame);
     const displayed = parseCssTransform((target as HTMLElement).style.transform);
-    transformStartRef.current = { layerId: selectedLayer.id, authored, displayed };
+    transformStartRef.current.set(layer.id, { authored, displayed });
+  };
+  const compensateScriptedDrag = (layerId: string, patch: Partial<LayerTransform>) => {
+    const start = transformStartRef.current.get(layerId);
+    const layer = composition.layers.find((candidate) => candidate.id === layerId);
+    if (start && layer) {
+      for (const property of ['x', 'y'] as const) {
+        if (
+          patch[property] === undefined ||
+          (!composition.scripting?.enabled &&
+            (!layer.expressions?.[property]?.trim() ||
+              layer.expressionsEnabled?.[property] === false))
+        )
+          continue;
+        patch[property] = authoredPositionAfterDrag(
+          start.authored[property],
+          start.displayed[property],
+          patch[property]!,
+        );
+      }
+    }
+    transformStartRef.current.delete(layerId);
+    return patch;
   };
 
   const applySnapping = (target: HTMLElement | SVGElement) => {
@@ -552,22 +578,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
   ) => {
     if (!selectedLayerId) return;
     const patch = readTransformPatch(target, extra);
-    const start = transformStartRef.current;
-    if (start?.layerId === selectedLayerId && selectedLayer) {
-      for (const property of ['x', 'y'] as const) {
-        if (
-          !selectedLayer.expressions?.[property]?.trim() ||
-          selectedLayer.expressionsEnabled?.[property] === false
-        )
-          continue;
-        patch[property] = authoredPositionAfterDrag(
-          start.authored[property],
-          start.displayed[property],
-          patch[property]!,
-        );
-      }
-    }
-    transformStartRef.current = null;
+    compensateScriptedDrag(selectedLayerId, patch);
     updateLayerTransform(selectedLayerId, useTimelineStore.getState().currentFrame, patch);
     clearLiveTransform();
   };
@@ -600,10 +611,13 @@ export function Stage({ style }: { style?: CSSProperties }) {
         updateLayerTransform(
           layerId,
           useTimelineStore.getState().currentFrame,
-          readTransformPatch(event.target, {
-            ...(Number.isFinite(width) ? { width } : {}),
-            ...(Number.isFinite(height) ? { height } : {}),
-          }),
+          compensateScriptedDrag(
+            layerId,
+            readTransformPatch(event.target, {
+              ...(Number.isFinite(width) ? { width } : {}),
+              ...(Number.isFinite(height) ? { height } : {}),
+            }),
+          ),
         );
       }
     }
@@ -1157,7 +1171,11 @@ export function Stage({ style }: { style?: CSSProperties }) {
               onDragEnd={({ target }) => commitTransform(target)}
               onDragGroupStart={({ events }) => {
                 beginConstrainedDrag(events.map((event) => event.target));
-                for (const event of events) event.set(currentTranslate(event.target));
+                transformStartRef.current.clear();
+                for (const event of events) {
+                  captureTransformStart(event.target);
+                  event.set(currentTranslate(event.target));
+                }
               }}
               onDragGroup={({ events, delta, inputEvent }) => {
                 applyConstrainedDrag(
