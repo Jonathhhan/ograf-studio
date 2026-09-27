@@ -583,16 +583,6 @@ export function InspectorPanel() {
         </div>
         <details className="inspector-expression-section">
           <summary>Expressions</summary>
-          <p className="inspector-hint">
-            JavaScript formula or function body with return. frame counts frames; time is in
-            seconds. Numeric data fields can be read as data.fieldKey. Compare select values with
-            strings, e.g. data.Alphabet == "Latin". Composition size is comp.width / comp.height.
-            Timeline boundaries are timeline.startFrame, timeline.firstStepFrame,
-            timeline.lastStepFrame and timeline.endFrame. Step boundaries require at least one Step.
-            timeline.exitProgress runs from 0 to 1 across the exit, including an exit from an
-            earlier Step. Use ease(start, end, progress, "cubic-out") for a keyframe easing preset,
-            such as "ease-in-out", "bounce-out" or "elastic-out". The easing preset is required.
-          </p>
           <label className="inspector-hint">
             Stable layer reference
             <select
@@ -627,7 +617,6 @@ export function InspectorPanel() {
                 false
                 ? expressionDiagnostics.diagnostics.find(
                     (entry) =>
-                      entry.kind !== 'log' &&
                       entry.layerId === layer.id &&
                       entry.property === key &&
                       entry.source === source,
@@ -692,25 +681,6 @@ export function InspectorPanel() {
               </PropertyRow>
             );
           })}
-          <details className="inspector-expression-console">
-            <summary>Expression console | current frame</summary>
-            <p className="inspector-hint">
-              Canvas logs for this layer. Repeated messages are grouped; up to 100 log calls per
-              evaluation.
-            </p>
-            {expressionDiagnostics.compositionId === composition.id &&
-              expressionDiagnostics.diagnostics
-                .filter((entry) => entry.layerId === layer.id)
-                .map((entry, index) => (
-                  <pre key={index} className="inspector-expression-log">
-                    {entry.property} |{' '}
-                    {entry.kind === 'log' ? `${entry.level} | frame ${entry.frame}` : 'error'}
-                    {entry.count && entry.count > 1 ? ` | x${entry.count}` : ''}
-                    {'\n'}
-                    {entry.message}
-                  </pre>
-                ))}
-          </details>
         </details>
 
         <PropertyRow

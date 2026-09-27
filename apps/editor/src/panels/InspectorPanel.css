@@ -449,12 +449,6 @@
   border-color: var(--border-strong);
 }
 
-.inspector-expression-log {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 11px;
-  margin: 6px 0;
-}
 .inspector-expression-console {
   max-height: 260px;
   overflow: auto;

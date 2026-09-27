@@ -69,33 +69,6 @@ describe('resolveExpressionTransforms', () => {
     expect(cycles.every((entry) => entry.message.includes('Circular'))).toBe(true);
   });
 
-  it('captures bounded, grouped console messages without turning them into property errors', () => {
-    const target = layer('logs', {
-      x: `
-      for (let i = 0; i < 150; i++) console.log('hello', { value: 2 });
-      return 123;
-    `,
-    });
-    const diagnostics: ExpressionDiagnostic[] = [];
-    expect(resolveExpressionTransforms([target], { frame: 12 }, diagnostics).get('logs')!.x).toBe(
-      123,
-    );
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]).toMatchObject({
-      kind: 'log',
-      level: 'log',
-      frame: 12,
-      count: 100,
-      message: 'hello {"value":2}',
-      layerId: 'logs',
-      property: 'x',
-    });
-    target.expressions = { x: 'const a = {}; a.self = a; console.warn(a); return 5;' };
-    const circular: ExpressionDiagnostic[] = [];
-    expect(resolveExpressionTransforms([target], {}, circular).get('logs')!.x).toBe(5);
-    expect(circular[0]!.message).toBe('[unserializable value]');
-  });
-
   it('reports failed properties and their dependents, and clears errors after repair or disabling', () => {
     const a = layer('A', { x: 'layer("Missing").x', y: '42' });
     const b = layer('B', { x: 'layer("A").x + 1' });

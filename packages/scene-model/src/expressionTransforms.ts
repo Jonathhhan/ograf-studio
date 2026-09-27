@@ -1,4 +1,4 @@
-import { evaluateExpression, type ExpressionScope, type ExpressionLogLevel } from './expressions';
+import { evaluateExpression, type ExpressionScope } from './expressions';
 import type { Layer, LayerTransform } from './types';
 
 export const EXPRESSION_PROPERTIES = ['x', 'y', 'width', 'height', 'rotation', 'opacity'] as const;
@@ -9,10 +9,6 @@ export interface ExpressionDiagnostic {
   property: ExpressionProperty;
   source: string;
   message: string;
-  kind?: 'log';
-  level?: ExpressionLogLevel;
-  frame?: number;
-  count?: number;
 }
 
 export interface ExpressionLayerState {
@@ -52,7 +48,6 @@ export function resolveExpressionTransforms(
     ids.set(layer.prototypeLayerId ?? layer.id, layer);
     referenceIds.set(layer.referenceScope, ids);
   }
-  let logCount = 0;
   const values = new Map<string, number>();
   const visiting = new Set<string>();
   const failures = new Map<string, unknown>();
@@ -119,49 +114,6 @@ export function resolveExpressionTransforms(
               throw new Error('Unknown layer property: ' + targetProperty);
             return resolve(target.id, targetProperty as ExpressionProperty);
           },
-          ...(diagnostics
-            ? {
-                onLog: (level: ExpressionLogLevel, args: unknown[]) => {
-                  // Bound capture and serialization work even when a script logs in a loop.
-                  if (logCount++ >= 100) return;
-                  const message = args
-                    .slice(0, 20)
-                    .map((arg) => {
-                      try {
-                        return (
-                          typeof arg === 'string' ? arg : (JSON.stringify(arg) ?? String(arg))
-                        ).slice(0, 2000);
-                      } catch {
-                        return '[unserializable value]';
-                      }
-                    })
-                    .join(' ')
-                    .slice(0, 4000);
-                  const previous = diagnostics.find(
-                    (entry) =>
-                      entry.kind === 'log' &&
-                      entry.layerId === id &&
-                      entry.property === property &&
-                      entry.level === level &&
-                      entry.message === message,
-                  );
-                  if (previous) {
-                    previous.count = (previous.count ?? 1) + 1;
-                    return;
-                  }
-                  diagnostics.push({
-                    layerId: id,
-                    property,
-                    source: expression,
-                    message,
-                    kind: 'log',
-                    level,
-                    frame: Number(context.frame ?? 0),
-                    count: 1,
-                  });
-                },
-              }
-            : {}),
         },
       );
       values.set(key, value);

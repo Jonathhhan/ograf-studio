@@ -30,12 +30,10 @@ references in JavaScript source: an ID reference continues to address its origin
 
 ### Debugging in Studio
 
-The **Expression console | current frame** section shows the selected layer's current canvas
-logs and errors, including property and log frame. `console.log`, `info`, `warn`, `error` and
-`debug` are captured during canvas evaluation. Identical messages are grouped. Capture is
-limited to the first 100 calls per evaluation, 20 arguments per call and 4,000 display characters
-per message. It is a current-evaluation view, not a persistent history; scrubbing replaces it.
-Exported graphics and evaluations without a diagnostic collector use the host's normal console.
+`console.log`, `info`, `warn`, `error` and `debug` use the host's normal console.
+In Studio, open the browser developer console to view these messages. Properties shows
+expression errors inline, without a separate log panel. Console output may repeat on each
+frame or evaluation. Exported graphics use the player environment's console.
 
 ```js
 console.log('position', frame, thisLayer.x);

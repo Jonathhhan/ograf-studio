@@ -4,11 +4,9 @@ import type { EasingPreset, KeyframeRole } from './types';
 export type ExpressionScope = Record<string, number | string>;
 export type ExpressionLayerResolver = (name: string, property: string) => number;
 export const EXPRESSION_API_VERSION = 1;
-export type ExpressionLogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
 export interface ExpressionEvaluationOptions {
   apiVersion?: number;
   resolveLayerById?: ExpressionLayerResolver;
-  onLog?: (level: ExpressionLogLevel, args: unknown[]) => void;
 }
 type CompiledExpression = (
   scope: ExpressionScope,
@@ -111,18 +109,6 @@ function evaluationScope(
           return options.resolveLayerById(id, property);
         },
       }),
-    ...(options.onLog
-      ? {
-          console: new Proxy(console, {
-            get: (target, property) => {
-              if (['log', 'info', 'warn', 'error', 'debug'].includes(String(property)))
-                return (...args: unknown[]) => options.onLog!(property as ExpressionLogLevel, args);
-              const value = Reflect.get(target, property);
-              return typeof value === 'function' ? value.bind(target) : value;
-            },
-          }),
-        }
-      : {}),
     layer: (name: string) =>
       new Proxy(Object.create(null), {
         get: (_target, property) => {
