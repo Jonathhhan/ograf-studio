@@ -45,9 +45,10 @@ export function LayerExpressionsEditor() {
             className="scripts-expression-row"
             help={`Expression for ${label}`}
           >
-            <label>
+            <span>
               <input
                 type="checkbox"
+                aria-label={`${label} expression enabled`}
                 checked={
                   layer.expressionsEnabled?.[key as keyof NonNullable<typeof layer.expressions>] !==
                   false
@@ -62,7 +63,7 @@ export function LayerExpressionsEditor() {
                 }
               />{' '}
               {label}
-            </label>
+            </span>
             <div className="scripts-expression-value">
               <JavaScriptEditor
                 key={layer.id}
