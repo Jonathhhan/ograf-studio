@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { expressionSyntaxError } from '@ograf-editor/scene-model';
 import { PropertyRow } from '../components/PropertyRow';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
@@ -19,38 +18,12 @@ export function LayerExpressionsEditor() {
   const selectedLayerId = useSelectionStore((s) => s.selectedLayerId);
   const layer = composition.layers.find((candidate) => candidate.id === selectedLayerId);
   const expressionDiagnostics = useExpressionDiagnosticsStore();
-  const [expressionReferenceId, setExpressionReferenceId] = useState('');
   const updateLayerExpressions = useProjectStore((s) => s.updateLayerExpressions);
   const setLayerExpressionEnabled = useProjectStore((s) => s.setLayerExpressionEnabled);
   if (!layer || layer.isGuide) return <p>Select a layer to edit its expressions.</p>;
   return (
     <section className="scripts-expressions">
       <h3>Expressions: {layer.name}</h3>
-      <label className="scripts-reference">
-        Stable layer reference
-        <select
-          value={expressionReferenceId}
-          aria-label="Stable layer reference"
-          onChange={(event) => setExpressionReferenceId(event.target.value)}
-        >
-          <option value="">Choose a layer...</option>
-          {composition.layers
-            .filter((candidate) => !candidate.isGuide)
-            .map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name}
-              </option>
-            ))}
-        </select>
-        {expressionReferenceId && (
-          <input
-            readOnly
-            aria-label="Layer reference code"
-            value={`layerById(${JSON.stringify(expressionReferenceId)})`}
-            onFocus={(event) => event.target.select()}
-          />
-        )}
-      </label>
       {EXPRESSION_FIELDS.map(({ key, label }) => {
         const source =
           layer.expressions?.[key as keyof NonNullable<typeof layer.expressions>] ?? '';

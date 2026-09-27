@@ -51,12 +51,6 @@
   gap: 12px;
   min-height: 100%;
 }
-.scripts-reference {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-}
 .scripts-expression-row {
   display: grid;
   grid-template-columns: 90px minmax(0, 1fr);
