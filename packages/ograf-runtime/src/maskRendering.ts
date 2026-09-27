@@ -5,9 +5,12 @@ import {
   type Element,
   type MaskRenderLayer,
   type MaskRenderState,
+  type ExpressionDiagnostic,
 } from '@ograf-editor/scene-model';
 import type { CompiledGraphicDescriptor } from '@ograf-editor/ograf-types';
 import { isRuntimeCollectionLayerActive } from './runtimeCollections';
+import { applyCompiledClipPaths, applyCompiledLayerTransform } from './loopRendering';
+import { resolveFrameExpressions } from './expressionRendering';
 
 const mounted = new WeakMap<HTMLElement, { svg: SVGSVGElement; id: string; markup: string }>();
 let nextId = 0;
@@ -19,7 +22,18 @@ export function applyCompiledMasks(
   elements: Map<string, HTMLElement>,
   states: Map<string, MaskRenderState>,
   data?: Record<string, unknown>,
+  onDiagnostics?: (diagnostics: ExpressionDiagnostic[]) => void,
 ): void {
+  states = new Map(states);
+  const diagnostics: ExpressionDiagnostic[] | undefined = onDiagnostics ? [] : undefined;
+  states = resolveFrameExpressions(descriptor, states, elements, data, diagnostics);
+  if (diagnostics) onDiagnostics?.(diagnostics);
+  for (const layer of descriptor.layers) {
+    const target = elements.get(layer.id);
+    const state = states.get(layer.id);
+    if (layer.expressions && target && state) applyCompiledLayerTransform(target, state.transform);
+  }
+  applyCompiledClipPaths(descriptor, elements, states);
   const hasMasks = descriptor.layers.some((layer) => layer.mask);
   const sources = new Map<string, MaskRenderLayer>();
   for (const layer of descriptor.layers) {

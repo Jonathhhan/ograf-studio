@@ -803,6 +803,8 @@ function projectFromDescriptor(
     layer.effects = { ...layer.effects, ...clone(compiled.effects) };
     layer.keyframes = clone(compiled.keyframes);
     layer.animationTracks = clone(compiled.animationTracks);
+    if (compiled.expressions) layer.expressions = clone(compiled.expressions);
+    if (compiled.expressionsEnabled) layer.expressionsEnabled = clone(compiled.expressionsEnabled);
     if (layer.element.type === 'text' && !layer.animationTracks.strokeWidth?.length) {
       layer.animationTracks.strokeWidth =
         getResolvedLayerAnimationTracks(layer).strokeWidth?.map((key) => ({ ...key })) ?? [];

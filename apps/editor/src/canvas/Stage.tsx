@@ -1,5 +1,6 @@
 import { previewBindingData } from '../state/dataBinding';
 import { useTestDataStore } from '../state/testDataStore';
+import { publishExpressionDiagnostics } from '../state/expressionDiagnosticsStore';
 import {
   useCallback,
   useEffect,
@@ -32,7 +33,6 @@ import { useLayerClipboardStore } from '../state/layerClipboardStore';
 import { buildMasterTimeline } from './masterTimeline';
 import { compileDescriptor } from '@ograf-editor/codegen';
 import {
-  applyCompiledClipPaths,
   applyCompiledMasks,
   applyCompiledLayerVisualState,
   sampleCompiledLayerVisualState,
@@ -44,7 +44,11 @@ import { pathConversionError } from '@ograf-editor/scene-model';
 import { AddElementToolbar } from './AddElementToolbar';
 import { useImagePlacement } from '../state/useImagePlacement';
 import { useFitZoom } from './useFitZoom';
-import { parseCssTransform } from './transformGeometry';
+import {
+  authoredPositionAfterDrag,
+  parseCssTransform,
+  renderedLayerGeometry,
+} from './transformGeometry';
 import { constrainedTranslation, dominantDragAxis, type DragAxis } from './axisConstrainedDrag';
 import {
   getCenteredStageScroll,
@@ -412,12 +416,30 @@ export function Stage({ style }: { style?: CSSProperties }) {
     return [x, y];
   };
 
+  const transformStartRef = useRef<{
+    layerId: string;
+    authored: { x: number; y: number };
+    displayed: { x: number; y: number };
+  } | null>(null);
+  const captureTransformStart = (target: HTMLElement | SVGElement) => {
+    if (!selectedLayer) return;
+    const authored = getLayerTransformAtFrame(
+      selectedLayer,
+      useTimelineStore.getState().currentFrame,
+    );
+    const displayed = parseCssTransform((target as HTMLElement).style.transform);
+    transformStartRef.current = { layerId: selectedLayer.id, authored, displayed };
+  };
+
   const applySnapping = (target: HTMLElement | SVGElement) => {
     const layerId = layerIdForTarget(target);
     const layer = composition.layers.find((candidate) => candidate.id === layerId);
     if (!layer) return;
     const parsed = parseCssTransform((target as HTMLElement).style.transform);
-    const pose = getLayerTransformAtFrame(layer, useTimelineStore.getState().currentFrame);
+    const pose = renderedLayerGeometry(
+      target as HTMLElement,
+      getLayerTransformAtFrame(layer, useTimelineStore.getState().currentFrame),
+    );
     const verticalGuides = [0, composition.width / 2, composition.width];
     const horizontalGuides = [0, composition.height / 2, composition.height];
     if (composition.layout.snapToGuides) {
@@ -428,7 +450,10 @@ export function Stage({ style }: { style?: CSSProperties }) {
     if (composition.layout.snapToLayers) {
       for (const candidate of composition.layers) {
         if (candidate.id === layer.id || !candidate.isVisible || candidate.isGuide) continue;
-        const other = getLayerTransformAtFrame(candidate, useTimelineStore.getState().currentFrame);
+        const other = renderedLayerGeometry(
+          layerRefs.current.get(candidate.id),
+          getLayerTransformAtFrame(candidate, useTimelineStore.getState().currentFrame),
+        );
         verticalGuides.push(other.x, other.x + other.width / 2, other.x + other.width);
         horizontalGuides.push(other.y, other.y + other.height / 2, other.y + other.height);
       }
@@ -526,11 +551,24 @@ export function Stage({ style }: { style?: CSSProperties }) {
     extra?: { width?: number; height?: number },
   ) => {
     if (!selectedLayerId) return;
-    updateLayerTransform(
-      selectedLayerId,
-      useTimelineStore.getState().currentFrame,
-      readTransformPatch(target, extra),
-    );
+    const patch = readTransformPatch(target, extra);
+    const start = transformStartRef.current;
+    if (start?.layerId === selectedLayerId && selectedLayer) {
+      for (const property of ['x', 'y'] as const) {
+        if (
+          !selectedLayer.expressions?.[property]?.trim() ||
+          selectedLayer.expressionsEnabled?.[property] === false
+        )
+          continue;
+        patch[property] = authoredPositionAfterDrag(
+          start.authored[property],
+          start.displayed[property],
+          patch[property]!,
+        );
+      }
+    }
+    transformStartRef.current = null;
+    updateLayerTransform(selectedLayerId, useTimelineStore.getState().currentFrame, patch);
     clearLiveTransform();
   };
 
@@ -647,21 +685,20 @@ export function Stage({ style }: { style?: CSSProperties }) {
     const refreshMasks = () => {
       const descriptor = compileDescriptor(composition, { includeGuides: true });
       const frame = useTimelineStore.getState().currentFrame;
+      const data = previewBindingData(composition.dataFields, useTestDataStore.getState().values);
       applyCompiledMasks(
         descriptor,
         layerRefs.current,
         new Map(
           descriptor.layers.map((layer) => [
             layer.id,
-            sampleCompiledLayerVisualState(
-              layer,
-              frame,
-              undefined,
-              previewBindingData(composition.dataFields, useTestDataStore.getState().values),
-            ),
+            sampleCompiledLayerVisualState(layer, frame, undefined, data),
           ]),
         ),
+        data,
+        (diagnostics) => publishExpressionDiagnostics(composition.id, diagnostics),
       );
+      moveableRef.current?.updateTarget();
     };
     refreshMasks();
     const observer = new ResizeObserver(() => refreshMasks());
@@ -684,7 +721,11 @@ export function Stage({ style }: { style?: CSSProperties }) {
     const currentFrame = useTimelineStore.getState().currentFrame;
     tl.seek(currentFrame / frameRate, true);
 
-    tl.eventCallback('onUpdate', () => setCurrentFrame(tl.time() * frameRate));
+    const updateRuntimeFrame = tl.eventCallback('onUpdate');
+    tl.eventCallback('onUpdate', () => {
+      updateRuntimeFrame?.();
+      setCurrentFrame(tl.time() * frameRate);
+    });
     tl.eventCallback('onComplete', () => {
       shaderPreviewClock.pause(performance.now());
       setPlaying(false);
@@ -810,8 +851,13 @@ export function Stage({ style }: { style?: CSSProperties }) {
         const element = layerRefs.current.get(layer.id);
         if (element) applyCompiledLayerVisualState(element, state, contentTimeMs);
       }
-      applyCompiledClipPaths(descriptor, layerRefs.current, states);
-      applyCompiledMasks(descriptor, layerRefs.current, states);
+      applyCompiledMasks(
+        descriptor,
+        layerRefs.current,
+        states,
+        previewBindingData(composition.dataFields, useTestDataStore.getState().values),
+        (diagnostics) => publishExpressionDiagnostics(composition.id, diagnostics),
+      );
       if (selectedLayerIds.length > 0) previewMoveable?.updateTarget();
       animationFrame =
         timelineIsPlaying || shaderPreviewClock.running || previewLoopLayerId
@@ -862,9 +908,12 @@ export function Stage({ style }: { style?: CSSProperties }) {
     recenterStageViewport(viewport);
   }, [applyStageOrigin, pasteboard, recenterStageViewport, syncStageCameraCss, zoom]);
 
-  useLayoutEffect(() => {
-    // updateTarget (rather than updateRect) refreshes transform-origin as well as the outer bounds.
-    if (moveableTarget) moveableRef.current?.updateTarget();
+  useEffect(() => {
+    if (!moveableTarget) return;
+    // Timeline rebuilding and expression evaluation write DOM transforms in passive effects.
+    // Measure after those writes, rather than in a layout effect with the previous frame's pose.
+    const measurement = requestAnimationFrame(() => moveableRef.current?.updateTarget());
+    return () => cancelAnimationFrame(measurement);
   }, [composition, moveableTarget, zoom]);
 
   useEffect(() => {
@@ -1095,6 +1144,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
               throttleRotate={0}
               keepRatio={false}
               onDragStart={({ target, set }) => {
+                captureTransformStart(target);
                 beginConstrainedDrag([target]);
                 set(currentTranslate(target));
               }}
@@ -1145,6 +1195,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
                 })
               }
               onResizeStart={({ target, dragStart, setOrigin }) => {
+                captureTransformStart(target);
                 if (dragStart) dragStart.set(currentTranslate(target));
                 if (moveableTransformOrigin) setOrigin(moveableTransformOrigin);
               }}
@@ -1165,6 +1216,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
                 commitTransform(target, { width, height });
               }}
               onRotateStart={({ target, set, dragStart }) => {
+                captureTransformStart(target);
                 const { rotation } = parseCssTransform((target as HTMLElement).style.transform);
                 set(rotation);
                 if (dragStart) dragStart.set(currentTranslate(target));

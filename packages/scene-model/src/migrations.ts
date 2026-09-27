@@ -266,6 +266,10 @@ function normalizeComposition(composition: LegacyComposition): Composition {
         semantics: createLayerSemantics(legacyLayer.semantics),
         designTokenBindings: legacyLayer.designTokenBindings ?? [],
         componentLink: legacyLayer.componentLink ?? null,
+        ...(legacyLayer.expressions ? { expressions: legacyLayer.expressions } : {}),
+        ...(legacyLayer.expressionsEnabled
+          ? { expressionsEnabled: legacyLayer.expressionsEnabled }
+          : {}),
         keyframes: sortLayerKeyframes(legacyLayer.keyframes).map((keyframe) => ({
           ...keyframe,
           transform: normalizeAuthoredTransform(keyframe.transform),
@@ -434,6 +438,8 @@ function normalizeComposition(composition: LegacyComposition): Composition {
           semantics: createLayerSemantics(layer.semantics),
           designTokenBindings: layer.designTokenBindings ?? [],
           componentLink: null,
+          ...(layer.expressions ? { expressions: layer.expressions } : {}),
+          ...(layer.expressionsEnabled ? { expressionsEnabled: layer.expressionsEnabled } : {}),
         };
         if (
           normalizedLayer.element.type === 'text' &&

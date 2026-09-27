@@ -7,6 +7,7 @@ import {
 } from '@ograf-editor/scene-model';
 import {
   buildPreviewDataFromTestValues,
+  buildPreviewFormFromTestValues,
   resolvePreviewDataRecord,
   resolvePreviewFormValue,
 } from './previewData';
@@ -35,6 +36,32 @@ describe('preview data', () => {
       headline: '',
       count: 7,
     });
+  });
+
+  it('builds keyed preview forms from field-id test values', () => {
+    const composition = createProject().compositions[0]!;
+    const inFrames = createFieldDefinition('integer', { key: 'inFrames', defaultValue: 10 });
+    const outFrames = createFieldDefinition('integer', { key: 'outFrames', defaultValue: 10 });
+    composition.dataFields.push(inFrames, outFrames);
+
+    expect(buildPreviewFormFromTestValues(composition, { [outFrames.id]: 50 })).toMatchObject({
+      inFrames: 10,
+      outFrames: 50,
+    });
+  });
+
+  it('converts numeric form text into numeric runtime data', () => {
+    const composition = createProject().compositions[0]!;
+    for (const type of ['number', 'integer', 'duration-ms', 'percentage'] as const)
+      composition.dataFields.push(createFieldDefinition(type, { key: type, defaultValue: 0 }));
+    expect(
+      resolvePreviewDataRecord(composition, {
+        number: '-12.5',
+        integer: '12',
+        'duration-ms': '250',
+        percentage: '100',
+      }),
+    ).toMatchObject({ number: -12.5, integer: 12, 'duration-ms': 250, percentage: 100 });
   });
 
   it('resolves local image assets for both test-value and keyed-form payloads', () => {

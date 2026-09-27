@@ -273,6 +273,13 @@ For recent changes, see the [release notes](releases/0.21.md).
 Manage a selected layer's data links under **Properties → Data Bindings**. Binding indicators are
 not drawn over the canvas artwork.
 
+## Property expressions
+
+For formulas that control layer position, dimensions, rotation or opacity, open
+**Properties → Expressions**. Each expression has its own enable checkbox. See the
+[expression guide](EXPRESSIONS.md) for syntax, data fields, layer references, timeline-driven
+animation and easing examples.
+
 ## Fullscreen preview
 
 In **Preview & Export**, choose **Fullscreen** to fill the current display with the graphic.

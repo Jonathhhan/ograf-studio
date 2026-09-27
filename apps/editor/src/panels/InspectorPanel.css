@@ -74,6 +74,21 @@
   line-height: 1.4;
 }
 
+.inspector-expression-value {
+  min-width: 0;
+  margin: 3px 6px;
+}
+
+.inspector-expression-value textarea {
+  width: 100%;
+  min-height: 54px;
+  resize: vertical;
+}
+
+.inspector-expression-value textarea[aria-invalid='true'] {
+  border-color: #ff7b86;
+}
+
 .inspector-binding-list {
   display: grid;
   gap: 7px;

@@ -1,4 +1,5 @@
 import { useEditorWindow } from '../layout/EditorWindow';
+import { useExpressionDiagnosticsStore } from '../state/expressionDiagnosticsStore';
 import { TRANSFORM_HELP } from './propertyHelp';
 import { PropertyRow } from '../components/PropertyRow';
 import { EffectStackEditor } from './EffectStackEditor';
@@ -6,6 +7,7 @@ import { ImageSourceEditor } from './ImageSourceEditor';
 import { LayerLightingEditor } from './LayerLightingEditor';
 import {
   getEffectStack,
+  expressionSyntaxError,
   EFFECT_CATALOG,
   effectProperty,
   effectParameterValue,
@@ -74,6 +76,11 @@ const TRANSFORM_FIELDS: { key: keyof LayerTransform; label: string; step?: numbe
   { key: 'width', label: 'W' },
   { key: 'height', label: 'H' },
   { key: 'rotation', label: 'Rotation' },
+];
+
+const EXPRESSION_FIELDS = [
+  ...TRANSFORM_FIELDS,
+  { key: 'opacity' as const, label: 'Opacity (0–1)' },
 ];
 
 const NUMERIC_MAPPING_PROPERTIES = new Set([
@@ -342,6 +349,7 @@ function CornerRadiusEditor({
 }
 
 export function InspectorPanel() {
+  const expressionDiagnostics = useExpressionDiagnosticsStore();
   const { window } = useEditorWindow();
   const composition = useActiveComposition();
   const currentFrame = useTimelineStore((s) => s.currentFrame);
@@ -354,6 +362,8 @@ export function InspectorPanel() {
   const updateLayerTransform = useProjectStore((s) => s.updateLayerTransform);
   const updateLayerKeyframeEasing = useProjectStore((s) => s.updateLayerKeyframeEasing);
   const updateLayerElement = useProjectStore((s) => s.updateLayerElement);
+  const updateLayerExpressions = useProjectStore((s) => s.updateLayerExpressions);
+  const setLayerExpressionEnabled = useProjectStore((s) => s.setLayerExpressionEnabled);
   const updateLayerTextStroke = useProjectStore((s) => s.updateLayerTextStroke);
   const updateLayerPaint = useProjectStore((s) => s.updateLayerPaint);
   const updateLayerShaderParameter = useProjectStore((s) => s.updateLayerShaderParameter);
@@ -570,6 +580,92 @@ export function InspectorPanel() {
             </PropertyRow>
           ))}
         </div>
+        <details className="inspector-expression-section">
+          <summary>Expressions</summary>
+          <p className="inspector-hint">
+            JavaScript formula or function body with return. frame counts frames; time is in
+            seconds. Numeric data fields can be read as data.fieldKey. Compare select values with
+            strings, e.g. data.Alphabet == "Latin". Composition size is comp.width / comp.height.
+            Timeline boundaries are timeline.startFrame, timeline.firstStepFrame,
+            timeline.lastStepFrame and timeline.endFrame. Step boundaries require at least one Step.
+            timeline.exitProgress runs from 0 to 1 across the exit, including an exit from an
+            earlier Step. Use ease(start, end, progress, "cubic-out") for a keyframe easing preset,
+            such as "ease-in-out", "bounce-out" or "elastic-out". The easing preset is required.
+          </p>
+          {EXPRESSION_FIELDS.map(({ key, label }) => {
+            const source =
+              layer.expressions?.[key as keyof NonNullable<typeof layer.expressions>] ?? '';
+            const runtimeError =
+              expressionDiagnostics.compositionId === composition.id &&
+              layer.expressionsEnabled?.[key as keyof NonNullable<typeof layer.expressions>] !==
+                false
+                ? expressionDiagnostics.diagnostics.find(
+                    (entry) =>
+                      entry.layerId === layer.id &&
+                      entry.property === key &&
+                      entry.source === source,
+                  )?.message
+                : undefined;
+            const error = expressionSyntaxError(source) ?? runtimeError;
+            const errorId = `expression-error-${layer.id}-${key}`;
+            return (
+              <PropertyRow
+                as="div"
+                key={`expression-${key}`}
+                className="inspector-row"
+                help={`Expression for ${label}`}
+              >
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={
+                      layer.expressionsEnabled?.[
+                        key as keyof NonNullable<typeof layer.expressions>
+                      ] !== false
+                    }
+                    disabled={layer.isLocked}
+                    onChange={(event) =>
+                      setLayerExpressionEnabled(
+                        layer.id,
+                        key as keyof NonNullable<typeof layer.expressions>,
+                        event.target.checked,
+                      )
+                    }
+                  />{' '}
+                  {label}
+                </label>
+                <div className="inspector-expression-value">
+                  <textarea
+                    rows={4}
+                    spellCheck={false}
+                    aria-invalid={Boolean(error)}
+                    aria-describedby={error ? errorId : undefined}
+                    aria-label={`${label} expression`}
+                    placeholder="Use authored value"
+                    value={source}
+                    disabled={layer.isLocked}
+                    onChange={(event) => {
+                      const expression = event.target.value;
+                      const expressions = { ...(layer.expressions ?? {}) };
+                      const expressionKey = key as keyof NonNullable<typeof layer.expressions>;
+                      if (expression.trim()) expressions[expressionKey] = expression;
+                      else delete expressions[expressionKey];
+                      updateLayerExpressions(
+                        layer.id,
+                        Object.keys(expressions).length ? expressions : undefined,
+                      );
+                    }}
+                  />
+                  {error && (
+                    <p id={errorId} className="inspector-error">
+                      {error}
+                    </p>
+                  )}
+                </div>
+              </PropertyRow>
+            );
+          })}
+        </details>
 
         <PropertyRow
           help={

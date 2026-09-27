@@ -27,6 +27,14 @@ function resolveFieldValue(
   field: Composition['dataFields'][number],
   value: FieldValue,
 ): FieldValue {
+  if (
+    ['number', 'integer', 'duration-ms', 'percentage'].includes(field.type) &&
+    typeof value === 'string' &&
+    value.trim() !== ''
+  ) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
   if (field.type === 'image-url' && typeof value === 'string') {
     return resolveAssetValue(value, composition.assets);
   }
@@ -58,6 +66,22 @@ export function buildPreviewDataFromTestValues(
         : field.defaultValue;
       return [field.key, resolveFieldValue(composition, field, value)];
     }),
+  );
+}
+
+/** Builds the key-addressed Preview & Export form from the same field-id test data used by Data. */
+export function buildPreviewFormFromTestValues(
+  composition: Composition,
+  testValuesByFieldId: Record<string, FieldValue>,
+): Record<string, FieldValue> {
+  return Object.fromEntries(
+    composition.dataFields.map((field) => [
+      field.key,
+      resolvePreviewFormValue(
+        field,
+        hasOwn(testValuesByFieldId, field.id) ? testValuesByFieldId[field.id] : undefined,
+      ),
+    ]),
   );
 }
 

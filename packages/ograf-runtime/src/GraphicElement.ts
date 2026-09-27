@@ -52,7 +52,6 @@ import {
   type LayerTransform,
 } from '@ograf-editor/scene-model';
 import {
-  applyCompiledClipPaths,
   applyCompiledLayerVisualState,
   interpolateCompiledLayerVisualState,
   sampleCompiledLayerVisualState,
@@ -341,6 +340,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
               this.#lastData,
             )
           : sampleCompiledLayerVisualState(layer, baseFrame, elapsedFrames, this.#lastData);
+      if (direct && directLayer) state.expressionExitProgress = directProgress;
       const correction = this.#loopExitCorrection?.layers.get(layer.id);
       if (!direct && correction && this.#loopExitCorrection) {
         const distance = Math.abs(
@@ -400,7 +400,6 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       const element = this.#layerEls.get(layer.id);
       if (element) applyCompiledLayerVisualState(element, state);
     }
-    applyCompiledClipPaths(this.activeDescriptor, this.#layerEls, states);
     applyCompiledMasks(this.activeDescriptor, this.#layerEls, states, this.#lastData);
   }
 
@@ -442,12 +441,12 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         transition.targetFrame,
         this.#lastData,
       );
+      state.expressionExitProgress = Math.min(1, Math.max(0, progress));
       state.effects = resolveBoundEffects(layer, this.#lastData, state.effects);
       states.set(layer.id, state);
       const element = this.#layerEls.get(layer.id);
       if (element) applyCompiledLayerVisualState(element, state);
     }
-    applyCompiledClipPaths(this.activeDescriptor, this.#layerEls, states);
     applyCompiledMasks(this.activeDescriptor, this.#layerEls, states, this.#lastData);
   }
 

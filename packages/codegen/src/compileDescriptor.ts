@@ -59,6 +59,7 @@ export function compileDescriptor(
       : undefined;
     return {
       id: layer.id,
+      name: layer.name,
       isVisible: layer.isVisible,
       blendMode: layer.blendMode,
       element: resolvePatternElement(
@@ -117,6 +118,10 @@ export function compileDescriptor(
             ];
       }),
       clipParentId: clipParent?.id ?? null,
+      ...(layer.expressions ? { expressions: layer.expressions } : {}),
+      ...(layer.expressionsEnabled !== undefined
+        ? { expressionsEnabled: layer.expressionsEnabled }
+        : {}),
       isMaskOnly: layer.isMaskOnly,
       mask: layer.mask ? { ...layer.mask } : null,
     };

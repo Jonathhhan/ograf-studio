@@ -45,3 +45,5 @@ export * from './projectThumbnail';
 export { createId } from './id';
 export * from './patternLighting';
 export * from './stylePackColorLinks';
+export * from './expressions';
+export * from './expressionTransforms';

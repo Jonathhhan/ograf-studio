@@ -5,7 +5,6 @@ import { compileDescriptor, type CompiledLayer } from '@ograf-editor/codegen';
 import {
   applyLayerEffectsFilter,
   applyAnimatedPaint,
-  applyCompiledClipPaths,
   applyCompiledMasks,
   disposeElementContent,
   expandRuntimeCollections,
@@ -446,7 +445,6 @@ function buildCompositionDom(
       rendered.set(layer.id, layerRoot);
       states.set(layer.id, state);
     }
-    applyCompiledClipPaths(descriptor, rendered, states);
     applyCompiledMasks(descriptor, rendered, states, data);
     return root;
   } catch (error) {

@@ -28,6 +28,10 @@ import {
   roundedRectangleSvgPath,
   resolveElementAssetReferences,
   valueAtSourcePath,
+  resolveExpressionTransforms,
+  EXPRESSION_PROPERTIES,
+  expressionDataScope,
+  expressionTimelineScope,
   type Composition,
   type Element,
   type FieldValue,
@@ -341,13 +345,52 @@ export function renderCompositionFrameSvg(
       };
     }),
   };
+  const data = Object.fromEntries(
+    composition.dataFields.map((field) => [field.key, field.defaultValue]),
+  );
+  const expressionScope: Record<string, number | string> = {
+    frame: normalizedFrame,
+    time: normalizedFrame / composition.frameRate,
+    'comp.width': composition.width,
+    'comp.height': composition.height,
+    ...expressionDataScope(data),
+    ...expressionTimelineScope(
+      computeKeyframeFrames(composition).map((key, index) => ({
+        frame: key.frame,
+        role: composition.keyframes[index]!.role,
+      })),
+      normalizedFrame,
+    ),
+  };
+  const expressionTransforms = resolveExpressionTransforms(
+    composition.layers.map((layer) => ({
+      ...layer,
+      transform: getLayerTransformAtFrame(layer, normalizedFrame),
+    })),
+    expressionScope,
+  );
+  composition.layers = composition.layers.map((candidate) => {
+    if (!candidate.expressions) return candidate;
+    const transform = expressionTransforms.get(candidate.id)!;
+    const animationTracks = { ...candidate.animationTracks };
+    for (const property of EXPRESSION_PROPERTIES) {
+      if (!candidate.expressions[property] || candidate.expressionsEnabled?.[property] === false)
+        continue;
+      animationTracks[property] = [
+        {
+          id: `expression:${candidate.id}:${property}`,
+          frame: normalizedFrame,
+          value: transform[property],
+          easing: 'linear',
+        },
+      ];
+    }
+    return { ...candidate, animationTracks };
+  });
   const background =
     composition.backgroundColor === 'transparent'
       ? ''
       : `<rect width="100%" height="100%" fill="${escapeXml(composition.backgroundColor)}"/>`;
-  const data = Object.fromEntries(
-    composition.dataFields.map((field) => [field.key, field.defaultValue]),
-  );
   const collectionByLayerId = new Map(
     composition.runtimeCollections.flatMap((collection) =>
       collection.prototypeLayerIds.map((layerId) => [layerId, collection] as const),
