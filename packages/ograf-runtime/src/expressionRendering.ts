@@ -1,8 +1,13 @@
+import {
+  expressionPropertyValues,
+  applyExpressionPropertyValues,
+} from './expressionPropertyValues';
 import { sampleCompiledLayerVisualState } from './loopRendering';
 import { resolveBoundElement } from './renderElement';
 import { measureExpressionText } from './expressionTextBounds';
 import {
   resolveExpressionTransforms,
+  normalizeExpressionPropertyValue,
   expressionSourceRect,
   getTrackValueAtFrame,
   expressionDataScope,
@@ -28,27 +33,31 @@ export function resolveFrameExpressions(
   const lastFrame = Math.max(0, ...descriptor.keyframes.map((key) => key.frame));
   const sampleFrame = (seconds: number) =>
     Math.max(0, Math.min(seconds * descriptor.frameRate, lastFrame));
+  const originals = new Map<string, ReturnType<typeof expressionPropertyValues>>();
   const transforms = resolveExpressionTransforms(
     descriptor.layers.flatMap((layer) => {
       const state = states.get(layer.id);
       if (!state) return [];
+      const original = expressionPropertyValues(layer, state, data);
+      originals.set(layer.id, original);
       const expressionState = state as MaskRenderState & {
         expressionFrame?: number;
         expressionExitProgress?: number;
       };
       const frame = expressionState.expressionFrame ?? 0;
-      const samples = new Map<number, MaskRenderState['transform']>();
-      const sampleTransform = (seconds: number) => {
+      const samples = new Map<number, MaskRenderState>();
+      const sampleState = (seconds: number) => {
         const at = sampleFrame(seconds);
         let sampled = samples.get(at);
         if (!sampled) {
-          sampled = sampleCompiledLayerVisualState(layer, at, undefined, data).transform;
+          sampled = sampleCompiledLayerVisualState(layer, at, undefined, data);
           // Bound memory even when a user script requests many distinct times.
           if (samples.size >= 128) samples.delete(samples.keys().next().value!);
           samples.set(at, sampled);
         }
         return sampled;
       };
+      const sampleTransform = (seconds: number) => sampleState(seconds).transform;
       return [
         {
           ...layer,
@@ -62,6 +71,20 @@ export function resolveFrameExpressions(
               }
             : {}),
           transform: state.transform,
+          propertyValues: original,
+          normalizeProperty: (
+            property: import('@ograf-editor/scene-model').AnimatableLayerProperty,
+            value: number,
+          ) =>
+            normalizeExpressionPropertyValue(
+              { ...layer, element: resolveBoundElement(layer, data) },
+              property,
+              value,
+            ),
+          sampleProperty: (
+            property: import('@ograf-editor/scene-model').AnimatableLayerProperty,
+            seconds: number,
+          ) => expressionPropertyValues(layer, sampleState(seconds), data)[property]!,
           sampleTransform,
           sourceRectAtTime: (seconds: number, includeExtents: boolean) => {
             const at = sampleFrame(seconds);
@@ -118,7 +141,9 @@ export function resolveFrameExpressions(
   return new Map(
     [...states].map(([id, state]) => [
       id,
-      { ...state, transform: transforms.get(id) ?? state.transform },
+      transforms.has(id)
+        ? applyExpressionPropertyValues(state, transforms.get(id)!, originals.get(id)!)
+        : state,
     ]),
   );
 }

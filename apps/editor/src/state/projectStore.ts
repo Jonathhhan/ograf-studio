@@ -1925,6 +1925,14 @@ export const useProjectStore = create<ProjectStore>()(
           const layer = composition.layers.find((candidate) => candidate.id === layerId);
           if (layer && !layer.isLocked) {
             layer.expressions = expressions;
+            if (layer.expressionsEnabled) {
+              for (const key of Object.keys(layer.expressionsEnabled) as Array<
+                keyof NonNullable<Layer['expressions']>
+              >)
+                if (!Object.hasOwn(expressions ?? {}, key)) delete layer.expressionsEnabled[key];
+              if (!Object.keys(layer.expressionsEnabled).length)
+                layer.expressionsEnabled = undefined;
+            }
             if (expressions) composition.expressionApiVersion ??= 1;
           }
         }),

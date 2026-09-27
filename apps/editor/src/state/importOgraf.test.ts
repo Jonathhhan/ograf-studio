@@ -198,8 +198,11 @@ describe('best-effort OGraf import', () => {
     text.expressions = {
       x: 'const rect = layer("Rectangle");\nreturn rect.x + rect.width + 100;',
       opacity: 'ease(0, 1, frame / 10, "quad-out")',
+      strokeWidth: 'value + 1',
+      transformOriginX: '',
+      blur: 'valueAtTime(0.2)',
     };
-    text.expressionsEnabled = { x: true, opacity: false };
+    text.expressionsEnabled = { x: true, opacity: false, strokeWidth: false };
     composition.expressionApiVersion = 23;
     composition.scripting = {
       enabled: true,

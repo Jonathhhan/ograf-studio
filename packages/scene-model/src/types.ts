@@ -604,11 +604,9 @@ export interface Layer {
   componentLink: ComponentLink | null;
   /** Ordered data bindings applied to independent element properties at runtime. */
   bindings: LayerBinding[];
-  /** Optional trusted JavaScript expressions for numeric transform properties. */
-  expressions?: Partial<Record<'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity', string>>;
-  expressionsEnabled?: Partial<
-    Record<'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity', boolean>
-  >;
+  /** Optional trusted JavaScript expressions for numeric animation properties. */
+  expressions?: Partial<Record<AnimatableLayerProperty, string>>;
+  expressionsEnabled?: Partial<Record<AnimatableLayerProperty, boolean>>;
 }
 
 export type KeyframeRole = 'start' | 'step' | 'end';

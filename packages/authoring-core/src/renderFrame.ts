@@ -29,7 +29,10 @@ import {
   resolveElementAssetReferences,
   valueAtSourcePath,
   resolveExpressionTransforms,
-  EXPRESSION_PROPERTIES,
+  getLayerExpressionProperties,
+  normalizeExpressionPropertyValue,
+  type AnimatableLayerProperty,
+  type ExpressionValues,
   expressionDataScope,
   expressionSourceRect,
   expressionTimelineScope,
@@ -147,7 +150,7 @@ function layerSvg(
   composition: Composition,
   data: Record<string, FieldValue>,
   options: {
-    transform?: LayerTransform;
+    transform?: ExpressionValues;
     itemValue?: FieldValue;
     collectionFieldId?: string;
     offsetX?: number;
@@ -156,6 +159,16 @@ function layerSvg(
   } = {},
 ): string {
   if (!layer.isVisible || layer.isGuide || layer.isMaskOnly) return '';
+  if (options.transform) {
+    layer = { ...layer, animationTracks: { ...layer.animationTracks } };
+    for (const property of getLayerExpressionProperties(layer)) {
+      const value = options.transform[property];
+      if (value !== undefined)
+        layer.animationTracks![property] = [
+          { id: `expression:${layer.id}:${property}`, frame, value, easing: 'linear' },
+        ];
+    }
+  }
   const transform = { ...(options.transform ?? getLayerTransformAtFrame(layer, frame)) };
   if (!options.transform) {
     transform.x += options.offsetX ?? 0;
@@ -184,6 +197,10 @@ function layerSvg(
           ? { ...effects, dropShadowColor: String(mapped) }
           : withEffectParameter(effects, binding.targetProperty, mapped);
     }
+  }
+  for (const [property, keys] of Object.entries(layer.animationTracks ?? {})) {
+    if (parseEffectProperty(property) && keys?.[0]?.id.startsWith('expression:'))
+      effects = withEffectParameter(effects, property, keys[0].value);
   }
   const filterId = `filter-${escapeXml(layer.id)}${escapeXml(options.idSuffix ?? '')}`;
   const filters = effectStackToSvg(effects);
@@ -374,6 +391,23 @@ export function renderCompositionFrameSvg(
       );
       const transform = getLayerTransformAtFrame(layer, normalizedFrame);
       const samplers = (index?: number) => {
+        let boundLayer = { ...layer };
+        for (const binding of layer.bindings) {
+          const field = composition.dataFields.find((entry) => entry.id === binding.fieldId);
+          const root = field ? data[field.key] : undefined;
+          const item =
+            index !== undefined && collection?.fieldId === field?.id && Array.isArray(root)
+              ? root[index]
+              : root;
+          const value = valueAtSourcePath(item, binding.sourcePath);
+          if (value === undefined) continue;
+          const mapped = binding.valueMap?.[String(value)] ?? value;
+          boundLayer = {
+            ...boundLayer,
+            element: applyElementDataValue(boundLayer.element, binding.targetProperty, mapped),
+            effects: withEffectParameter(boundLayer.effects, binding.targetProperty, mapped),
+          };
+        }
         const sampleFrame = (seconds: number) =>
           Math.max(0, Math.min(seconds * composition.frameRate, getTotalFrames(composition)));
         const sampleTransform = (seconds: number) => {
@@ -384,30 +418,32 @@ export function renderCompositionFrameSvg(
             y: pose.y + (index === undefined ? 0 : collection!.offsetPerItem.y * index),
           };
         };
+        const propertyValues = Object.fromEntries(
+          getLayerExpressionProperties(boundLayer).map((property) => [
+            property,
+            TRANSFORM_ANIMATION_PROPERTIES.includes(property as keyof LayerTransform)
+              ? sampleTransform(normalizedFrame / composition.frameRate)[
+                  property as keyof LayerTransform
+                ]
+              : getLayerPropertyValueAtFrame(boundLayer, property, normalizedFrame),
+          ]),
+        );
         return {
+          propertyValues,
           sampleTransform,
+          normalizeProperty: (property: AnimatableLayerProperty, value: number) =>
+            normalizeExpressionPropertyValue(boundLayer, property, value),
+          sampleProperty: (property: AnimatableLayerProperty, seconds: number) =>
+            TRANSFORM_ANIMATION_PROPERTIES.includes(property as keyof LayerTransform)
+              ? sampleTransform(seconds)[property as keyof LayerTransform]
+              : getLayerPropertyValueAtFrame(boundLayer, property, sampleFrame(seconds)),
           sourceRectAtTime: (seconds: number, includeExtents: boolean) => {
-            let element = layer.bindings.reduce<Element>((resolved, binding) => {
-              const field = composition.dataFields.find((entry) => entry.id === binding.fieldId);
-              const root = field ? data[field.key] : undefined;
-              const item =
-                index !== undefined && collection?.fieldId === field?.id && Array.isArray(root)
-                  ? root[index]
-                  : root;
-              const value = valueAtSourcePath(item, binding.sourcePath);
-              return value === undefined
-                ? resolved
-                : applyElementDataValue(
-                    resolved,
-                    binding.targetProperty,
-                    binding.valueMap?.[String(value)] ?? value,
-                  );
-            }, layer.element);
+            let element = boundLayer.element;
             if (element.type === 'text')
               element = {
                 ...element,
                 strokeWidth: getLayerPropertyValueAtFrame(
-                  layer,
+                  boundLayer,
                   'strokeWidth',
                   sampleFrame(seconds),
                 ),
@@ -439,8 +475,10 @@ export function renderCompositionFrameSvg(
     if (!candidate.expressions && !composition.scripting?.enabled) return candidate;
     const transform = expressionTransforms.get(candidate.id);
     if (!transform) return candidate;
-    const animationTracks = { ...candidate.animationTracks };
-    for (const property of EXPRESSION_PROPERTIES) {
+    const animationTracks: import('@ograf-editor/scene-model').LayerAnimationTracks = {
+      ...candidate.animationTracks,
+    };
+    for (const property of getLayerExpressionProperties(candidate)) {
       if (
         !composition.scripting?.enabled &&
         (!candidate.expressions?.[property] || candidate.expressionsEnabled?.[property] === false)
@@ -450,7 +488,7 @@ export function renderCompositionFrameSvg(
         {
           id: `expression:${candidate.id}:${property}`,
           frame: normalizedFrame,
-          value: transform[property],
+          value: transform[property]!,
           easing: 'linear',
         },
       ];

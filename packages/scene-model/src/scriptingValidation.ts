@@ -1,6 +1,6 @@
 import { scriptModuleName } from './scriptModules';
 
-const properties = new Set(['x', 'y', 'width', 'height', 'rotation', 'opacity']);
+import { isAnimatableLayerProperty } from './layerAnimation';
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -57,7 +57,7 @@ export function scriptingErrors(value: unknown, validateModuleNames = true): str
       if (!record(entries)) errors.push('Layer ' + field + ' must be an object.');
       else
         for (const [property, entry] of Object.entries(entries)) {
-          if (!properties.has(property) || typeof entry !== type)
+          if (!isAnimatableLayerProperty(property) || typeof entry !== type)
             errors.push(
               'Layer ' +
                 field +

@@ -438,3 +438,20 @@ describe('renderCompositionFrameSvg', () => {
     expect(svg).toContain('translate(100 122)');
   });
 });
+
+it('renders new numeric expression targets in SVG snapshots', () => {
+  const project = createProject();
+  const comp = project.compositions[0]!;
+  const layer = createLayerOfKind('text');
+  layer.keyframes = [createLayerKeyframe(0, createDefaultTransform())];
+  if (layer.element.type === 'text') layer.element.strokeColor = '#ffffff';
+  layer.expressions = { strokeWidth: '4', blur: '3', transformOriginX: '0.25' };
+  comp.layers = [layer];
+  const result = renderCompositionFrameSvg(project);
+  expect(result.svg).toContain('stroke-width="4"');
+  expect(result.svg).toContain('stdDeviation="3"');
+  expect(result.composition.layers[0]!.animationTracks.transformOriginX?.[0]?.value).toBe(0.25);
+  expect(layer.animationTracks.strokeWidth).not.toEqual(
+    result.composition.layers[0]!.animationTracks.strokeWidth,
+  );
+});
