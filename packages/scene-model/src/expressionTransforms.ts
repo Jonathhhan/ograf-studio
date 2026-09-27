@@ -1,4 +1,4 @@
-import { evaluateExpression, type ExpressionScope } from './expressions';
+import { evaluateExpression, type ExpressionScope, type ExpressionLogLevel } from './expressions';
 import type { Layer, LayerTransform } from './types';
 
 export const EXPRESSION_PROPERTIES = ['x', 'y', 'width', 'height', 'rotation', 'opacity'] as const;
@@ -9,12 +9,18 @@ export interface ExpressionDiagnostic {
   property: ExpressionProperty;
   source: string;
   message: string;
+  kind?: 'log';
+  level?: ExpressionLogLevel;
+  frame?: number;
+  count?: number;
 }
 
 export interface ExpressionLayerState {
   id: string;
   name?: string;
   transform: LayerTransform;
+  /** Authored identity of a layer expanded into a collection item. */
+  prototypeLayerId?: string;
   expressions?: Layer['expressions'];
   expressionsEnabled?: Layer['expressionsEnabled'];
   scope?: ExpressionScope;
@@ -27,6 +33,7 @@ export function resolveExpressionTransforms(
   layers: readonly ExpressionLayerState[],
   scope: ExpressionScope,
   diagnostics?: ExpressionDiagnostic[],
+  apiVersion = 1,
 ): Map<string, LayerTransform> {
   const byId = new Map(layers.map((layer) => [layer.id, layer]));
   const byName = new Map<string, ExpressionLayerState | null>();
@@ -39,6 +46,13 @@ export function resolveExpressionTransforms(
     }
     if (layer.name) names.set(layer.name, names.has(layer.name) ? null : layer);
   }
+  const referenceIds = new Map<string | undefined, Map<string, ExpressionLayerState>>();
+  for (const layer of layers) {
+    const ids = referenceIds.get(layer.referenceScope) ?? new Map();
+    ids.set(layer.prototypeLayerId ?? layer.id, layer);
+    referenceIds.set(layer.referenceScope, ids);
+  }
+  let logCount = 0;
   const values = new Map<string, number>();
   const visiting = new Set<string>();
   const failures = new Map<string, unknown>();
@@ -90,8 +104,65 @@ export function resolveExpressionTransforms(
       })) {
         Object.defineProperty(context, name, { value, configurable: true });
       }
-      const value = evaluateExpression(expression, context, (name, property) =>
-        resolveLayer(layer, name, property),
+      const value = evaluateExpression(
+        expression,
+        context,
+        (name, property) => resolveLayer(layer, name, property),
+        {
+          apiVersion,
+          resolveLayerById: (targetId, targetProperty) => {
+            const target =
+              referenceIds.get(layer.referenceScope)?.get(targetId) ??
+              referenceIds.get(undefined)?.get(targetId);
+            if (!target) throw new Error('Unknown layer ID: ' + targetId);
+            if (!(EXPRESSION_PROPERTIES as readonly string[]).includes(targetProperty))
+              throw new Error('Unknown layer property: ' + targetProperty);
+            return resolve(target.id, targetProperty as ExpressionProperty);
+          },
+          ...(diagnostics
+            ? {
+                onLog: (level: ExpressionLogLevel, args: unknown[]) => {
+                  // Bound capture and serialization work even when a script logs in a loop.
+                  if (logCount++ >= 100) return;
+                  const message = args
+                    .slice(0, 20)
+                    .map((arg) => {
+                      try {
+                        return (
+                          typeof arg === 'string' ? arg : (JSON.stringify(arg) ?? String(arg))
+                        ).slice(0, 2000);
+                      } catch {
+                        return '[unserializable value]';
+                      }
+                    })
+                    .join(' ')
+                    .slice(0, 4000);
+                  const previous = diagnostics.find(
+                    (entry) =>
+                      entry.kind === 'log' &&
+                      entry.layerId === id &&
+                      entry.property === property &&
+                      entry.level === level &&
+                      entry.message === message,
+                  );
+                  if (previous) {
+                    previous.count = (previous.count ?? 1) + 1;
+                    return;
+                  }
+                  diagnostics.push({
+                    layerId: id,
+                    property,
+                    source: expression,
+                    message,
+                    kind: 'log',
+                    level,
+                    frame: Number(context.frame ?? 0),
+                    count: 1,
+                  });
+                },
+              }
+            : {}),
+        },
       );
       values.set(key, value);
       return value;

@@ -818,6 +818,8 @@ export interface CompositionLayout {
 }
 
 export interface Composition {
+  /** Missing means API v1; unknown versions must not be reinterpreted. */
+  expressionApiVersion?: number;
   id: string;
   name: string;
   width: number;

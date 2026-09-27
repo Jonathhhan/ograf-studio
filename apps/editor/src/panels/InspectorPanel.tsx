@@ -350,6 +350,7 @@ function CornerRadiusEditor({
 
 export function InspectorPanel() {
   const expressionDiagnostics = useExpressionDiagnosticsStore();
+  const [expressionReferenceId, setExpressionReferenceId] = useState('');
   const { window } = useEditorWindow();
   const composition = useActiveComposition();
   const currentFrame = useTimelineStore((s) => s.currentFrame);
@@ -592,6 +593,31 @@ export function InspectorPanel() {
             earlier Step. Use ease(start, end, progress, "cubic-out") for a keyframe easing preset,
             such as "ease-in-out", "bounce-out" or "elastic-out". The easing preset is required.
           </p>
+          <label className="inspector-hint">
+            Stable layer reference
+            <select
+              value={expressionReferenceId}
+              aria-label="Stable layer reference"
+              onChange={(event) => setExpressionReferenceId(event.target.value)}
+            >
+              <option value="">Choose a layer...</option>
+              {composition.layers
+                .filter((candidate) => !candidate.isGuide)
+                .map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </option>
+                ))}
+            </select>
+            {expressionReferenceId && (
+              <input
+                readOnly
+                aria-label="Layer reference code"
+                value={`layerById(${JSON.stringify(expressionReferenceId)})`}
+                onFocus={(event) => event.target.select()}
+              />
+            )}
+          </label>
           {EXPRESSION_FIELDS.map(({ key, label }) => {
             const source =
               layer.expressions?.[key as keyof NonNullable<typeof layer.expressions>] ?? '';
@@ -601,6 +627,7 @@ export function InspectorPanel() {
                 false
                 ? expressionDiagnostics.diagnostics.find(
                     (entry) =>
+                      entry.kind !== 'log' &&
                       entry.layerId === layer.id &&
                       entry.property === key &&
                       entry.source === source,
@@ -665,6 +692,25 @@ export function InspectorPanel() {
               </PropertyRow>
             );
           })}
+          <details className="inspector-expression-console">
+            <summary>Expression console | current frame</summary>
+            <p className="inspector-hint">
+              Canvas logs for this layer. Repeated messages are grouped; up to 100 log calls per
+              evaluation.
+            </p>
+            {expressionDiagnostics.compositionId === composition.id &&
+              expressionDiagnostics.diagnostics
+                .filter((entry) => entry.layerId === layer.id)
+                .map((entry, index) => (
+                  <pre key={index} className="inspector-expression-log">
+                    {entry.property} |{' '}
+                    {entry.kind === 'log' ? `${entry.level} | frame ${entry.frame}` : 'error'}
+                    {entry.count && entry.count > 1 ? ` | x${entry.count}` : ''}
+                    {'\n'}
+                    {entry.message}
+                  </pre>
+                ))}
+          </details>
         </details>
 
         <PropertyRow

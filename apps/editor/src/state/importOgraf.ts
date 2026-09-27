@@ -888,6 +888,7 @@ function projectFromDescriptor(
     width: descriptor.width,
     height: descriptor.height,
     frameRate: descriptor.frameRate,
+    expressionApiVersion: descriptor.expressionApiVersion ?? 1,
     backgroundColor: descriptor.backgroundColor,
     layers,
     keyframes: lifecycle.keyframes,

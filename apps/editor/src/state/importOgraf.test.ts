@@ -200,6 +200,7 @@ describe('best-effort OGraf import', () => {
       opacity: 'ease(0, 1, frame / 10, "quad-out")',
     };
     text.expressionsEnabled = { x: true, opacity: false };
+    composition.expressionApiVersion = 23;
     composition.layers = [rectangle, text];
     const descriptor = compileDescriptor(composition);
     const manifest = assembleManifest(project, composition, descriptor);
@@ -213,6 +214,8 @@ describe('best-effort OGraf import', () => {
 
     expect(imported.mode).toBe('compiled-descriptor');
     const restored = imported.project.compositions[0]!;
+    expect(restored.expressionApiVersion).toBe(23);
+    expect(compileDescriptor(restored).expressionApiVersion).toBe(23);
     expect(restored.layers.find((layer) => layer.id === rectangle.id)?.name).toBe('Rectangle');
     expect(restored.layers.find((layer) => layer.id === text.id)).toMatchObject({
       expressions: text.expressions,

@@ -1918,7 +1918,10 @@ export const useProjectStore = create<ProjectStore>()(
         set((state) => {
           const composition = getActiveComposition(state.project, state.activeCompositionId);
           const layer = composition.layers.find((candidate) => candidate.id === layerId);
-          if (layer && !layer.isLocked) layer.expressions = expressions;
+          if (layer && !layer.isLocked) {
+            layer.expressions = expressions;
+            if (expressions) composition.expressionApiVersion ??= 1;
+          }
         }),
 
       setLayerExpressionEnabled: (layerId, property, enabled) =>

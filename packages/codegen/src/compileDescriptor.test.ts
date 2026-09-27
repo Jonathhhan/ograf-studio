@@ -35,6 +35,14 @@ const POSE = {
 };
 
 describe('compileDescriptor', () => {
+  it('pins legacy expressions to API v1 and preserves unknown API versions', () => {
+    const composition = createComposition({ layers: [createLayerOfKind('rectangle')] });
+    composition.layers[0]!.expressions = { x: 'x + 1' };
+    delete composition.expressionApiVersion;
+    expect(compileDescriptor(composition).expressionApiVersion).toBe(1);
+    composition.expressionApiVersion = 23;
+    expect(compileDescriptor(composition).expressionApiVersion).toBe(23);
+  });
   it('preserves expression source and individual enable flags in exported graphics', () => {
     const layer = createLayerOfKind('rectangle');
     layer.expressions = {

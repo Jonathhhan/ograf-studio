@@ -27,6 +27,75 @@ function layer(
 }
 
 describe('resolveExpressionTransforms', () => {
+  it('retains v1 behavior for legacy expressions and rejects future versions before execution', () => {
+    const legacy = layer('legacy', { x: 'Math.max(x, 42)' });
+    const future = layer('future', { x: 'throw new Error("executed")' });
+    const diagnostics: ExpressionDiagnostic[] = [];
+    expect(resolveExpressionTransforms([legacy], {}).get('legacy')!.x).toBe(42);
+    const result = resolveExpressionTransforms([future], {}, diagnostics, 2);
+    expect(result.get('future')!.x).toBe(10);
+    expect(diagnostics[0]!.message).toBe('Unsupported expression API version: 2');
+  });
+
+  it('keeps ID references stable after renaming and resolves collection prototypes locally', () => {
+    const target = { ...layer('stable-id', { width: '200' }), name: 'Renamed' };
+    const follower = layer('follower', { x: 'layerById("stable-id").width' });
+    const items = [0, 1].flatMap((index) => [
+      {
+        ...layer('box-' + index, { width: String(300 + index) }),
+        prototypeLayerId: 'box',
+        referenceScope: 'item-' + index,
+      },
+      {
+        ...layer('text-' + index, { x: 'layerById("box").width' }),
+        prototypeLayerId: 'text',
+        referenceScope: 'item-' + index,
+      },
+    ]);
+    const diagnostics: ExpressionDiagnostic[] = [];
+    const outside = layer('outside', { x: 'layerById("box").width' });
+    const result = resolveExpressionTransforms(
+      [follower, target, ...items, outside],
+      {},
+      diagnostics,
+    );
+    expect(result.get('follower')!.x).toBe(200);
+    expect(result.get('text-0')!.x).toBe(300);
+    expect(result.get('text-1')!.x).toBe(301);
+    expect(diagnostics[0]!.message).toBe('Unknown layer ID: box');
+    target.expressions = { width: 'layerById("follower").x' };
+    const cycles: ExpressionDiagnostic[] = [];
+    expect(resolveExpressionTransforms([target, follower], {}, cycles).get('follower')!.x).toBe(10);
+    expect(cycles.every((entry) => entry.message.includes('Circular'))).toBe(true);
+  });
+
+  it('captures bounded, grouped console messages without turning them into property errors', () => {
+    const target = layer('logs', {
+      x: `
+      for (let i = 0; i < 150; i++) console.log('hello', { value: 2 });
+      return 123;
+    `,
+    });
+    const diagnostics: ExpressionDiagnostic[] = [];
+    expect(resolveExpressionTransforms([target], { frame: 12 }, diagnostics).get('logs')!.x).toBe(
+      123,
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({
+      kind: 'log',
+      level: 'log',
+      frame: 12,
+      count: 100,
+      message: 'hello {"value":2}',
+      layerId: 'logs',
+      property: 'x',
+    });
+    target.expressions = { x: 'const a = {}; a.self = a; console.warn(a); return 5;' };
+    const circular: ExpressionDiagnostic[] = [];
+    expect(resolveExpressionTransforms([target], {}, circular).get('logs')!.x).toBe(5);
+    expect(circular[0]!.message).toBe('[unserializable value]');
+  });
+
   it('reports failed properties and their dependents, and clears errors after repair or disabling', () => {
     const a = layer('A', { x: 'layer("Missing").x', y: '42' });
     const b = layer('B', { x: 'layer("A").x + 1' });

@@ -185,6 +185,7 @@ export function compileDescriptor(
     height: composition.height,
     backgroundColor: composition.backgroundColor,
     frameRate: composition.frameRate,
+    expressionApiVersion: composition.expressionApiVersion ?? 1,
     updateTransitionFrames: composition.updateTransitionFrames,
     fonts: composition.assets
       .filter((asset) => asset.kind === 'font')

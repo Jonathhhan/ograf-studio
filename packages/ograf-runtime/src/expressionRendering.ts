@@ -50,6 +50,7 @@ export function resolveFrameExpressions(
           ...layer,
           ...(layer.collectionItem
             ? {
+                prototypeLayerId: layer.collectionItem.prototypeLayerId,
                 referenceScope: JSON.stringify([
                   layer.collectionItem.collectionId,
                   layer.collectionItem.index,
@@ -77,6 +78,7 @@ export function resolveFrameExpressions(
       ...expressionTimelineScope(descriptor.keyframes),
     },
     diagnostics,
+    descriptor.expressionApiVersion,
   );
   return new Map(
     [...base].map(([id, state]) => [

@@ -3,9 +3,17 @@ import type { EasingPreset, KeyframeRole } from './types';
 
 export type ExpressionScope = Record<string, number | string>;
 export type ExpressionLayerResolver = (name: string, property: string) => number;
+export const EXPRESSION_API_VERSION = 1;
+export type ExpressionLogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
+export interface ExpressionEvaluationOptions {
+  apiVersion?: number;
+  resolveLayerById?: ExpressionLayerResolver;
+  onLog?: (level: ExpressionLogLevel, args: unknown[]) => void;
+}
 type CompiledExpression = (
   scope: ExpressionScope,
   resolveLayer?: ExpressionLayerResolver,
+  options?: ExpressionEvaluationOptions,
 ) => number;
 
 /** Authored timeline positions; playback speed and data fields do not move these boundaries. */
@@ -74,7 +82,11 @@ function helper(name: 'lerp' | 'clamp' | 'ease', ...args: unknown[]): number {
 }
 
 /** Preserve lazy getters: copying their values would eagerly evaluate unrelated dependencies. */
-function evaluationScope(scope: ExpressionScope, resolveLayer?: ExpressionLayerResolver) {
+function evaluationScope(
+  scope: ExpressionScope,
+  resolveLayer?: ExpressionLayerResolver,
+  options: ExpressionEvaluationOptions = {},
+) {
   const context = Object.create(null);
   const thisLayer = Object.create(null);
   for (const key of Object.getOwnPropertyNames(scope)) {
@@ -91,6 +103,26 @@ function evaluationScope(scope: ExpressionScope, resolveLayer?: ExpressionLayerR
   }
   Object.assign(context, {
     thisLayer,
+    layerById: (id: string) =>
+      new Proxy(Object.create(null), {
+        get: (_target, property) => {
+          if (typeof property !== 'string') return undefined;
+          if (!options.resolveLayerById) throw new Error('Layer ID lookup is unavailable.');
+          return options.resolveLayerById(id, property);
+        },
+      }),
+    ...(options.onLog
+      ? {
+          console: new Proxy(console, {
+            get: (target, property) => {
+              if (['log', 'info', 'warn', 'error', 'debug'].includes(String(property)))
+                return (...args: unknown[]) => options.onLog!(property as ExpressionLogLevel, args);
+              const value = Reflect.get(target, property);
+              return typeof value === 'function' ? value.bind(target) : value;
+            },
+          }),
+        }
+      : {}),
     layer: (name: string) =>
       new Proxy(Object.create(null), {
         get: (_target, property) => {
@@ -127,8 +159,8 @@ function compileExpression(source: string): CompiledExpression {
       execute = compile(source);
     }
   }
-  return (scope, resolveLayer) => {
-    const result = execute(evaluationScope(scope, resolveLayer));
+  return (scope, resolveLayer, options) => {
+    const result = execute(evaluationScope(scope, resolveLayer, options));
     if (typeof result !== 'number') throw new Error('Expression result must be a number.');
     if (!Number.isFinite(result)) throw new Error('Expression result is not finite.');
     return result;
@@ -163,6 +195,10 @@ export function evaluateExpression(
   source: string,
   scope: ExpressionScope,
   resolveLayer?: ExpressionLayerResolver,
+  options: ExpressionEvaluationOptions = {},
 ): number {
-  return compiledExpression(source)(scope, resolveLayer);
+  const version = options.apiVersion ?? 1;
+  if (version !== EXPRESSION_API_VERSION)
+    throw new Error('Unsupported expression API version: ' + version);
+  return compiledExpression(source)(scope, resolveLayer, options);
 }

@@ -26,7 +26,11 @@ export function publishExpressionDiagnostics(
         entry.layerId === before.layerId &&
         entry.property === before.property &&
         entry.source === before.source &&
-        entry.message === before.message
+        entry.message === before.message &&
+        entry.kind === before.kind &&
+        entry.level === before.level &&
+        entry.frame === before.frame &&
+        entry.count === before.count
       );
     })
   )

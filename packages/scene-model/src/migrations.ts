@@ -394,6 +394,7 @@ function normalizeComposition(composition: LegacyComposition): Composition {
 
   return {
     ...composition,
+    expressionApiVersion: composition.expressionApiVersion ?? 1,
     updateTransitionFrames: Math.max(0, Math.round(composition.updateTransitionFrames ?? 0)),
     keyframes: normalizedKeyframes,
     transitions,

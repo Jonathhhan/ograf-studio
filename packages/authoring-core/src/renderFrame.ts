@@ -368,6 +368,8 @@ export function renderCompositionFrameSvg(
       transform: getLayerTransformAtFrame(layer, normalizedFrame),
     })),
     expressionScope,
+    undefined,
+    composition.expressionApiVersion,
   );
   composition.layers = composition.layers.map((candidate) => {
     if (!candidate.expressions) return candidate;

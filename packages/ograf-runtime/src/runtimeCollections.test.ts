@@ -90,6 +90,7 @@ describe('runtime collection expansion', () => {
       itemIndex: 1,
     });
     expect(secondLabel.collectionItem).toEqual({
+      prototypeLayerId: label.id,
       collectionId: 'collection',
       dataKey: 'leaderboard',
       index: 1,

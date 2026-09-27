@@ -68,7 +68,12 @@ export interface CompiledLayer {
   isMaskOnly?: boolean;
   mask?: import('@ograf-editor/scene-model').LayerMask | null;
   /** Runtime-only visibility/data identity for one bounded collection slot. */
-  collectionItem?: { collectionId: string; dataKey: string; index: number };
+  collectionItem?: {
+    prototypeLayerId?: string;
+    collectionId: string;
+    dataKey: string;
+    index: number;
+  };
 }
 
 export interface CompiledRuntimeCollection {
@@ -122,6 +127,8 @@ export interface CompiledCustomActionRef {
 
 /** A flattened, runtime-ready representation of a Composition — what `GraphicElement` interprets. */
 export interface CompiledGraphicDescriptor {
+  /** Missing means API v1; unknown versions must not be reinterpreted. */
+  expressionApiVersion?: number;
   width: number;
   height: number;
   backgroundColor: string;

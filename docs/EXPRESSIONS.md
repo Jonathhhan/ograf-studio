@@ -12,6 +12,40 @@ real JavaScript. Expressions are trusted project code and can access the host en
 Use expressions only from projects you trust. They run synchronously; an infinite loop can
 block rendering. Return a finite number for the property value.
 
+## API compatibility and stable references
+
+Expression API **v1** defines the values and helpers documented here. Each composition stores one
+`expressionApiVersion`, which is preserved by project migration and compiled export/import.
+Existing compositions without a version use v1. All their expressions share that API version. Unsupported versions produce an error and retain
+the sampled property; they are never silently executed with another API version.
+The export embeds its runtime, so later Studio updates do not replace the evaluator in an
+already exported graphic. This versions Studio's API, not the host's JavaScript engine.
+
+Use `layerById("layer-id").width` when a reference must survive a layer rename. Choose a layer
+under **Stable layer reference**, then copy the displayed code into an expression and append
+the property. Name-based `layer("Name")` remains supported. IDs refer to the current composition.
+Within runtime collections, authored prototype IDs resolve within the current item first,
+then to global layers; they cannot address another item. Duplicating a layer does not rewrite
+references in JavaScript source: an ID reference continues to address its original target.
+
+### Debugging in Studio
+
+The **Expression console | current frame** section shows the selected layer's current canvas
+logs and errors, including property and log frame. `console.log`, `info`, `warn`, `error` and
+`debug` are captured during canvas evaluation. Identical messages are grouped. Capture is
+limited to the first 100 calls per evaluation, 20 arguments per call and 4,000 display characters
+per message. It is a current-evaluation view, not a persistent history; scrubbing replaces it.
+Exported graphics and evaluations without a diagnostic collector use the host's normal console.
+
+```js
+console.log('position', frame, thisLayer.x);
+return thisLayer.x;
+```
+
+Local variables and helper context are recreated for every evaluation. The API is synchronous:
+return a finite number, never a Promise. External side effects are possible but are not part of
+the playback contract. Use pure calculations from supplied values for repeatable seeking.
+
 ## Start with a formula
 
 In a text layer's X expression:
