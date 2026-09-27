@@ -10,6 +10,8 @@ const reservedNames = new Set([
   'frame',
   'time',
   'thisLayer',
+  'thisProperty',
+  'value',
   'layer',
   'layerById',
   'lerp',

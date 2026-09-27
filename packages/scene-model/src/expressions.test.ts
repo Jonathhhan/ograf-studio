@@ -290,3 +290,44 @@ describe('evaluateExpression', () => {
     expect(evaluateExpression('data.Alphabet == "Latin" ? 1 : missing()', scope)).toBe(1);
   });
 });
+
+describe('structured expression data', () => {
+  it('preserves nested objects, arrays, null, booleans and literal field keys', () => {
+    const scope = expressionDataScope({
+      visible: true,
+      rows: [{ score: 7 }],
+      missing: null,
+      'a.b': 3,
+      'home score': 2,
+    });
+    expect(
+      evaluateExpression(
+        'data.visible === true && data.missing === null ? data.rows[0].score + data["a.b"] + data["home score"] : 0',
+        scope,
+      ),
+    ).toBe(12);
+    expect(evaluateExpression('Number(data.visible)', scope)).toBe(1);
+    expect(evaluateExpression('Object.keys(data).length', scope)).toBe(5);
+  });
+  it('detaches and freezes nested values without freezing the input', () => {
+    const input = { rows: [{ score: 7 }], visible: true };
+    const scope = expressionDataScope(input);
+    input.rows[0]!.score = 9;
+    for (const source of [
+      'data.rows[0].score = 100; return 1;',
+      'data.rows.push({score: 100}); return 1;',
+      'data.visible = false; return 1;',
+      'delete data.rows; return 1;',
+    ])
+      expect(() => evaluateExpression(source, scope)).toThrow();
+    expect(evaluateExpression('data.rows[0].score', scope)).toBe(7);
+    expect(input.rows[0]!.score).toBe(9);
+    expect(Object.isFrozen(input.rows)).toBe(false);
+  });
+  it('keeps special object keys as data without changing prototypes', () => {
+    const data = JSON.parse('{"__proto__":{"score":7},"constructor":3}');
+    expect(
+      evaluateExpression('data.__proto__.score + data.constructor', expressionDataScope(data)),
+    ).toBe(10);
+  });
+});

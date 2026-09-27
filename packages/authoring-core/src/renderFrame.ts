@@ -32,6 +32,7 @@ import {
   EXPRESSION_PROPERTIES,
   expressionDataScope,
   expressionTimelineScope,
+  type ExpressionScope,
   type Composition,
   type Element,
   type FieldValue,
@@ -351,7 +352,7 @@ export function renderCompositionFrameSvg(
   const data = Object.fromEntries(
     composition.dataFields.map((field) => [field.key, field.defaultValue]),
   );
-  const expressionScope: Record<string, number | string> = {
+  const expressionScope: ExpressionScope = {
     frame: normalizedFrame,
     time: normalizedFrame / composition.frameRate,
     'comp.width': composition.width,

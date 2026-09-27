@@ -21,6 +21,18 @@ Empty or disabled expressions retain the sampled animation value. Errors appear 
 field and retain that property's sampled value; unrelated properties still evaluate.
 Layer dependencies resolve lazily, independently of layer order. Circular dependencies are errors.
 
+`value` is the current property's sampled value before its expression. The equivalent
+`thisProperty.value` is accompanied by `thisProperty.name` and `thisProperty.layerId`:
+
+```js
+value + data.layout.padding;
+```
+
+`thisLayer.id/name` identify the expression's layer. `layer("Title").id/name` and
+`layerById(id).id/name` identify a referenced layer without evaluating its transforms.
+Metadata is read-only and non-enumerable on layer objects, so spreading a layer still copies
+only transform values. Collection references report the evaluated item's runtime ID.
+
 ## Composition script and shared files
 
 Open **Scripts > Composition & modules** and select **Composition (each frame)**.
@@ -82,13 +94,15 @@ load; SVG snapshots start with fresh modules. Editing scripting settings also re
 
 | Value                                               | Meaning                                                                          |
 | --------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `value`, `thisProperty.value`                       | Sampled value of the current property before its expression.                     |
+| `thisProperty.name`, `thisProperty.layerId`         | Current property name and runtime layer ID; property expressions only.           |
 | `thisLayer`                                         | Sampled transform before expressions; property expressions only.                 |
 | `x`, `y`, `width`, `height`, `rotation`, `opacity`  | Shorthand for the sampled transform in a property expression.                    |
 | `layer("Name")`                                     | Computed transform of a uniquely named layer. Read-only in property expressions. |
 | `layerById("id")`                                   | Same lookup by stable ID; use the Scripts reference selector to obtain the code. |
 | `frame`, `time`                                     | Composition playhead in frames and seconds.                                      |
 | `comp.width`, `comp.height`                         | Composition dimensions.                                                          |
-| `data.key`                                          | Scalar input field; booleans are exposed as 0/1.                                 |
+| `data.key`                                          | Read-only input data, including objects, arrays, booleans and null.              |
 | `timeline.startFrame`, `timeline.endFrame`          | Authored start and end boundaries.                                               |
 | `timeline.firstStepFrame`, `timeline.lastStepFrame` | First and last Step boundaries, when present.                                    |
 | `timeline.exitProgress`                             | Exit progress, including a direct Stop transition.                               |
@@ -101,7 +115,17 @@ layer's keys does not evaluate its properties; copying values does create depend
 
 Within collection property expressions, name and prototype-ID lookups prefer siblings in the
 same item, then global layers. Composition scripts require unique evaluated names or exact
-runtime IDs; duplicated collection names are ambiguous. `data` contains top-level scalar fields.
+runtime IDs; duplicated collection names are ambiguous. `data` preserves nested fields and arrays.
+
+Data is a detached, deeply frozen snapshot shared by the frame's expressions and composition
+script. Use `data.scoreboard.home.name`, `data.rows[0].score`, or bracket notation for literal
+field names such as `data["home.score"]`. Helper functions receive the same read-only data.
+
+Booleans now remain JavaScript `true`/`false`, replacing the earlier draft's numeric flags.
+Use `data.visible === true` or `data.visible ? 1 : 0`; use `Number(data.visible)` when a numeric
+flag is needed. Expressions must still return a finite number. Existing strict checks against
+`1` or `0` should be updated. Array/object fields are available without adding new expression
+result types.
 
 The playhead follows OGraf Steps, holds, and Stop transitions; it is not wall-clock elapsed time.
 Scripts do not schedule actions. Existing OGraf lifecycle behavior remains unchanged.

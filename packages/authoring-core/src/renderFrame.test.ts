@@ -11,6 +11,22 @@ import {
 import { renderCompositionFrameSvg } from './renderFrame';
 
 describe('renderCompositionFrameSvg', () => {
+  it('uses structured data defaults and property metadata in snapshots', () => {
+    const project = createProject();
+    const comp = project.compositions[0]!;
+    const layer = createLayerOfKind('rectangle');
+    layer.keyframes = [createLayerKeyframe(0, createDefaultTransform({ x: 10, y: 0, opacity: 1 }))];
+    layer.expressions = {
+      x: 'thisProperty.name === "x" && thisProperty.layerId === thisLayer.id && data.visible === true ? value + data.layout.padding : 0',
+    };
+    comp.layers = [layer];
+    comp.dataFields = [
+      createFieldDefinition('boolean', { key: 'visible', defaultValue: true }),
+      createFieldDefinition('object', { key: 'layout', defaultValue: { padding: 15 } }),
+    ];
+    expect(renderCompositionFrameSvg(project, comp.id).svg).toContain('translate(25 0)');
+  });
+
   it('evaluates collection expressions after item offsets and scopes sibling references', () => {
     const project = createProject();
     const comp = project.compositions[0]!;

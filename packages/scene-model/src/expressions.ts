@@ -1,12 +1,15 @@
 import { easedProgress } from './layerAnimation';
 import type { EasingPreset, KeyframeRole } from './types';
 
-export type ExpressionScope = Record<string, number | string>;
+export type ExpressionScope = Record<string, unknown>;
 export type ExpressionLayerResolver = (name: string, property: string) => number;
 export const EXPRESSION_API_VERSION = 1;
 export const EXPRESSION_PROPERTIES = ['x', 'y', 'width', 'height', 'rotation', 'opacity'] as const;
 export interface ExpressionEvaluationOptions {
   apiVersion?: number;
+  currentLayer?: { id: string; name: string };
+  currentProperty?: { name: string; value: number; layerId: string };
+  resolveLayerMetadata?: (reference: string, byId: boolean) => { id: string; name: string };
   modules?: Record<string, object>;
   writeLayer?: (name: string, property: string, value: number) => void;
   writeLayerById?: (id: string, property: string, value: number) => void;
@@ -47,18 +50,22 @@ export function expressionTimelineScope(
   };
 }
 
-/** Only scalar fields with identifier keys can be addressed as data.fieldKey. */
+/** Detached, deeply read-only JSON data; field names remain literal, including dots. */
 export function expressionDataScope(data: Record<string, unknown>): ExpressionScope {
-  const scope: ExpressionScope = Object.create(null);
-  for (const [name, value] of Object.entries(data))
-    if (
-      /^[A-Za-z_$][\w$]*$/.test(name) &&
-      (typeof value === 'string' ||
-        typeof value === 'boolean' ||
-        (typeof value === 'number' && Number.isFinite(value)))
-    )
-      scope['data.' + name] = typeof value === 'boolean' ? Number(value) : value;
-  return scope;
+  const copies = new WeakMap<object, object>();
+  const snapshot = (value: unknown): unknown => {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+    if (!value || typeof value !== 'object') return undefined;
+    const existing = copies.get(value);
+    if (existing) return existing;
+    const copy = Array.isArray(value) ? [] : Object.create(null);
+    copies.set(value, copy);
+    for (const [key, child] of Object.entries(value))
+      Object.defineProperty(copy, key, { value: snapshot(child), enumerable: true });
+    return Object.freeze(copy);
+  };
+  return { data: snapshot(data) };
 }
 
 function numeric(value: unknown): number {
@@ -87,7 +94,8 @@ function helper(name: 'lerp' | 'clamp' | 'ease', ...args: unknown[]): number {
 function layerReference(
   resolve: (property: string) => number,
   write?: (property: string, value: number) => void,
-): Record<string, number> {
+  metadata?: () => { id: string; name: string },
+): Record<string, unknown> {
   const target = Object.create(null);
   for (const property of EXPRESSION_PROPERTIES)
     Object.defineProperty(target, property, {
@@ -95,6 +103,9 @@ function layerReference(
       get: () => resolve(property),
       ...(write ? { set: (value: number) => write(property, value) } : {}),
     });
+  if (metadata)
+    for (const key of ['id', 'name'] as const)
+      Object.defineProperty(target, key, { get: () => metadata()[key] });
   return Object.preventExtensions(target);
 }
 
@@ -115,12 +126,24 @@ function evaluationScope(
     const dot = key.lastIndexOf('.');
     if (dot < 0) {
       Object.defineProperty(context, key, descriptor);
-      Object.defineProperty(thisLayer, key, descriptor);
+      if (key !== 'data') Object.defineProperty(thisLayer, key, descriptor);
     } else {
       const name = key.slice(0, dot);
       if (!Object.hasOwn(context, name)) context[name] = Object.create(null);
       Object.defineProperty(context[name], key.slice(dot + 1), descriptor);
     }
+  }
+  // Metadata does not introduce transform dependencies or change transform enumeration.
+  if (options.currentLayer)
+    for (const [key, value] of Object.entries(options.currentLayer))
+      Object.defineProperty(thisLayer, key, { value });
+  Object.freeze(thisLayer);
+  Object.defineProperty(context, 'data', { value: context.data, writable: false });
+  if (options.currentProperty) {
+    Object.defineProperty(context, 'value', { value: options.currentProperty.value });
+    Object.defineProperty(context, 'thisProperty', {
+      value: Object.freeze({ ...options.currentProperty }),
+    });
   }
   Object.assign(context, {
     thisLayer,
@@ -133,6 +156,7 @@ function evaluationScope(
         options.writeLayerById
           ? (property, value) => options.writeLayerById!(id, property, value)
           : undefined,
+        options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(id, true) : undefined,
       ),
     layer: (name: string) =>
       layerReference(
@@ -145,6 +169,7 @@ function evaluationScope(
         options.writeLayer
           ? (property, value) => options.writeLayer!(name, property, value)
           : undefined,
+        options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(name, false) : undefined,
       ),
     lerp: (...args: unknown[]) => helper('lerp', ...args),
     clamp: (...args: unknown[]) => helper('clamp', ...args),

@@ -69,16 +69,26 @@ export function resolveExpressionTransforms(
   const values = new Map<string, number>();
   const visiting = new Set<string>();
   const failures = new Map<string, unknown>();
-  const resolveLayer = (owner: ExpressionLayerState, name: string, property: string): number => {
+  const findLayer = (
+    owner: ExpressionLayerState,
+    reference: string,
+    byIdentity = false,
+  ): ExpressionLayerState => {
+    if (byIdentity) {
+      const target =
+        referenceIds.get(owner.referenceScope)?.get(reference) ??
+        referenceIds.get(undefined)?.get(reference);
+      if (!target) throw new Error('Unknown layer ID: ' + reference);
+      return target;
+    }
     const local =
       owner.referenceScope === undefined ? undefined : byScope.get(owner.referenceScope);
-    const layer = local?.has(name) ? local.get(name) : byName.get(name);
-    if (layer === null) throw new Error('Ambiguous layer name: ' + name);
-    if (!layer) throw new Error('Unknown layer: ' + name);
-    if (!(EXPRESSION_PROPERTIES as readonly string[]).includes(property))
-      throw new Error('Unknown layer property: ' + property);
-    return resolve(layer.id, property as ExpressionProperty);
+    const target = local?.has(reference) ? local.get(reference) : byName.get(reference);
+    if (target === null) throw new Error('Ambiguous layer name: ' + reference);
+    if (!target) throw new Error('Unknown layer: ' + reference);
+    return target;
   };
+  const metadata = (layer: ExpressionLayerState) => ({ id: layer.id, name: layer.name ?? '' });
   const resolve = (id: string, property: ExpressionProperty): number => {
     const key = id + ':' + property;
     if (values.has(key)) return values.get(key)!;
@@ -106,19 +116,15 @@ export function resolveExpressionTransforms(
       const value = evaluateExpression(
         expression,
         context,
-        (name, property) => resolveLayer(layer, name, property),
+        (name, property) => resolve(findLayer(layer, name).id, property as ExpressionProperty),
         {
           apiVersion,
           modules,
-          resolveLayerById: (targetId, targetProperty) => {
-            const target =
-              referenceIds.get(layer.referenceScope)?.get(targetId) ??
-              referenceIds.get(undefined)?.get(targetId);
-            if (!target) throw new Error('Unknown layer ID: ' + targetId);
-            if (!(EXPRESSION_PROPERTIES as readonly string[]).includes(targetProperty))
-              throw new Error('Unknown layer property: ' + targetProperty);
-            return resolve(target.id, targetProperty as ExpressionProperty);
-          },
+          currentLayer: metadata(layer),
+          currentProperty: { name: property, value: layer.transform[property], layerId: layer.id },
+          resolveLayerMetadata: (reference, byId) => metadata(findLayer(layer, reference, byId)),
+          resolveLayerById: (targetId, targetProperty) =>
+            resolve(findLayer(layer, targetId, true).id, targetProperty as ExpressionProperty),
         },
       );
       values.set(key, value);
@@ -178,6 +184,11 @@ export function resolveExpressionTransforms(
       {
         apiVersion,
         modules,
+        resolveLayerMetadata: (reference, byIdentity) => {
+          find(reference, byIdentity);
+          const id = byIdentity ? reference : names.get(reference)!;
+          return metadata(byId.get(id!)!);
+        },
         resolveLayerById: (id, property) => find(id, true)[property as ExpressionProperty],
         writeLayer: (name, property, value) => write(name, property, value),
         writeLayerById: (id, property, value) => write(id, property, value, true),

@@ -93,6 +93,34 @@ function descriptor(): CompiledGraphicDescriptor {
 }
 
 describe('runtime timeline boundary seeking', () => {
+  it('shares structured data and property metadata between expressions and composition scripts', () => {
+    const compiled = descriptor();
+    compiled.layers[0]!.name = 'Title';
+    compiled.layers[0]!.expressions = {
+      width:
+        'data.visible === true && thisProperty.name === "width" ? value + data.rows[0].padding : 0',
+    };
+    compiled.scripting = {
+      enabled: true,
+      modules: [],
+      source:
+        'const title = layer("Title"); layerById(title.id).x = title.width + data.rows[0].padding;',
+    };
+    const states = new Map([['layer', sampleCompiledLayerVisualState(compiled.layers[0]!, 0)]]);
+    const data = { visible: true, rows: [{ padding: 20 }] };
+    const diagnostics: Parameters<typeof resolveFrameExpressions>[3] = [];
+    expect(
+      resolveFrameExpressions(compiled, states, data, diagnostics).get('layer')!.transform,
+    ).toMatchObject({ width: 120, x: 140 });
+    expect(diagnostics).toEqual([]);
+    compiled.scripting.source = 'layer("Title").x = 999; data.rows[0].padding = 999;';
+    expect(
+      resolveFrameExpressions(compiled, states, data, diagnostics).get('layer')!.transform,
+    ).toMatchObject({ width: 120, x: 0 });
+    expect(data.rows[0]!.padding).toBe(20);
+    expect(diagnostics[0]?.property).toBe('script');
+  });
+
   it('uses updated auto-size text bounds for expressions without changing authored dimensions', () => {
     const compiled = descriptor();
     const text = compiled.layers[0]!;

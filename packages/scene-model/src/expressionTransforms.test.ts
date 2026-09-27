@@ -27,6 +27,59 @@ function layer(
 }
 
 describe('resolveExpressionTransforms', () => {
+  it('provides the sampled value and read-only metadata for each current property', () => {
+    const target = layer('Title');
+    target.expressions = Object.fromEntries(
+      ['x', 'y', 'width', 'height', 'rotation', 'opacity'].map((property) => [
+        property,
+        `if (thisProperty.name !== ${JSON.stringify(property)} || thisProperty.layerId !== thisLayer.id || thisLayer.name !== "Title") throw new Error("metadata"); return value + thisProperty.value;`,
+      ]),
+    );
+    const diagnostics: ExpressionDiagnostic[] = [];
+    expect(resolveExpressionTransforms([target], {}, diagnostics).get('Title')).toMatchObject({
+      x: 20,
+      y: 40,
+      width: 200,
+      height: 100,
+      rotation: 0,
+      opacity: 2,
+    });
+    expect(diagnostics).toEqual([]);
+    target.expressions = {
+      x: 'thisProperty.value = 99; return 1;',
+      y: 'thisLayer.id = "Other"; return 1;',
+    };
+    expect(resolveExpressionTransforms([target], {}, diagnostics).get('Title')).toMatchObject({
+      x: 10,
+      y: 20,
+    });
+    expect(diagnostics).toHaveLength(2);
+  });
+  it('reads layer identity without evaluating its transform properties', () => {
+    const broken = layer('Broken', { x: 'missing()' });
+    const target = layer('Target', {
+      x: 'layer("Broken").id === "Broken" && layerById("Broken").name === "Broken" ? value + 5 : 0',
+    });
+    const diagnostics: ExpressionDiagnostic[] = [];
+    expect(resolveExpressionTransforms([target, broken], {}, diagnostics).get('Target')!.x).toBe(
+      15,
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]!.layerId).toBe('Broken');
+  });
+  it('exposes the runtime identity for scoped collection references', () => {
+    const a = { ...layer('rows::0::a'), name: 'A', prototypeLayerId: 'a', referenceScope: 'rows0' };
+    const b = {
+      ...layer('rows::0::b', {
+        x: 'layer("A").id === "rows::0::a" && layerById("a").id === layer("A").id ? value : 0',
+      }),
+      name: 'B',
+      prototypeLayerId: 'b',
+      referenceScope: 'rows0',
+    };
+    expect(resolveExpressionTransforms([a, b], {}).get(b.id)!.x).toBe(10);
+  });
+
   it('supports spread, Object.keys and JSON serialization for supplied API values', () => {
     const target = layer('Target', {
       x: '({...data}).padding + Object.keys(data).length',
