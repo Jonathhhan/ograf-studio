@@ -84,6 +84,23 @@ export function LayerExpressionsEditor() {
           </section>
         );
       })}
+      {layer.legacyExpressions && Object.keys(layer.legacyExpressions).length > 0 && (
+        <details className="scripts-property-reference">
+          <summary>Previous expressions (inactive)</summary>
+          <p>
+            These targets were removed from expressions. Their original code is preserved here for
+            reuse in a composition script.
+          </p>
+          {Object.entries(layer.legacyExpressions).map(([property, entry]) => (
+            <div key={property}>
+              <strong>{property}</strong>
+              <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                {entry.source || '(empty)'}
+              </pre>
+            </div>
+          ))}
+        </details>
+      )}
     </section>
   );
 }

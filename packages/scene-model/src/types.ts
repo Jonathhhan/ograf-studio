@@ -604,6 +604,8 @@ export interface Layer {
   componentLink: ComponentLink | null;
   /** Ordered data bindings applied to independent element properties at runtime. */
   bindings: LayerBinding[];
+  /** Preserved source from retired expression targets; never evaluated or exported as active code. */
+  legacyExpressions?: Record<string, { source: string; enabled: boolean }>;
   /** Optional trusted JavaScript expressions for numeric transform properties. */
   expressions?: Partial<Record<'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity', string>>;
   expressionsEnabled?: Partial<

@@ -204,3 +204,11 @@ and retain sampled values. This is Studio's API version, not a JavaScript langua
 The shared evaluator is used by Studio, SVG snapshots, and exported graphics. References use
 the renderer's sampled layer boxes; scripting does not change text auto-sizing behavior.
 Tests cover dependencies, errors, module loading, seeking, lifecycle timing, and export/import.
+
+## Earlier extended expressions
+
+Projects from the experimental extended-expression build still open. Expressions for retired
+targets (including transform origins, text stroke, gradient stops, shaders and effects) are
+preserved under **Previous expressions (inactive)** in the Scripts tab. They do not run or
+become additional expression fields. Copy their code into a composition script when needed.
+The original code and enable state remain in the saved project's `legacyExpressions` metadata.
