@@ -4,7 +4,7 @@
 
 ## Property expressions
 
-Open **Properties > Expressions** for a selected layer. An expression controls `x`, `y`,
+Open **Scripts > Layer expressions** for a selected layer. An expression controls `x`, `y`,
 `width`, `height`, `rotation`, or `opacity` (0 to 1). Return a finite number, either as a
 formula or from a JavaScript statement body:
 
@@ -63,20 +63,20 @@ changes or the project reloads. Prefer pure functions so seeking remains repeata
 
 ## API
 
-| Value                                               | Meaning                                                                             |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `thisLayer`                                         | Sampled transform before expressions; property expressions only.                    |
-| `x`, `y`, `width`, `height`, `rotation`, `opacity`  | Shorthand for the sampled transform in a property expression.                       |
-| `layer("Name")`                                     | Computed transform of a uniquely named layer. Read-only in property expressions.    |
-| `layerById("id")`                                   | Same lookup by stable ID; use the Properties reference selector to obtain the code. |
-| `frame`, `time`                                     | Composition playhead in frames and seconds.                                         |
-| `comp.width`, `comp.height`                         | Composition dimensions.                                                             |
-| `data.key`                                          | Scalar input field; booleans are exposed as 0/1.                                    |
-| `timeline.startFrame`, `timeline.endFrame`          | Authored start and end boundaries.                                                  |
-| `timeline.firstStepFrame`, `timeline.lastStepFrame` | First and last Step boundaries, when present.                                       |
-| `timeline.exitProgress`                             | Exit progress, including a direct Stop transition.                                  |
-| `lerp(a, b, t)`, `clamp(value, min, max)`           | Numeric interpolation and bounds.                                                   |
-| `ease(a, b, t, preset)`                             | Interpolation using an existing Studio easing preset.                               |
+| Value                                               | Meaning                                                                          |
+| --------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `thisLayer`                                         | Sampled transform before expressions; property expressions only.                 |
+| `x`, `y`, `width`, `height`, `rotation`, `opacity`  | Shorthand for the sampled transform in a property expression.                    |
+| `layer("Name")`                                     | Computed transform of a uniquely named layer. Read-only in property expressions. |
+| `layerById("id")`                                   | Same lookup by stable ID; use the Scripts reference selector to obtain the code. |
+| `frame`, `time`                                     | Composition playhead in frames and seconds.                                      |
+| `comp.width`, `comp.height`                         | Composition dimensions.                                                          |
+| `data.key`                                          | Scalar input field; booleans are exposed as 0/1.                                 |
+| `timeline.startFrame`, `timeline.endFrame`          | Authored start and end boundaries.                                               |
+| `timeline.firstStepFrame`, `timeline.lastStepFrame` | First and last Step boundaries, when present.                                    |
+| `timeline.exitProgress`                             | Exit progress, including a direct Stop transition.                               |
+| `lerp(a, b, t)`, `clamp(value, min, max)`           | Numeric interpolation and bounds.                                                |
+| `ease(a, b, t, preset)`                             | Interpolation using an existing Studio easing preset.                            |
 
 Layer names do not become JavaScript globals: use `layer("Title").x`, not `Title.x`.
 `Object.keys`, object spread, and JSON serialization work on the supplied objects. Listing a

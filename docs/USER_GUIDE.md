@@ -275,7 +275,7 @@ not drawn over the canvas artwork.
 
 ## JavaScript scripting
 
-Use **Properties > Expressions** for individual numeric properties, or **Scripts** for a
+Use **Scripts > Layer expressions** for individual numeric properties, or **Scripts** for a
 composition script and imported JavaScript modules. See the [scripting guide](EXPRESSIONS.md).
 
 ## Fullscreen preview

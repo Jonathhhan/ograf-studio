@@ -1,16 +1,10 @@
-import { useExpressionDiagnosticsStore } from '../state/expressionDiagnosticsStore';
 import { useEditorWindow } from '../layout/EditorWindow';
 import { TRANSFORM_HELP } from './propertyHelp';
 import { PropertyRow } from '../components/PropertyRow';
 import { EffectStackEditor } from './EffectStackEditor';
 import { ImageSourceEditor } from './ImageSourceEditor';
 import { LayerLightingEditor } from './LayerLightingEditor';
-import {
-  getEffectStack,
-  expressionSyntaxError,
-  EFFECT_CATALOG,
-  effectProperty,
-} from '@ograf-editor/scene-model';
+import { getEffectStack, EFFECT_CATALOG, effectProperty } from '@ograf-editor/scene-model';
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { LayerMaskEditor } from './LayerMaskEditor';
 import { TilingPatternEditor } from './TilingPatternEditor';
@@ -74,11 +68,6 @@ const TRANSFORM_FIELDS: { key: keyof LayerTransform; label: string; step?: numbe
   { key: 'width', label: 'W' },
   { key: 'height', label: 'H' },
   { key: 'rotation', label: 'Rotation' },
-];
-
-const EXPRESSION_FIELDS = [
-  ...TRANSFORM_FIELDS,
-  { key: 'opacity' as const, label: 'Opacity (0\u20131)' },
 ];
 
 function elementSectionLabel(type: string): string {
@@ -262,10 +251,6 @@ function CornerRadiusEditor({
 }
 
 export function InspectorPanel() {
-  const expressionDiagnostics = useExpressionDiagnosticsStore();
-  const [expressionReferenceId, setExpressionReferenceId] = useState('');
-  const updateLayerExpressions = useProjectStore((s) => s.updateLayerExpressions);
-  const setLayerExpressionEnabled = useProjectStore((s) => s.setLayerExpressionEnabled);
   const { window } = useEditorWindow();
   const composition = useActiveComposition();
   const currentFrame = useTimelineStore((s) => s.currentFrame);
@@ -494,108 +479,6 @@ export function InspectorPanel() {
             </PropertyRow>
           ))}
         </div>
-
-        <details className="inspector-expression-section">
-          <summary>Expressions</summary>
-          <label className="inspector-hint">
-            Stable layer reference
-            <select
-              value={expressionReferenceId}
-              aria-label="Stable layer reference"
-              onChange={(event) => setExpressionReferenceId(event.target.value)}
-            >
-              <option value="">Choose a layer...</option>
-              {composition.layers
-                .filter((candidate) => !candidate.isGuide)
-                .map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                  </option>
-                ))}
-            </select>
-            {expressionReferenceId && (
-              <input
-                readOnly
-                aria-label="Layer reference code"
-                value={`layerById(${JSON.stringify(expressionReferenceId)})`}
-                onFocus={(event) => event.target.select()}
-              />
-            )}
-          </label>
-          {EXPRESSION_FIELDS.map(({ key, label }) => {
-            const source =
-              layer.expressions?.[key as keyof NonNullable<typeof layer.expressions>] ?? '';
-            const runtimeError =
-              expressionDiagnostics.compositionId === composition.id &&
-              layer.expressionsEnabled?.[key as keyof NonNullable<typeof layer.expressions>] !==
-                false
-                ? expressionDiagnostics.diagnostics.find(
-                    (entry) =>
-                      entry.layerId === layer.id &&
-                      entry.property === key &&
-                      entry.source === source,
-                  )?.message
-                : undefined;
-            const error = expressionSyntaxError(source) ?? runtimeError;
-            const errorId = `expression-error-${layer.id}-${key}`;
-            return (
-              <PropertyRow
-                as="div"
-                key={`expression-${key}`}
-                className="inspector-row"
-                help={`Expression for ${label}`}
-              >
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={
-                      layer.expressionsEnabled?.[
-                        key as keyof NonNullable<typeof layer.expressions>
-                      ] !== false
-                    }
-                    disabled={layer.isLocked}
-                    onChange={(event) =>
-                      setLayerExpressionEnabled(
-                        layer.id,
-                        key as keyof NonNullable<typeof layer.expressions>,
-                        event.target.checked,
-                      )
-                    }
-                  />{' '}
-                  {label}
-                </label>
-                <div className="inspector-expression-value">
-                  <textarea
-                    rows={4}
-                    spellCheck={false}
-                    aria-invalid={Boolean(error)}
-                    aria-describedby={error ? errorId : undefined}
-                    aria-label={`${label} expression`}
-                    placeholder="Use authored value"
-                    value={source}
-                    disabled={layer.isLocked}
-                    onChange={(event) => {
-                      const expression = event.target.value;
-                      const expressions = { ...(layer.expressions ?? {}) };
-                      const expressionKey = key as keyof NonNullable<typeof layer.expressions>;
-                      if (expression.length) expressions[expressionKey] = expression;
-                      else delete expressions[expressionKey];
-                      updateLayerExpressions(
-                        layer.id,
-                        Object.keys(expressions).length ? expressions : undefined,
-                      );
-                    }}
-                  />
-                  {error && (
-                    <p id={errorId} className="inspector-error">
-                      {error}
-                    </p>
-                  )}
-                </div>
-              </PropertyRow>
-            );
-          })}
-        </details>
 
         <PropertyRow
           help={

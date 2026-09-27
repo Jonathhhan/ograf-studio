@@ -29,7 +29,7 @@
   flex: 1;
   min-width: 0;
 }
-.scripts-panel textarea {
+.scripts-editor textarea {
   flex: 1;
   min-height: 220px;
   resize: vertical;
@@ -39,4 +39,39 @@
   tab-size: 2;
   white-space: pre;
   overflow: auto;
+}
+
+.scripts-editor-view {
+  flex: 1;
+  min-height: 0;
+}
+.scripts-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100%;
+}
+.scripts-reference {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.scripts-expression-row {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.scripts-expression-value textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 54px;
+  resize: vertical;
+  font-family: monospace;
+  line-height: 1.5;
+  tab-size: 2;
+}
+.scripts-expression-value textarea[aria-invalid='true'] {
+  border-color: #ff7b86;
 }

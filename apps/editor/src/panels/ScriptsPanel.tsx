@@ -8,13 +8,35 @@ import {
 } from '@ograf-editor/scene-model';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useExpressionDiagnosticsStore } from '../state/expressionDiagnosticsStore';
+import { LayerExpressionsEditor } from './LayerExpressionsEditor';
 import './ScriptsPanel.css';
 
 const EMPTY: CompositionScripting = { source: '', enabled: false, modules: [] };
 
 export function ScriptsPanel() {
   const composition = useActiveComposition();
-  return <ScriptEditor key={composition.id} composition={composition} />;
+  const [view, setView] = useState('expressions');
+  return (
+    <div className="scripts-panel">
+      <label className="scripts-file-select">
+        Edit
+        <select
+          aria-label="Scripting view"
+          value={view}
+          onChange={(event) => setView(event.target.value)}
+        >
+          <option value="expressions">Layer expressions</option>
+          <option value="scripts">Composition &amp; modules</option>
+        </select>
+      </label>
+      <div hidden={view !== 'expressions'}>
+        <LayerExpressionsEditor key={composition.id} />
+      </div>
+      <div className="scripts-editor-view" hidden={view !== 'scripts'}>
+        <ScriptEditor key={composition.id} composition={composition} />
+      </div>
+    </div>
+  );
 }
 
 function ScriptEditor({ composition }: { composition: Composition }) {
@@ -49,7 +71,13 @@ function ScriptEditor({ composition }: { composition: Composition }) {
   }
   const runtimeErrors =
     diagnostics.compositionId === composition.id
-      ? [...new Set(diagnostics.diagnostics.map((entry) => entry.message))]
+      ? [
+          ...new Set(
+            diagnostics.diagnostics
+              .filter((entry) => entry.property === 'script')
+              .map((entry) => entry.message),
+          ),
+        ]
       : [];
   const editFile = (patch: Partial<{ fileName: string; source: string }>) =>
     setDraft((current) => ({
@@ -74,7 +102,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
     }
   };
   return (
-    <div className="scripts-panel">
+    <div className="scripts-editor">
       <div className="scripts-toolbar">
         <button
           type="button"
