@@ -1,4 +1,5 @@
 import { ScriptLogWindow } from './ScriptLogWindow';
+import { JavaScriptEditor } from '../components/JavaScriptEditor';
 import { useRef, useState } from 'react';
 import {
   compositionScriptSyntaxError,
@@ -182,12 +183,11 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           />
         </label>
       )}
-      <textarea
-        aria-label={file ? 'Module source' : 'Composition script'}
-        spellCheck={false}
+      <JavaScriptEditor
+        key={selected}
+        label={file ? 'Module source' : 'Composition script'}
         value={file?.source ?? scripting.source}
-        onChange={(event) => {
-          const source = event.target.value;
+        onChange={(source) => {
           if (file) editFile({ source });
           else edit((current) => ({ ...current, source }));
         }}

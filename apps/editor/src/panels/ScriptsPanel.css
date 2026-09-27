@@ -29,16 +29,11 @@
   flex: 1;
   min-width: 0;
 }
-.scripts-editor textarea {
+.scripts-editor > .javascript-editor {
   flex: 1;
   min-height: 220px;
   resize: vertical;
-  font-family: monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  tab-size: 2;
-  white-space: pre;
-  overflow: auto;
+  height: 300px;
 }
 
 .scripts-editor-view {
@@ -57,16 +52,27 @@
   gap: 8px;
   margin-bottom: 8px;
 }
-.scripts-expression-value textarea {
+.scripts-expression-value .javascript-editor {
   box-sizing: border-box;
   width: 100%;
-  min-height: 54px;
+  min-height: 80px;
+  height: 100px;
   resize: vertical;
-  font-family: monospace;
-  line-height: 1.5;
-  tab-size: 2;
 }
-.scripts-expression-value textarea[aria-invalid='true'] {
+.javascript-editor {
+  overflow: hidden;
+  border: 1px solid #444;
+  border-radius: 4px;
+  min-width: 0;
+}
+.javascript-editor .cm-editor {
+  height: 100%;
+}
+.javascript-editor .cm-scroller {
+  overflow: auto;
+  font: 13px/1.5 monospace;
+}
+.javascript-editor[data-invalid='true'] {
   border-color: #ff7b86;
 }
 

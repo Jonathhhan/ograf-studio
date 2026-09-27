@@ -1,5 +1,6 @@
 import { expressionSyntaxError } from '@ograf-editor/scene-model';
 import { PropertyRow } from '../components/PropertyRow';
+import { JavaScriptEditor } from '../components/JavaScriptEditor';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useSelectionStore } from '../state/selectionStore';
 import { useExpressionDiagnosticsStore } from '../state/expressionDiagnosticsStore';
@@ -63,17 +64,15 @@ export function LayerExpressionsEditor() {
               {label}
             </label>
             <div className="scripts-expression-value">
-              <textarea
-                rows={4}
-                spellCheck={false}
-                aria-invalid={Boolean(error)}
-                aria-describedby={error ? errorId : undefined}
-                aria-label={`${label} expression`}
+              <JavaScriptEditor
+                key={layer.id}
+                invalid={Boolean(error)}
+                describedBy={error ? errorId : undefined}
+                label={`${label} expression`}
                 placeholder="Use authored value"
                 value={source}
-                disabled={layer.isLocked}
-                onChange={(event) => {
-                  const expression = event.target.value;
+                readOnly={layer.isLocked}
+                onChange={(expression) => {
                   const expressions = { ...(layer.expressions ?? {}) };
                   const expressionKey = key as keyof NonNullable<typeof layer.expressions>;
                   if (expression.length) expressions[expressionKey] = expression;
