@@ -1,0 +1,87 @@
+.data-value-row {
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: var(--property-label-width, minmax(118px, 42%)) minmax(0, 1fr);
+  align-items: center;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.data-value-row > span:first-child {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-right: 1px solid var(--border);
+  color: var(--text);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.data-value-row input,
+.data-value-row select,
+.data-value-row textarea {
+  min-width: 0;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  padding: 3px 6px;
+  font: inherit;
+}
+
+.data-value-row > :is(input, select, textarea) {
+  width: calc(100% - 12px);
+  margin: 3px 6px;
+}
+
+.data-value-row select[multiple] {
+  min-height: 58px;
+}
+
+.data-value-row input[type='color'] {
+  height: 24px;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.data-field-toggle,
+.data-field-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 3px 6px;
+}
+
+.data-field-toggle {
+  cursor: pointer;
+}
+
+.data-field-toggle input {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+}
+
+.data-field-toggle span {
+  color: var(--text-dim);
+}
+
+.data-field-range input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+
+.data-field-range input[type='number'] {
+  width: 64px;
+  flex: none;
+}
+
+.data-json-invalid {
+  border-color: #e45c5c !important;
+}

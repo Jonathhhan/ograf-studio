@@ -1,22 +1,21 @@
 import { PropertyRow } from '../components/PropertyRow';
-import { Fragment, useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   createFieldDefinition,
   defaultConstraintsForFieldType,
   defaultOptionsForFieldType,
   defaultValueForFieldType,
-  isShaderPaint,
   type FieldConstraints,
   type FieldDefinition,
-  type GradientPaint,
   type FieldOption,
   type FieldType,
 } from '@ograf-editor/scene-model';
 import { compileCustomActions, compileDataSchema } from '@ograf-editor/codegen';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
-import { useTestDataStore, type TestValue } from '../state/testDataStore';
+import { useTestDataStore } from '../state/testDataStore';
 import { Panel } from './Panel';
-import { PaintEditor } from './PaintEditor';
+import { DataFieldInput } from './DataFieldInput';
+import { resolvePreviewFormValue } from '../state/previewData';
 import './DataPanel.css';
 
 const FIELD_TYPE_OPTIONS: { value: FieldType; label: string }[] = [
@@ -73,6 +72,7 @@ function optionalNumber(value: string): number | undefined {
 export function DataPanel() {
   const composition = useActiveComposition();
   const addDataField = useProjectStore((s) => s.addDataField);
+  const moveDataField = useProjectStore((s) => s.moveDataField);
   const removeDataField = useProjectStore((s) => s.removeDataField);
   const updateDataField = useProjectStore((s) => s.updateDataField);
   const addCustomAction = useProjectStore((s) => s.addCustomAction);
@@ -128,7 +128,7 @@ export function DataPanel() {
                 </tr>
               </thead>
               <tbody>
-                {composition.dataFields.map((field) => (
+                {composition.dataFields.map((field, index) => (
                   <Fragment key={field.id}>
                     <tr>
                       <td>
@@ -172,7 +172,7 @@ export function DataPanel() {
                         </select>
                       </td>
                       <td>
-                        <DefaultValueInput
+                        <DataFieldInput
                           field={field}
                           value={field.defaultValue}
                           onChange={(value) => updateDataField(field.id, { defaultValue: value })}
@@ -211,6 +211,26 @@ export function DataPanel() {
                         />
                       </td>
                       <td>
+                        <button
+                          type="button"
+                          className="data-table-move"
+                          aria-label={`Move ${field.label || field.key} up`}
+                          title="Move up"
+                          disabled={index === 0}
+                          onClick={() => moveDataField(field.id, -1)}
+                        >
+                          {'↑'}
+                        </button>
+                        <button
+                          type="button"
+                          className="data-table-move"
+                          aria-label={`Move ${field.label || field.key} down`}
+                          title="Move down"
+                          disabled={index === composition.dataFields.length - 1}
+                          onClick={() => moveDataField(field.id, 1)}
+                        >
+                          {'↓'}
+                        </button>
                         <button
                           type="button"
                           className="data-table-delete"
@@ -323,13 +343,15 @@ export function DataPanel() {
               {composition.dataFields.map((field) => (
                 <PropertyRow
                   help={`${field.description ? field.description + ' ' : ''}Test value for ${field.label || field.key} (${field.type}). Updates the editor preview without changing the field default or exported source.`}
-                  className="test-data-row"
+                  as="div"
+                  className="data-value-row"
                   key={field.id}
                 >
                   <span>{field.label || field.key}</span>
-                  <DefaultValueInput
+                  <DataFieldInput
                     field={field}
-                    value={testValues[field.id] ?? field.defaultValue}
+                    interactive
+                    value={resolvePreviewFormValue(field, testValues[field.id])}
                     onChange={(value) => setTestValue(field.id, value)}
                   />
                 </PropertyRow>
@@ -511,145 +533,6 @@ function FieldDetails({
       </div>
       <FieldSchemaEditor field={field} update={update} />
     </div>
-  );
-}
-
-function DefaultValueInput({
-  field,
-  value,
-  onChange,
-}: {
-  field: FieldDefinition;
-  value: TestValue;
-  onChange: (value: TestValue) => void;
-}) {
-  const { type } = field;
-  if (type === 'boolean') {
-    return (
-      <input
-        type="checkbox"
-        checked={Boolean(value)}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.checked)}
-      />
-    );
-  }
-  if (type === 'number' || type === 'integer' || type === 'duration-ms' || type === 'percentage') {
-    return (
-      <input
-        type="number"
-        min={field.constraints.minimum}
-        max={field.constraints.maximum}
-        step={field.constraints.step ?? (type === 'number' || type === 'percentage' ? 'any' : 1)}
-        value={Number(value)}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))}
-      />
-    );
-  }
-  if (type === 'color') {
-    return (
-      <input
-        type="color"
-        value={String(value)}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-      />
-    );
-  }
-  if (type === 'textarea') {
-    return (
-      <textarea
-        rows={2}
-        value={String(value)}
-        minLength={field.constraints.minLength}
-        maxLength={field.constraints.maxLength}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    );
-  }
-  if (type === 'gradient') {
-    return value && typeof value === 'object' && !Array.isArray(value) && 'stops' in value ? (
-      <PaintEditor
-        allowShader={false}
-        value={value as GradientPaint}
-        onChange={(paint) => {
-          if (paint !== undefined && !isShaderPaint(paint)) onChange(paint);
-        }}
-      />
-    ) : null;
-  }
-  if (type === 'select') {
-    return (
-      <select value={String(value)} onChange={(event) => onChange(event.target.value)}>
-        {field.options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  if (type === 'select-multiple') {
-    const selected = Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === 'string')
-      : [];
-    return (
-      <select
-        multiple
-        value={selected}
-        onChange={(event) =>
-          onChange([...event.target.selectedOptions].map((option) => option.value))
-        }
-      >
-        {field.options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  if (type === 'object' || type === 'array') {
-    return <JsonValueInput value={value} onChange={onChange} />;
-  }
-  return (
-    <input
-      type="text"
-      placeholder={type === 'image-url' ? 'asset:… or image path' : undefined}
-      minLength={field.constraints.minLength}
-      maxLength={field.constraints.maxLength}
-      pattern={field.constraints.pattern}
-      value={String(value)}
-      onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-    />
-  );
-}
-
-function JsonValueInput({
-  value,
-  onChange,
-}: {
-  value: TestValue;
-  onChange: (value: TestValue) => void;
-}) {
-  const [text, setText] = useState(() => JSON.stringify(value, null, 2));
-  const [invalid, setInvalid] = useState(false);
-  useEffect(() => setText(JSON.stringify(value, null, 2)), [value]);
-  return (
-    <textarea
-      rows={5}
-      className={invalid ? 'data-json-invalid' : undefined}
-      value={text}
-      onChange={(event) => {
-        const next = event.target.value;
-        setText(next);
-        try {
-          const parsed = JSON.parse(next) as TestValue;
-          setInvalid(false);
-          onChange(parsed);
-        } catch {
-          setInvalid(true);
-        }
-      }}
-    />
   );
 }
 
