@@ -120,7 +120,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           value={file ? selected : -1}
           onChange={(event) => setSelected(Number(event.target.value))}
         >
-          <option value={-1}>Composition (each frame)</option>
+          <option value={-1}>Composition</option>
           {scripting.modules.map((module, index) => (
             <option key={index} value={index}>
               {module.fileName}
