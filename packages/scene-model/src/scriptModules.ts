@@ -12,6 +12,8 @@ const reservedNames = new Set([
   'thisLayer',
   'thisProperty',
   'value',
+  'valueAtTime',
+  'sourceRectAtTime',
   'layer',
   'layerById',
   'lerp',

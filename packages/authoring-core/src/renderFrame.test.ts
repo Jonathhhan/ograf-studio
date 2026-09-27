@@ -11,6 +11,29 @@ import {
 import { renderCompositionFrameSvg } from './renderFrame';
 
 describe('renderCompositionFrameSvg', () => {
+  it('supports time sampling and local shape bounds in SVG expressions', () => {
+    const project = createProject();
+    const comp = project.compositions[0]!;
+    comp.frameRate = 25;
+    const layer = createLayerOfKind('rectangle');
+    layer.name = 'Title';
+    layer.keyframes = [
+      createLayerKeyframe(0, createDefaultTransform({ x: 0, y: 0, width: 100, opacity: 1 })),
+      createLayerKeyframe(10, createDefaultTransform({ x: 100, y: 0, width: 200, opacity: 1 })),
+    ];
+    layer.animationTracks.x = [
+      { id: 'x0', frame: 0, value: 0, easing: 'linear' },
+      { id: 'x1', frame: 10, value: 100, easing: 'linear' },
+    ];
+    layer.animationTracks.width = [
+      { id: 'w0', frame: 0, value: 100, easing: 'linear' },
+      { id: 'w1', frame: 10, value: 200, easing: 'linear' },
+    ];
+    layer.expressions = { x: 'valueAtTime(0.2)', y: 'layer("Title").sourceRectAtTime(0.2).width' };
+    comp.layers = [layer];
+    expect(renderCompositionFrameSvg(project, comp.id, 0).svg).toContain('translate(50 150)');
+  });
+
   it('uses structured data defaults and property metadata in snapshots', () => {
     const project = createProject();
     const comp = project.compositions[0]!;

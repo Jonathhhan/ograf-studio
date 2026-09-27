@@ -1,5 +1,10 @@
+import { sampleCompiledLayerVisualState } from './loopRendering';
+import { resolveBoundElement } from './renderElement';
+import { measureExpressionText } from './expressionTextBounds';
 import {
   resolveExpressionTransforms,
+  expressionSourceRect,
+  getTrackValueAtFrame,
   expressionDataScope,
   expressionTimelineScope,
   type MaskRenderState,
@@ -19,6 +24,15 @@ export function resolveFrameExpressions(
   const clock = [...states.values()][0] as
     (MaskRenderState & { expressionFrame?: number; expressionExitProgress?: number }) | undefined;
   const frame = clock?.expressionFrame ?? 0;
+  const boundsCache = new Map<string, ReturnType<typeof expressionSourceRect>>();
+  const sampleFrame = (seconds: number) =>
+    Math.max(
+      0,
+      Math.min(
+        seconds * descriptor.frameRate,
+        Math.max(0, ...descriptor.keyframes.map((key) => key.frame)),
+      ),
+    );
   const transforms = resolveExpressionTransforms(
     descriptor.layers.flatMap((layer) => {
       const state = states.get(layer.id);
@@ -41,6 +55,32 @@ export function resolveFrameExpressions(
               }
             : {}),
           transform: state.transform,
+          sampleTransform: (seconds: number) =>
+            sampleCompiledLayerVisualState(layer, sampleFrame(seconds), undefined, data).transform,
+          sourceRectAtTime: (seconds: number, includeExtents: boolean) => {
+            const at = sampleFrame(seconds);
+            const key = JSON.stringify([layer.id, at, includeExtents]);
+            const cached = boundsCache.get(key);
+            if (cached) return cached;
+            let element = resolveBoundElement(layer, data);
+            if (element.type === 'text')
+              element = {
+                ...element,
+                strokeWidth: getTrackValueAtFrame(
+                  layer.animationTracks.strokeWidth ?? [],
+                  at,
+                  element.strokeWidth,
+                ),
+              };
+            const bounds = expressionSourceRect(
+              element,
+              sampleCompiledLayerVisualState(layer, at, undefined, data).transform,
+              includeExtents,
+              measureExpressionText,
+            );
+            boundsCache.set(key, bounds);
+            return bounds;
+          },
           scope: {
             frame,
             time: frame / descriptor.frameRate,

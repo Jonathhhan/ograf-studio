@@ -93,6 +93,62 @@ function descriptor(): CompiledGraphicDescriptor {
 }
 
 describe('runtime timeline boundary seeking', () => {
+  it('samples authored values and local bounds at fractional seconds without evaluating expressions', () => {
+    const compiled = descriptor();
+    const layer = compiled.layers[0]!;
+    layer.name = 'Title';
+    layer.animationTracks.x = [
+      { id: 'x0', frame: 0, value: 0, easing: 'linear' },
+      { id: 'x1', frame: 10, value: 100, easing: 'linear' },
+    ];
+    layer.animationTracks.width = [
+      { id: 'w0', frame: 0, value: 100, easing: 'linear' },
+      { id: 'w1', frame: 10, value: 200, easing: 'linear' },
+    ];
+    layer.expressions = {
+      x: 'valueAtTime(0.1) + thisProperty.valueAtTime(0.1)',
+      y: 'layer("Title").property("x").valueAtTime(0.1)',
+      width: 'sourceRectAtTime(0.2).width',
+      height:
+        'thisLayer.sourceRectAtTime(0.2).left + layerById(thisLayer.id).sourceRectAtTime(0.2).height',
+    };
+    const states = new Map([['layer', sampleCompiledLayerVisualState(layer, 8)]]);
+    const before = JSON.stringify(states.get('layer'));
+    const diagnostics: Parameters<typeof resolveFrameExpressions>[3] = [];
+    expect(
+      resolveFrameExpressions(compiled, states, {}, diagnostics).get('layer')!.transform,
+    ).toMatchObject({ x: 50, y: 25, width: 150, height: 50 });
+    expect(diagnostics).toEqual([]);
+    expect(JSON.stringify(states.get('layer'))).toBe(before);
+    compiled.scripting = {
+      enabled: true,
+      modules: [],
+      source:
+        'layer("Title").x = layer("Title").property("x").valueAtTime(99); layer("Title").y = layer("Title").property("x").valueAtTime(-1);',
+    };
+    expect(resolveFrameExpressions(compiled, states).get('layer')!.transform).toMatchObject({
+      x: 100,
+      y: 0,
+    });
+  });
+
+  it.each([
+    'valueAtTime(NaN)',
+    'valueAtTime("1")',
+    'sourceRectAtTime(Infinity)',
+    'sourceRectAtTime(0, 1)',
+    'thisLayer.property("unknown").valueAtTime(0)',
+  ])('reports invalid sampling arguments without changing the sampled pose: %s', (source) => {
+    const compiled = descriptor();
+    compiled.layers[0]!.expressions = { width: source };
+    const states = new Map([['layer', sampleCompiledLayerVisualState(compiled.layers[0]!, 0)]]);
+    const diagnostics: Parameters<typeof resolveFrameExpressions>[3] = [];
+    expect(
+      resolveFrameExpressions(compiled, states, {}, diagnostics).get('layer')!.transform.width,
+    ).toBe(100);
+    expect(diagnostics).toHaveLength(1);
+  });
+
   it('shares structured data and property metadata between expressions and composition scripts', () => {
     const compiled = descriptor();
     compiled.layers[0]!.name = 'Title';

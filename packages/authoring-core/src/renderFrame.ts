@@ -31,6 +31,7 @@ import {
   resolveExpressionTransforms,
   EXPRESSION_PROPERTIES,
   expressionDataScope,
+  expressionSourceRect,
   expressionTimelineScope,
   type ExpressionScope,
   type Composition,
@@ -372,11 +373,55 @@ export function renderCompositionFrameSvg(
         entry.prototypeLayerIds.includes(layer.id),
       );
       const transform = getLayerTransformAtFrame(layer, normalizedFrame);
-      if (!collection) return [{ ...layer, transform }];
+      const samplers = (index?: number) => {
+        const sampleFrame = (seconds: number) =>
+          Math.max(0, Math.min(seconds * composition.frameRate, getTotalFrames(composition)));
+        const sampleTransform = (seconds: number) => {
+          const pose = getLayerTransformAtFrame(layer, sampleFrame(seconds));
+          return {
+            ...pose,
+            x: pose.x + (index === undefined ? 0 : collection!.offsetPerItem.x * index),
+            y: pose.y + (index === undefined ? 0 : collection!.offsetPerItem.y * index),
+          };
+        };
+        return {
+          sampleTransform,
+          sourceRectAtTime: (seconds: number, includeExtents: boolean) => {
+            let element = layer.bindings.reduce<Element>((resolved, binding) => {
+              const field = composition.dataFields.find((entry) => entry.id === binding.fieldId);
+              const root = field ? data[field.key] : undefined;
+              const item =
+                index !== undefined && collection?.fieldId === field?.id && Array.isArray(root)
+                  ? root[index]
+                  : root;
+              const value = valueAtSourcePath(item, binding.sourcePath);
+              return value === undefined
+                ? resolved
+                : applyElementDataValue(
+                    resolved,
+                    binding.targetProperty,
+                    binding.valueMap?.[String(value)] ?? value,
+                  );
+            }, layer.element);
+            if (element.type === 'text')
+              element = {
+                ...element,
+                strokeWidth: getLayerPropertyValueAtFrame(
+                  layer,
+                  'strokeWidth',
+                  sampleFrame(seconds),
+                ),
+              };
+            return expressionSourceRect(element, sampleTransform(seconds), includeExtents);
+          },
+        };
+      };
+      if (!collection) return [{ ...layer, transform, ...samplers() }];
       return Array.from({ length: collection.capacity }, (_, index) => ({
         ...layer,
         id: `${collection.id}::${index}::${layer.id}`,
         prototypeLayerId: layer.id,
+        ...samplers(index),
         referenceScope: JSON.stringify([collection.id, index]),
         transform: {
           ...transform,

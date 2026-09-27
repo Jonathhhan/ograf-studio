@@ -3,6 +3,8 @@ import {
   evaluateCompositionScript,
   EXPRESSION_PROPERTIES,
   type ExpressionScope,
+  type ExpressionLayerSampling,
+  type ExpressionRect,
 } from './expressions';
 import { scriptModules } from './scriptModules';
 import type { CompositionScripting, Layer, LayerTransform } from './types';
@@ -21,6 +23,8 @@ export interface ExpressionLayerState {
   id: string;
   name?: string;
   transform: LayerTransform;
+  sampleTransform?: (seconds: number) => LayerTransform;
+  sourceRectAtTime?: (seconds: number, includeExtents: boolean) => ExpressionRect;
   /** Authored identity of a layer expanded into a collection item. */
   prototypeLayerId?: string;
   expressions?: Layer['expressions'];
@@ -89,6 +93,17 @@ export function resolveExpressionTransforms(
     return target;
   };
   const metadata = (layer: ExpressionLayerState) => ({ id: layer.id, name: layer.name ?? '' });
+  const sampling = (layer: ExpressionLayerState): ExpressionLayerSampling => ({
+    valueAtTime: (property, seconds) => {
+      if (!layer.sampleTransform) throw new Error('Time sampling is unavailable for this layer.');
+      return layer.sampleTransform(seconds)[property as ExpressionProperty];
+    },
+    sourceRectAtTime: (seconds, includeExtents) => {
+      if (!layer.sourceRectAtTime)
+        throw new Error('Content bounds are unavailable for this layer.');
+      return layer.sourceRectAtTime(seconds, includeExtents);
+    },
+  });
   const resolve = (id: string, property: ExpressionProperty): number => {
     const key = id + ':' + property;
     if (values.has(key)) return values.get(key)!;
@@ -121,6 +136,8 @@ export function resolveExpressionTransforms(
           apiVersion,
           modules,
           currentLayer: metadata(layer),
+          currentSampling: sampling(layer),
+          resolveLayerSampling: (reference, byId) => sampling(findLayer(layer, reference, byId)),
           currentProperty: { name: property, value: layer.transform[property], layerId: layer.id },
           resolveLayerMetadata: (reference, byId) => metadata(findLayer(layer, reference, byId)),
           resolveLayerById: (targetId, targetProperty) =>
@@ -184,6 +201,11 @@ export function resolveExpressionTransforms(
       {
         apiVersion,
         modules,
+        resolveLayerSampling: (reference, byIdentity) => {
+          find(reference, byIdentity);
+          const id = byIdentity ? reference : names.get(reference)!;
+          return sampling(byId.get(id!)!);
+        },
         resolveLayerMetadata: (reference, byIdentity) => {
           find(reference, byIdentity);
           const id = byIdentity ? reference : names.get(reference)!;

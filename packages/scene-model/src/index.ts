@@ -48,3 +48,5 @@ export * from './stylePackColorLinks';
 export * from './expressions';
 export * from './scriptModules';
 export * from './expressionTransforms';
+
+export * from './expressionBounds';

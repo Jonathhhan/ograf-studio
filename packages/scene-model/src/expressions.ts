@@ -5,11 +5,23 @@ export type ExpressionScope = Record<string, unknown>;
 export type ExpressionLayerResolver = (name: string, property: string) => number;
 export const EXPRESSION_API_VERSION = 1;
 export const EXPRESSION_PROPERTIES = ['x', 'y', 'width', 'height', 'rotation', 'opacity'] as const;
+export interface ExpressionRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+export interface ExpressionLayerSampling {
+  valueAtTime: (property: string, seconds: number) => number;
+  sourceRectAtTime: (seconds: number, includeExtents: boolean) => ExpressionRect;
+}
 export interface ExpressionEvaluationOptions {
   apiVersion?: number;
   currentLayer?: { id: string; name: string };
   currentProperty?: { name: string; value: number; layerId: string };
   resolveLayerMetadata?: (reference: string, byId: boolean) => { id: string; name: string };
+  currentSampling?: ExpressionLayerSampling;
+  resolveLayerSampling?: (reference: string, byId: boolean) => ExpressionLayerSampling;
   modules?: Record<string, object>;
   writeLayer?: (name: string, property: string, value: number) => void;
   writeLayerById?: (id: string, property: string, value: number) => void;
@@ -90,11 +102,43 @@ function helper(name: 'lerp' | 'clamp' | 'ease', ...args: unknown[]): number {
   return a + (b - a) * progress;
 }
 
+function sampleTime(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    throw new Error('Sample time must be finite seconds.');
+  return value;
+}
+function sampledProperty(
+  resolve: (property: string) => number,
+  property: string,
+  sampling?: () => ExpressionLayerSampling,
+) {
+  if (!(EXPRESSION_PROPERTIES as readonly string[]).includes(property))
+    throw new Error('Unknown layer property: ' + property);
+  return Object.freeze({
+    name: property,
+    get value() {
+      return resolve(property);
+    },
+    valueAtTime: (seconds: number) => {
+      if (!sampling) throw new Error('Time sampling is unavailable.');
+      return sampling().valueAtTime(property, sampleTime(seconds));
+    },
+  });
+}
+function sourceRectMethod(sampling: () => ExpressionLayerSampling, time: number) {
+  return (seconds = time, includeExtents = false) => {
+    if (typeof includeExtents !== 'boolean') throw new Error('includeExtents must be a boolean.');
+    return Object.freeze({ ...sampling().sourceRectAtTime(sampleTime(seconds), includeExtents) });
+  };
+}
+
 /** Enumerable getters support normal object operations without eagerly resolving dependencies. */
 function layerReference(
   resolve: (property: string) => number,
   write?: (property: string, value: number) => void,
   metadata?: () => { id: string; name: string },
+  sampling?: () => ExpressionLayerSampling,
+  time = 0,
 ): Record<string, unknown> {
   const target = Object.create(null);
   for (const property of EXPRESSION_PROPERTIES)
@@ -106,6 +150,11 @@ function layerReference(
   if (metadata)
     for (const key of ['id', 'name'] as const)
       Object.defineProperty(target, key, { get: () => metadata()[key] });
+  Object.defineProperty(target, 'property', {
+    value: (name: string) => sampledProperty(resolve, name, sampling),
+  });
+  if (sampling)
+    Object.defineProperty(target, 'sourceRectAtTime', { value: sourceRectMethod(sampling, time) });
   return Object.preventExtensions(target);
 }
 
@@ -137,12 +186,32 @@ function evaluationScope(
   if (options.currentLayer)
     for (const [key, value] of Object.entries(options.currentLayer))
       Object.defineProperty(thisLayer, key, { value });
+  if (options.currentSampling) {
+    const sampling = () => options.currentSampling!;
+    const time = typeof scope.time === 'number' ? scope.time : 0;
+    Object.defineProperty(thisLayer, 'property', {
+      value: (name: string) =>
+        sampledProperty((property) => numeric(scope[property]), name, sampling),
+    });
+    Object.defineProperty(thisLayer, 'sourceRectAtTime', {
+      value: sourceRectMethod(sampling, time),
+    });
+    Object.defineProperty(context, 'sourceRectAtTime', { value: sourceRectMethod(sampling, time) });
+  }
   Object.freeze(thisLayer);
   Object.defineProperty(context, 'data', { value: context.data, writable: false });
   if (options.currentProperty) {
     Object.defineProperty(context, 'value', { value: options.currentProperty.value });
+    const valueAtTime = (seconds: number) => {
+      if (!options.currentSampling) throw new Error('Time sampling is unavailable.');
+      return options.currentSampling.valueAtTime(
+        options.currentProperty!.name,
+        sampleTime(seconds),
+      );
+    };
+    Object.defineProperty(context, 'valueAtTime', { value: valueAtTime });
     Object.defineProperty(context, 'thisProperty', {
-      value: Object.freeze({ ...options.currentProperty }),
+      value: Object.freeze({ ...options.currentProperty, valueAtTime }),
     });
   }
   Object.assign(context, {
@@ -157,6 +226,8 @@ function evaluationScope(
           ? (property, value) => options.writeLayerById!(id, property, value)
           : undefined,
         options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(id, true) : undefined,
+        options.resolveLayerSampling ? () => options.resolveLayerSampling!(id, true) : undefined,
+        typeof scope.time === 'number' ? scope.time : 0,
       ),
     layer: (name: string) =>
       layerReference(
@@ -170,6 +241,8 @@ function evaluationScope(
           ? (property, value) => options.writeLayer!(name, property, value)
           : undefined,
         options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(name, false) : undefined,
+        options.resolveLayerSampling ? () => options.resolveLayerSampling!(name, false) : undefined,
+        typeof scope.time === 'number' ? scope.time : 0,
       ),
     lerp: (...args: unknown[]) => helper('lerp', ...args),
     clamp: (...args: unknown[]) => helper('clamp', ...args),

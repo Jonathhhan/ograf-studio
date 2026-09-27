@@ -130,6 +130,41 @@ result types.
 The playhead follows OGraf Steps, holds, and Stop transitions; it is not wall-clock elapsed time.
 Scripts do not schedule actions. Existing OGraf lifecycle behavior remains unchanged.
 
+## Sampling time and content bounds
+
+Times are composition seconds, including fractional frames, clamped to the authored timeline.
+`valueAtTime(seconds)` and `thisProperty.valueAtTime(seconds)` sample the current property's
+authored animation before expressions and composition-script writes. This supports a delay
+without recursively evaluating the expression:
+
+```js
+valueAtTime(time - 0.2);
+```
+
+Use `layer("Title").property("x").valueAtTime(time - 0.2)` for another property.
+`property(name).value` reads that reference's current value; `valueAtTime` always reads authored
+animation. The six supported transform properties are available. Sampling does not seek the
+playhead or replay OGraf lifecycle actions, held loops, or previous data updates.
+
+`layer("Title").sourceRectAtTime(seconds = time, includeExtents = false)` returns a read-only
+`{ left, top, width, height }` in local layer pixels, before position, rotation, expressions,
+masks and effects. In a property expression, `sourceRectAtTime()` and
+`thisLayer.sourceRectAtTime()` address the current layer.
+
+```js
+layer('Title').sourceRectAtTime(time).width + 40;
+```
+
+Text uses the current bound content and browser font/wrapping/fitting code with the authored
+box at the requested time. Empty text has zero bounds. Editable paths use their path bounds;
+other sources use their authored source box, not a pixel-alpha scan. `includeExtents` includes
+stroke expansion; it does not include shadows, filters or masks. These semantics are not a
+complete clone of AE's method.
+
+Measurements are cached for the current evaluation and never alter live layers. The lightweight
+SVG overview lacks browser font metrics and uses the authored text box; Studio and exported
+browser graphics measure text. Use browser capture for accurate text-dependent output.
+
 ## Execution and portability
 
 Expressions and scripts are trusted JavaScript executed synchronously by the host engine,
