@@ -6,7 +6,7 @@ import {
   type Composition,
   type CompositionScripting,
 } from '@ograf-editor/scene-model';
-import { useActiveComposition, useProjectStore } from '../state/projectStore';
+import { getActiveComposition, useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useExpressionDiagnosticsStore } from '../state/expressionDiagnosticsStore';
 import { LayerExpressionsEditor } from './LayerExpressionsEditor';
 import './ScriptsPanel.css';
@@ -40,29 +40,22 @@ export function ScriptsPanel() {
 }
 
 function ScriptEditor({ composition }: { composition: Composition }) {
-  const saved = composition.scripting ?? EMPTY;
-  const [baseline, setBaseline] = useState(saved);
-  const [draft, setDraft] = useState(saved);
+  const scripting = composition.scripting ?? EMPTY;
   const [selected, setSelected] = useState(-1);
   const [importError, setImportError] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
   const update = useProjectStore((state) => state.updateCompositionSettings);
   const diagnostics = useExpressionDiagnosticsStore();
-  // External edits and undo/redo replace the immutable settings object.
-  if (baseline !== saved) {
-    setBaseline(saved);
-    if (baseline.source === saved.source && baseline.modules === saved.modules) {
-      setDraft({ ...draft, enabled: saved.enabled });
-    } else {
-      setDraft(saved);
-      setSelected(-1);
-    }
-  }
-  const hasCodeChanges = draft.source !== saved.source || draft.modules !== saved.modules;
-  const file = draft.modules[selected];
-  let syntaxError = compositionScriptSyntaxError(draft.source);
+  const edit = (change: (current: CompositionScripting) => CompositionScripting) => {
+    const state = useProjectStore.getState();
+    const active = getActiveComposition(state.project, state.activeCompositionId);
+    if (active.id !== composition.id) return;
+    update({ scripting: change(active.scripting ?? EMPTY) });
+  };
+  const file = scripting.modules[selected];
+  let syntaxError = compositionScriptSyntaxError(scripting.source);
   const names = new Set<string>();
-  for (const module of draft.modules) {
+  for (const module of scripting.modules) {
     try {
       const name = scriptModuleName(module.fileName);
       if (names.has(name)) throw new Error('Duplicate module name: ' + name);
@@ -85,7 +78,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
         ]
       : [];
   const editFile = (patch: Partial<{ fileName: string; source: string }>) =>
-    setDraft((current) => ({
+    edit((current) => ({
       ...current,
       modules: current.modules.map((module, index) =>
         index === selected ? { ...module, ...patch } : module,
@@ -101,7 +94,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           return { fileName: file.name, source: await file.text() };
         }),
       );
-      setDraft((current) => ({ ...current, modules: [...current.modules, ...imported] }));
+      edit((current) => ({ ...current, modules: [...current.modules, ...imported] }));
     } catch (error) {
       setImportError(error instanceof Error ? error.message : String(error));
     }
@@ -109,29 +102,11 @@ function ScriptEditor({ composition }: { composition: Composition }) {
   return (
     <div className="scripts-editor">
       <div className="scripts-toolbar">
-        <button
-          type="button"
-          disabled={!hasCodeChanges || !!syntaxError}
-          onClick={() => update({ scripting: { ...draft, enabled: saved.enabled } })}
-        >
-          Apply
-        </button>
-        <button
-          type="button"
-          disabled={!hasCodeChanges}
-          onClick={() => {
-            setDraft(saved);
-            setSelected(-1);
-            setImportError('');
-          }}
-        >
-          Revert
-        </button>
         <label>
           <input
             type="checkbox"
-            checked={saved.enabled}
-            onChange={(event) => update({ scripting: { ...saved, enabled: event.target.checked } })}
+            checked={scripting.enabled}
+            onChange={(event) => edit((current) => ({ ...current, enabled: event.target.checked }))}
           />
           Composition script enabled
         </label>
@@ -143,7 +118,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           onChange={(event) => setSelected(Number(event.target.value))}
         >
           <option value={-1}>Composition (each frame)</option>
-          {draft.modules.map((module, index) => (
+          {scripting.modules.map((module, index) => (
             <option key={index} value={index}>
               {module.fileName}
             </option>
@@ -158,13 +133,13 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           type="button"
           onClick={() => {
             let index = 1;
-            while (draft.modules.some((module) => module.fileName === `helpers${index}.js`))
+            while (scripting.modules.some((module) => module.fileName === `helpers${index}.js`))
               index++;
-            setSelected(draft.modules.length);
-            setDraft({
-              ...draft,
-              modules: [...draft.modules, { fileName: `helpers${index}.js`, source: '' }],
-            });
+            setSelected(scripting.modules.length);
+            edit((current) => ({
+              ...current,
+              modules: [...current.modules, { fileName: `helpers${index}.js`, source: '' }],
+            }));
           }}
         >
           New module
@@ -173,10 +148,10 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           <button
             type="button"
             onClick={() => {
-              setDraft({
-                ...draft,
-                modules: draft.modules.filter((_, index) => index !== selected),
-              });
+              edit((current) => ({
+                ...current,
+                modules: current.modules.filter((_, index) => index !== selected),
+              }));
               setSelected(-1);
             }}
           >
@@ -208,11 +183,11 @@ function ScriptEditor({ composition }: { composition: Composition }) {
       <textarea
         aria-label={file ? 'Module source' : 'Composition script'}
         spellCheck={false}
-        value={file?.source ?? draft.source}
+        value={file?.source ?? scripting.source}
         onChange={(event) => {
           const source = event.target.value;
           if (file) editFile({ source });
-          else setDraft({ ...draft, source });
+          else edit((current) => ({ ...current, source }));
         }}
       />
       {importError && (
@@ -225,12 +200,11 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           {syntaxError}
         </p>
       )}
-      {!hasCodeChanges &&
-        runtimeErrors.map((message) => (
-          <p role="alert" className="inspector-error" key={message}>
-            {message}
-          </p>
-        ))}
+      {runtimeErrors.map((message) => (
+        <p role="alert" className="inspector-error" key={message}>
+          {message}
+        </p>
+      ))}
     </div>
   );
 }

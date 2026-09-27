@@ -24,9 +24,10 @@ Layer dependencies resolve lazily, independently of layer order. Circular depend
 ## Composition script and shared files
 
 Open **Scripts > Composition & modules** and select **Composition (each frame)**.
-**Composition script enabled** turns the applied script on or off immediately, even when the
-draft contains errors. It preserves unapplied edits. **Apply** commits code edits;
-**Revert** restores the applied code. Scripts run after property
+Code edits save directly to the project, like layer expressions. **Composition script enabled**
+turns the composition script on or off immediately. Syntax errors appear below the editor and
+do not prevent toggling execution. Use the normal project Undo/Redo to undo code edits.
+Scripts run after property
 expressions, so their assignments win for that frame:
 
 ```js
@@ -75,7 +76,7 @@ use a JavaScript identifier followed by `.js` or `.mjs`, and cannot conflict wit
 names. The file list is flat; directory, npm and network imports, import cycles, and top-level
 await are unsupported. `import` statements belong in module files; script bodies use namespaces.
 Modules initialize on first use. Playback instances keep their own module state until the next
-load; SVG snapshots start with fresh modules. Applying new scripting settings also resets state. Prefer pure functions so seeking remains repeatable.
+load; SVG snapshots start with fresh modules. Editing scripting settings also resets state. Prefer pure functions so seeking remains repeatable.
 
 ## API
 
