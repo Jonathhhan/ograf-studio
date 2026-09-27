@@ -8,7 +8,6 @@ import {
 } from '@ograf-editor/scene-model';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useExpressionDiagnosticsStore } from '../state/expressionDiagnosticsStore';
-import { ExpressionInput } from './ExpressionInput';
 import './ScriptsPanel.css';
 
 const EMPTY: CompositionScripting = { source: '', enabled: false, modules: [] };
@@ -173,11 +172,15 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           />
         </label>
       )}
-      <ExpressionInput
+      <textarea
         aria-label={file ? 'Module source' : 'Composition script'}
         spellCheck={false}
         value={file?.source ?? draft.source}
-        onValueChange={(source) => (file ? editFile({ source }) : setDraft({ ...draft, source }))}
+        onChange={(event) => {
+          const source = event.target.value;
+          if (file) editFile({ source });
+          else setDraft({ ...draft, source });
+        }}
       />
       {importError && (
         <p role="alert" className="inspector-error">

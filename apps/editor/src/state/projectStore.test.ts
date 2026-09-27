@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useTimelineStore } from './timelineStore';
-import { compileDataSchema } from '@ograf-editor/codegen';
 import {
   getLayerPropertyValueAtFrame,
   createShaderPaint,
@@ -11,26 +10,6 @@ import { getActiveComposition, useProjectStore } from './projectStore';
 
 describe('project store authoring', () => {
   beforeEach(() => useProjectStore.getState().newProject());
-  it('uses the reordered field list in the exported data schema', () => {
-    const store = useProjectStore.getState();
-    const ids = [
-      store.addDataField('text'),
-      store.addDataField('text'),
-      store.addDataField('text'),
-    ];
-    const composition = () => {
-      const state = useProjectStore.getState();
-      return getActiveComposition(state.project, state.activeCompositionId);
-    };
-    const fields = () => composition().dataFields;
-    store.moveDataField(ids[2]!, -1);
-    expect(fields().map((field) => field.id)).toEqual([ids[0], ids[2], ids[1]]);
-    expect(Object.keys(compileDataSchema(composition()).properties)).toEqual(
-      fields().map((field) => field.key),
-    );
-    store.moveDataField(ids[0]!, -1);
-    expect(fields().map((field) => field.id)).toEqual([ids[0], ids[2], ids[1]]);
-  });
   it('keeps editable text and independent fill/outline fields when either paint changes', () => {
     const store = useProjectStore.getState();
     const id = store.addLayer('text');

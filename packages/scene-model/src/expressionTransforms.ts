@@ -103,8 +103,6 @@ export function resolveExpressionTransforms(
       const context = Object.create(null) as ExpressionScope;
       for (const [name, value] of Object.entries({ ...scope, ...layer.scope, ...layer.transform }))
         Object.defineProperty(context, name, { value, configurable: true, enumerable: true });
-      const local =
-        layer.referenceScope === undefined ? undefined : byScope.get(layer.referenceScope);
       const value = evaluateExpression(
         expression,
         context,
@@ -112,7 +110,6 @@ export function resolveExpressionTransforms(
         {
           apiVersion,
           modules,
-          hasLayer: (name) => Boolean(local?.has(name) || byName.has(name)),
           resolveLayerById: (targetId, targetProperty) => {
             const target =
               referenceIds.get(layer.referenceScope)?.get(targetId) ??

@@ -74,24 +74,6 @@
   line-height: 1.4;
 }
 
-.inspector-expression-value {
-  min-width: 0;
-  margin: 3px 6px;
-}
-
-.inspector-expression-value textarea {
-  font-family: ui-monospace, Consolas, monospace;
-  tab-size: 2;
-  line-height: 1.5;
-  width: 100%;
-  min-height: 54px;
-  resize: vertical;
-}
-
-.inspector-expression-value textarea[aria-invalid='true'] {
-  border-color: #ff7b86;
-}
-
 .inspector-binding-list {
   display: grid;
   gap: 7px;
@@ -118,26 +100,6 @@
 
 .inspector-binding-remove:hover {
   color: #ff7b86;
-}
-
-.inspector-binding-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.inspector-binding-mode {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--text-dim);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.inspector-binding-mode input {
-  margin: 0;
 }
 
 .inspector-button-row button,
@@ -450,4 +412,22 @@
 .paint-stops {
   background: #292929;
   border-color: var(--border-strong);
+}
+
+.inspector-expression-value {
+  min-width: 0;
+  margin: 3px 6px;
+}
+
+.inspector-expression-value textarea {
+  font-family: ui-monospace, Consolas, monospace;
+  tab-size: 2;
+  line-height: 1.5;
+  width: 100%;
+  min-height: 54px;
+  resize: vertical;
+}
+
+.inspector-expression-value textarea[aria-invalid='true'] {
+  border-color: #ff7b86;
 }

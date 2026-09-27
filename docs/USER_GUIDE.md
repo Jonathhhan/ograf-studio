@@ -273,12 +273,10 @@ For recent changes, see the [release notes](releases/0.21.md).
 Manage a selected layer's data links under **Properties → Data Bindings**. Binding indicators are
 not drawn over the canvas artwork.
 
-## Property expressions
+## JavaScript scripting
 
-For formulas that control layer position, dimensions, rotation or opacity, open
-**Properties → Expressions**. Each expression has its own enable checkbox. See the
-[expression guide](EXPRESSIONS.md) for syntax, data fields, layer references, timeline-driven
-animation and easing examples.
+Use **Properties > Expressions** for individual numeric properties, or **Scripts** for a
+composition script and imported JavaScript modules. See the [scripting guide](EXPRESSIONS.md).
 
 ## Fullscreen preview
 

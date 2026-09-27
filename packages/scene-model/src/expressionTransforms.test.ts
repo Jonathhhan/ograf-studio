@@ -49,16 +49,16 @@ describe('resolveExpressionTransforms', () => {
     expect(diagnostics).toEqual([]);
   });
 
-  it('copies computed layer values through names, IDs and lazy bare aliases', () => {
+  it('copies computed layer values through explicit name and ID references', () => {
     const source = layer('Source', { width: '200' });
     const target = layer('Target', {
       x: '({...layer("Source")}).width',
       y: '({...layerById("Source")}).width',
-      width: 'JSON.parse(JSON.stringify(Source)).width',
+      width: 'JSON.parse(JSON.stringify(layer("Source"))).width',
     });
     // Enumerating keys must not create a dependency on Broken.x.
     const broken = layer('Broken', { x: 'layer("Missing").x' });
-    target.expressions!.height = 'Object.keys(Broken).length';
+    target.expressions!.height = 'Object.keys(layer("Broken")).length';
     const diagnostics: ExpressionDiagnostic[] = [];
     const result = resolveExpressionTransforms([target, source, broken], {}, diagnostics);
     expect(result.get('Target')).toMatchObject({ x: 200, y: 200, width: 200, height: 6 });

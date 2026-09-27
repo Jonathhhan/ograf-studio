@@ -15,15 +15,12 @@ describe('RealityHub-style configuration panes', () => {
   });
 
   it('uses the same label/value columns for Data and Preview overrides', () => {
-    const sharedCss = source('./panels/DataFieldInput.css');
+    const dataCss = source('./panels/DataPanel.css');
+    const previewCss = source('./panels/PreviewExportPanel.css');
     const columns =
       /grid-template-columns: var\(--property-label-width, minmax\(118px, 42%\)\) minmax\(0, 1fr\);/;
 
-    expect(sharedCss).toMatch(columns);
-    for (const panel of ['DataPanel', 'PreviewExportPanel']) {
-      const component = source(`./panels/${panel}.tsx`);
-      expect(component).toContain('className="data-value-row"');
-      expect(component).toContain('<DataFieldInput');
-    }
+    expect(dataCss).toMatch(columns);
+    expect(previewCss).toMatch(columns);
   });
 });

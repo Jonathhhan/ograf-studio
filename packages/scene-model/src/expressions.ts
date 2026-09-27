@@ -11,8 +11,6 @@ export interface ExpressionEvaluationOptions {
   writeLayer?: (name: string, property: string, value: number) => void;
   writeLayerById?: (id: string, property: string, value: number) => void;
   resolveLayerById?: ExpressionLayerResolver;
-  /** Constant-time membership check; must not evaluate a layer property. */
-  hasLayer?: (name: string) => boolean;
 }
 type CompiledExpression = (
   scope: ExpressionScope,
@@ -159,30 +157,7 @@ function evaluationScope(
     ))
       if (!Object.hasOwn(context, name)) Object.defineProperty(context, name, descriptor);
   }
-  if (!options.hasLayer || !resolveLayer) return context;
-  const aliases = new Map<string, object>();
-  const isAlias = (name: PropertyKey): name is string =>
-    typeof name === 'string' &&
-    !Object.hasOwn(context, name) &&
-    !Object.hasOwn(globalThis, name) &&
-    options.hasLayer!(name);
-  return new Proxy(context, {
-    has: (target, name) => Reflect.has(target, name) || isAlias(name),
-    get: (target, name, receiver) => {
-      if (!isAlias(name)) return Reflect.get(target, name, receiver);
-      let reference = aliases.get(name);
-      if (!reference) {
-        reference = layerReference(
-          (property) => resolveLayer(name, property),
-          options.writeLayer
-            ? (property, value) => options.writeLayer!(name, property, value)
-            : undefined,
-        );
-        aliases.set(name, reference);
-      }
-      return reference;
-    },
-  });
+  return context;
 }
 
 /** Trusted project JavaScript, compiled by the host engine; this is not a sandbox. */

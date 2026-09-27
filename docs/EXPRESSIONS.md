@@ -1,391 +1,107 @@
-# JavaScript expressions and composition scripts
+# JavaScript expressions and scripts
 
-[Using Studio](USER_GUIDE.md) · [Development](DEVELOPMENT.md)
+[Using Studio](USER_GUIDE.md)
 
-Select a layer and open **Properties → Expressions**. Each expression controls one numeric
-property: **X**, **Y**, **W** (width), **H** (height), **Rotation**, or **Opacity**. Use the checkbox
-beside a property to disable its expression without deleting it. An empty expression uses the
-normal sampled value from the layer and its animation.
+## Property expressions
 
-Expressions run in the editor's browser preview and in exported OGraf graphics. They use
-real JavaScript. Expressions are trusted project code and can access the host environment.
-Use expressions only from projects you trust. They run synchronously; an infinite loop can
-block rendering. Return a finite number for the property value.
+Open **Properties > Expressions** for a selected layer. An expression controls `x`, `y`,
+`width`, `height`, `rotation`, or `opacity` (0 to 1). Return a finite number, either as a
+formula or from a JavaScript statement body:
 
-## Shared modules and composition scripts
+```js
+layer('Background').x + 20;
+```
 
-Open the **Scripts** tab (or reopen it from the panel menu). Select **Composition (each frame)**
-to edit the composition script, or use **Import .js files** / **New module** for reusable functions.
-Changes remain drafts until **Apply**; **Revert** restores the applied version. Enable
-**Run composition script** to execute its body. Disabling that body leaves shared modules
-available to property expressions. There is no separate log window; `console.log` uses the host console.
+```js
+const target = layer('Background');
+return Math.max(target.width - thisLayer.width, 0) / 2;
+```
 
-For example, import `helpers.js`:
+Empty or disabled expressions retain the sampled animation value. Errors appear beside the
+field and retain that property's sampled value; unrelated properties still evaluate.
+Layer dependencies resolve lazily, independently of layer order. Circular dependencies are errors.
+
+## Composition script and shared files
+
+Open **Scripts**, select **Composition (each frame)**, and enable **Run composition script**.
+**Apply** commits the draft; **Revert** restores the applied code. Scripts run after property
+expressions, so their assignments win for that frame:
+
+```js
+const title = layer('Title');
+title.x += 20;
+layer('Background').width = title.width + 40;
+```
+
+The same six properties are writable. Reads observe earlier script assignments; property
+expressions are not rerun after writes. Each evaluation starts from a fresh animation pose,
+so assignments do not edit keyframes or accumulate between frames. If the script throws or
+writes an invalid value, all of its layer writes are discarded. Errors appear in Scripts.
+
+Use **Import .js files** or **New module** for reusable functions. For example, `helpers.js`:
 
 ```js
 export function spacing(index, gap) {
   return index * gap;
 }
-
-export function place(target, x, y) {
-  target.x = x;
-  target.y = y;
-}
 ```
 
-A property expression can return `helpers.spacing(3, data.gap)`. The composition script can
-change several layers together:
+Both property expressions and the composition script can call `helpers.spacing(3, 100)`.
+Included files can import and re-export each other with explicit relative paths:
 
 ```js
-const title = layer('Title');
-const background = layer('Background');
-helpers.place(title, helpers.spacing(3, data.gap), 100);
-background.x = title.x - 20;
-background.width = title.width + 40;
+import { spacing } from './helpers.js';
+export const offset = (index) => spacing(index, 40);
 ```
 
-The evaluation order is animation/data binding and text measurement, property expressions,
-then the composition script, followed by transform/mask application. `layer()` and `layerById()`
-in the composition script read the computed values and permit writes to `x`, `y`, `width`,
-`height`, `rotation`, and `opacity`. Writes are visible to subsequent script statements;
-property expressions are not reevaluated after script writes. Their own layer references stay
-read-only. The script has `data`, `comp`, `timeline`, `frame`, `time`, and the interpolation
-helpers; there is no current layer. Composition script references must have unique names or
-exact evaluated layer IDs. A collection's duplicated names are ambiguous here; the item-local
-prototype lookup described below applies only inside property expressions.
-
-Every evaluation starts from a fresh sampled frame. Assignments affect that frame, not saved
-keyframes. A thrown error or invalid numeric assignment discards all of the script's writes,
-while retaining successful property expression results. Errors appear in Scripts. Calculating
-from `frame`, `time`, and data rather than persistent counters keeps seeking repeatable.
-Scripts and property results must be synchronous; asynchronous layer writes are rejected.
-This is trusted JavaScript with host access, not a sandbox or a timeout mechanism.
-
-Module files are embedded as source in `.ogs` projects and the exported graphic descriptor;
-no original disk path or network fetch is needed for playback. Modules use ordinary ES
-`export` syntax. Named/default imports and re-exports between included files work with explicit
-relative paths, for example `import { spacing } from "./helpers.js"`. The module's basename is
-its expression namespace (`helpers`), also available through `modules.helpers`. Use a valid
-JavaScript identifier as the basename, with `.js` or `.mjs`, and avoid API/global names. This
-initial version uses a flat file list: directory imports, npm/network imports, import cycles,
-and top-level await are unsupported. Import statements belong in module files; expression
-and composition script bodies use the exposed namespaces.
-
-Modules initialize lazily on first use and retain their state for that applied scripting
-configuration. Applying changed settings or loading a project creates a new module instance;
-compilation is cached. Exported bindings are read-only to callers, but modules can update their
-own state using normal JavaScript. Prefer pure helper functions for deterministic playout.
-Module syntax is transformed by [Sucrase](https://github.com/alangpierce/sucrase); execution
-uses the host JavaScript engine, as it does for property expressions.
-
-## API compatibility and stable references
-
-Expression API **v1** defines the values and helpers documented here. Each composition stores one
-`expressionApiVersion`, which is preserved by project migration and compiled export/import.
-Existing compositions without a version use v1. All their expressions share that API version. Unsupported versions produce an error and retain
-the sampled property; they are never silently executed with another API version.
-The export embeds its runtime, so later Studio updates do not replace the evaluator in an
-already exported graphic. This versions Studio's API, not the host's JavaScript engine.
-
-Use `layerById("layer-id").width` when a reference must survive a layer rename. Choose a layer
-under **Stable layer reference**, then copy the displayed code into an expression and append
-the property. Name-based `layer("Name")` remains supported. IDs refer to the current composition.
-Within runtime collections, authored prototype IDs resolve within the current item first,
-then to global layers; they cannot address another item. Duplicating a layer does not rewrite
-references in JavaScript source: an ID reference continues to address its original target.
-
-### Debugging in Studio
-
-`console.log`, `info`, `warn`, `error` and `debug` use the host's normal console.
-In Studio, open the browser developer console to view these messages. Properties shows
-expression errors inline, without a separate log panel. Console output may repeat on each
-frame or evaluation. Exported graphics use the player environment's console.
-
-```js
-console.log('position', frame, thisLayer.x);
-return thisLayer.x;
-```
-
-Local variables and helper context are recreated for every evaluation. The API is synchronous:
-return a finite number, never a Promise. External side effects are possible but are not part of
-the playback contract. Use pure calculations from supplied values for repeatable seeking.
-
-API objects expose enumerable properties: spread, `Object.keys`, `Object.values` and JSON
-serialization work for `data`, `thisLayer`, `comp`, `timeline`, and layer references.
-Listing a layer's keys does not evaluate its properties. Copying or serializing its values
-resolves those properties and therefore participates in dependency checks. Copying the current
-computed layer while evaluating one of its properties can create a cycle; use `thisLayer` for
-sampled values instead. Bare layer aliases are looked up lazily.
-
-### Editing
-
-Expression fields use a monospace font. Tab indents, Shift+Tab outdents selected lines,
-and Enter continues the current indentation. Press Escape followed by Tab to move keyboard
-focus out of an expression field. Syntax and evaluation errors stay beside the property.
-A missing return reports that no value was returned; circular dependencies show their layer
-and property path. Layer names matching API namespaces or JavaScript globals (for example,
-`Math`, `console` or `data`) must be accessed through `layer()` or `layerById()`; they never
-replace those built-in values through a bare alias.
-
-## Start with a formula
-
-In a text layer's X expression:
-
-```js
-layer('Rectangle').x + layer('Rectangle').width + 100;
-```
-
-This puts the text's X coordinate 100 pixels beyond the rectangle's right edge when both layers
-use the same parent coordinate system and are unrotated. References do not convert between
-different parent coordinate systems or calculate rotated visual bounds.
-
-For longer expressions, use constants and an explicit return:
-
-```js
-const rect = layer('Rectangle');
-return rect.x + rect.width + 100;
-```
-
-Use the layer's exact, unique name. Spaces, Unicode characters and quoted names are supported;
-escape a quote inside a string, for example `layer("Headline \"Arabic\"").width`.
-Renaming a layer does not rewrite references in expressions.
-Guide layers are omitted from exports, so use ordinary layers for runtime references.
-
-## Available values
-
-| Value                                               | Meaning                                                                                                                       |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `x`, `y`, `width`, `height`, `rotation`, `opacity`  | This layer's sampled values before its expressions run.                                                                       |
-| `thisLayer.x`, `thisLayer.width`, etc.              | Explicit access to those same pre-expression values, even if a local constant has the same name.                              |
-| `layer("Name").x`, etc.                             | The named layer's final expression result for that property, or its sampled value when that expression is empty or disabled.  |
-| `frame`                                             | Current composition timeline position in frames. Browser playback may supply fractional frames.                               |
-| `time`                                              | The same timeline position in seconds: frame divided by composition frame rate.                                               |
-| `comp.width`, `comp.height`                         | Composition dimensions in pixels.                                                                                             |
-| `data.fieldKey`                                     | A scalar data field addressed by its key, not its display label.                                                              |
-| `timeline.startFrame`, `timeline.endFrame`          | Authored Start and End positions.                                                                                             |
-| `timeline.firstStepFrame`, `timeline.lastStepFrame` | Authored first and last Step positions; available only when at least one Step exists.                                         |
-| `timeline.exitProgress`                             | Linear exit progress, 0–1. Uses the existing exit transition during playout and the last Step-to-End interval when scrubbing. |
-
-Position and dimensions are in pixels, rotation is in degrees, and opacity is **0–1** (the UI
-displays it as a percentage). Apply `clamp()` if you need to constrain a result.
-
-The current layer's bare properties and `thisLayer` retain the sampled values, so `x + 100` adds
-an offset to existing keyframe animation. `layer("This layer's name").x` instead requests the
-computed X value and creates a circular dependency if used to compute that same X property.
-
-Dependencies resolve per property, independently of layer ordering. A rectangle's width can
-depend on a text layer's width while the text's X depends on the rectangle's computed width.
-This is not a cycle unless a property eventually depends on itself.
-
-Data keys must be valid identifiers, such as `xPos` or `Alphabet`. Numbers remain numbers,
-select/text values are strings, and boolean fields are exposed as **1** or **0**. Object/array
-fields and nested data paths are not exposed. Examples:
-
-```js
-return data.Alphabet == 'Arabic' ? 200 : 100;
-```
-
-```js
-if (data.fade == 0) return 1;
-return clamp(frame / 10, 0, 1);
-```
-
-`frame` and `time` follow the composition playhead, not elapsed wall-clock time. They hold when
-playback pauses at a Step. Changing transition durations changes the timeline boundary values;
-expressions do not move Steps or redefine their durations. With one Step, first and last are
-the same position. With multiple Steps, the interval between them can be used as a hold.
-
-### Integration with OGraf playback
-
-Studio's existing OGraf lifecycle is the timing authority. `playAction()` advances to a Step,
-`stopAction()` exits, and scheduled actions plus `goToTime()` reproduce that lifecycle when
-seeking. Expressions read the resulting composition playhead and the existing compiled Step
-positions. They do not create Steps, change transition durations or start another clock.
-
-OGraf action-schedule timestamps are milliseconds and may include an arbitrarily long hold.
-Expression `time` is the composition playhead in seconds. For example, if an entrance reaches
-the first Step after one second and holds there, a schedule timestamp of 2,500 ms still produces
-`time = 1`. The next action resumes movement from that Step.
-
-Use `time` when seconds are convenient, and `frame` with `timeline.*Frame` for frame-based
-calculations. The latter values remain frames; do not subtract them directly from `time`.
-There are no `timeline.*Time` aliases or separate expression-driven timing settings.
-
-On a multi-Step graphic, `stopAction()` can exit from an earlier Step directly to End.
-The composition playhead then traverses that earlier position to End over the exit duration.
-A formula anchored to `timeline.lastStepFrame` therefore does not necessarily animate for the
-whole exit: it can hold until that boundary is crossed. For an exit from any Step, use
-`timeline.exitProgress` instead. It reads the existing direct lifecycle transition during
-playout and scheduled seeking, without changing `frame` or `time`. It is linear; apply easing
-explicitly. While scrubbing, it follows the last Step-to-End interval. With no Steps it follows
-Start-to-End. A zero-duration interval switches to 1 at End.
-
-For example, fade out across the full exit, even when stopped at an earlier Step:
-
-```js
-return ease(1, 0, timeline.exitProgress, 'quad-in');
-```
-
-## Interpolation and easing
-
-| Function                               | Behavior                                                                          |
-| -------------------------------------- | --------------------------------------------------------------------------------- |
-| `lerp(start, end, progress)`           | Linear interpolation. Progress is not clamped, so values outside 0–1 extrapolate. |
-| `clamp(value, minimum, maximum)`       | Constrains a number to a range. Supply minimum ≤ maximum.                         |
-| `ease(start, end, progress, "preset")` | Uses the same easing sampler as the keyframe preset.                              |
-
-`ease()` requires an explicit preset and clamps input progress to 0–1. Back and elastic presets
-can still produce output overshoot; that is part of their curve.
-
-Preset names:
-
-- `linear`
-- `ease-in`, `ease-out`, `ease-in-out` (aliases for the corresponding quadratic curves)
-- Each of `quad`, `cubic`, `quart`, `quint`, `sine`, `expo`, `circ`, `back`, `bounce`, `elastic`
-  with `-in`, `-out` or `-in-out`, for example `quad-out` or `elastic-in-out`.
-
-Preset names are case-sensitive strings. A string data field can also supply the preset:
-
-```js
-return ease(0, 300, frame / 20, data.easing);
-```
-
-Expressions do not automatically inherit the easing dropdown selection. Choose the preset in
-the expression. To keep easing already applied to the underlying keyframes, use a sampled value
-such as `thisLayer.x` instead of rebuilding that animation from `frame`.
-
-## Enter with Quad Out, exit with Quad In
-
-Put this in X to slide a text layer in from beyond the rectangle's right edge, stop 100 pixels
-inside its left edge, and exit to the right. The durations follow the first and last timeline
-Steps. Zero-duration transitions are handled without division by zero.
-
-```js
-const rect = layer('Rectangle');
-const inFrames = timeline.firstStepFrame - timeline.startFrame;
-const outFrames = timeline.endFrame - timeline.lastStepFrame;
-const enter = inFrames > 0 ? ease(0, 1, (frame - timeline.startFrame) / inFrames, 'quad-out') : 1;
-const exit =
-  outFrames > 0
-    ? ease(1, 0, (frame - timeline.lastStepFrame) / outFrames, 'quad-in')
-    : frame < timeline.endFrame
-      ? 1
-      : 0;
-return rect.x + 100 + rect.width * (1 - enter * exit);
-```
-
-For opacity, use the same timing constants and return `enter * exit`. If a boolean `fade` data
-field controls the fade, put `if (data.fade == 0) return 1;` first.
-
-For an animated rectangle width, use the same timing constants and replace the final return:
-
-```js
-const minimum = layer('Rectangle').height;
-const fullWidth = clamp(layer('Text').width + 150, minimum, comp.width * 0.9);
-return lerp(minimum, fullWidth, enter * exit);
-```
-
-Use `lerp()` for that final interpolation: the progress has already been eased.
-This example assumes playback reaches the last Step before exiting; see the early-exit
-limitation above.
-
-## A rectangle that follows text dimensions
-
-Enable **Auto size** on the text layer. The browser renderer exposes its measured box after text
-and font data are applied. For a rectangle with 100 pixels left padding, 50 right, and 30 above
-and below, use these separate expressions:
-
-Width:
-
-```js
-return layer('Text').width + 150;
-```
-
-Height:
-
-```js
-return layer('Text').height + 60;
-```
-
-Text X and Y:
-
-```js
-return layer('Rectangle').x + 100;
-```
-
-```js
-return layer('Rectangle').y + 30;
-```
-
-Use the browser preview or exported graphic to check measured typography. The server's SVG
-diagnostic renderer shares expression semantics but has no browser text measurement: text
-dimensions there come from its sampled layer geometry.
-
-## JavaScript syntax
-
-Use a single formula (with an optional trailing semicolon), or a JavaScript function body
-with an explicit `return`. Standard JavaScript features work, including `Math`, `let`, loops,
-functions, arrays, objects, template strings, logical operators and dynamic `layer(name)` calls.
-Normal JavaScript truthiness, comparisons and type conversion apply. The final value must be
-a finite number; boolean, string, object and Promise results are rejected.
-
-Local variables start fresh on each evaluation. For repeatable playback and seeking, derive
-results from the supplied `frame`, `time`, data and layer values. Avoid wall-clock time,
-randomness and external state. Browser-only APIs are unavailable in the server SVG renderer.
-
-## Errors and troubleshooting
-
-The expression field displays grammar errors and runtime errors from the current Studio canvas
-evaluation inline. A syntactically valid expression can still fail when a layer is missing, names
-are duplicated, a data key is unavailable, types do not match, or the result is not finite.
-Runtime messages clear after correction or disabling. They reflect the current frame and test
-data, so they cannot certify all future data combinations. Exported graphics retain the same
-fallback behavior without drawing editor diagnostics over the graphic.
-
-On failure, the property retains its sampled pre-expression value. Dependent properties also
-fall back; unrelated properties continue evaluating. Thrown errors and invalid results are caught; non-terminating code cannot be recovered this way. Disable the checkbox to compare against the sampled value.
-
-If a formula appears to do nothing, check its checkbox, exact layer names, data **keys**, and
-whether its result differs from the sampled value. Check references for cycles. Use a guard
-before division by a potentially zero duration. Syntax success is not a guarantee that every
-runtime data combination is valid.
-
-### Collections and canvas editing
-
-- In an expanded runtime collection, `layer("Name")` looks in the current item first, then
-  among top-level layers. Other items and collections are not visible to that lookup. A duplicate
-  name inside the same item is still an error; it does not fall through to a global layer.
-  Top-level expressions cannot address collection instances by prototype name. Test expanded
-  collections in Preview & Export; the authoring canvas edits prototypes.
-- Bare properties and `thisLayer` use the current instance's sampled pose, including its item
-  offset. Named references use the sibling's computed pose; do not add the item offset again.
-  `data` still refers to top-level scalar data fields; there is no item data expression scope.
-- Canvas snapping reads rendered positions and box sizes, including expression results and
-  auto-sized text. It retains Studio's axis-aligned guide and pixel-rounding behavior.
-  Dragging edits authored values; a formula that replaces X or Y without using those values
-  will override that edit.
-
-## Implementation and tests
-
-The scene-model package owns the JavaScript expression compiler and the shared per-property dependency
-resolver. SVG rendering and browser runtime rendering provide their own sampled geometry to
-that resolver. Exported descriptors preserve expression source and individual enable flags.
-Compiled-package import restores both even when no embedded Studio project is present.
-These are Studio implementation details carried in the graphic's JavaScript module, not new
-fields or methods required of an OGraf controller. The existing
-[OGraf Step model and actions](https://ograf.ebu.io/v1/specification/docs/Specification.html#step-model)
-remain in charge of playback.
-
-Compilation is cached for up to 256 distinct expressions; evaluation has fresh local scope
-on every call, including recursive references. Property dependency chains remain limited to
-128 active evaluations. JavaScript executes directly in the host, without a sandbox or timeout.
-
-Run the focused checks with:
-
-```sh
-npx vitest run expressions expressionTransforms easingOptions buildRuntimeTimeline renderFrame compileDescriptor
-```
-
-Coverage includes timeline changes, fractional and backward seeking, easing parity, independent
-scopes, escaped names, duplicate names, disabled expressions, cycles, export preservation and
-SVG/runtime semantics. Browser text metrics and target-player appearance still need visual QA.
+The filename's basename is its namespace, also available as `modules.helpers`. Filenames must
+use a JavaScript identifier followed by `.js` or `.mjs`, and cannot conflict with API/global
+names. The file list is flat; directory, npm and network imports, import cycles, and top-level
+await are unsupported. `import` statements belong in module files; script bodies use namespaces.
+Modules initialize on first use and retain state until the applied scripting configuration
+changes or the project reloads. Prefer pure functions so seeking remains repeatable.
+
+## API
+
+| Value                                               | Meaning                                                                             |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `thisLayer`                                         | Sampled transform before expressions; property expressions only.                    |
+| `x`, `y`, `width`, `height`, `rotation`, `opacity`  | Shorthand for the sampled transform in a property expression.                       |
+| `layer("Name")`                                     | Computed transform of a uniquely named layer. Read-only in property expressions.    |
+| `layerById("id")`                                   | Same lookup by stable ID; use the Properties reference selector to obtain the code. |
+| `frame`, `time`                                     | Composition playhead in frames and seconds.                                         |
+| `comp.width`, `comp.height`                         | Composition dimensions.                                                             |
+| `data.key`                                          | Scalar input field; booleans are exposed as 0/1.                                    |
+| `timeline.startFrame`, `timeline.endFrame`          | Authored start and end boundaries.                                                  |
+| `timeline.firstStepFrame`, `timeline.lastStepFrame` | First and last Step boundaries, when present.                                       |
+| `timeline.exitProgress`                             | Exit progress, including a direct Stop transition.                                  |
+| `lerp(a, b, t)`, `clamp(value, min, max)`           | Numeric interpolation and bounds.                                                   |
+| `ease(a, b, t, preset)`                             | Interpolation using an existing Studio easing preset.                               |
+
+Layer names do not become JavaScript globals: use `layer("Title").x`, not `Title.x`.
+`Object.keys`, object spread, and JSON serialization work on the supplied objects. Listing a
+layer's keys does not evaluate its properties; copying values does create dependencies.
+
+Within collection property expressions, name and prototype-ID lookups prefer siblings in the
+same item, then global layers. Composition scripts require unique evaluated names or exact
+runtime IDs; duplicated collection names are ambiguous. `data` contains top-level scalar fields.
+
+The playhead follows OGraf Steps, holds, and Stop transitions; it is not wall-clock elapsed time.
+Scripts do not schedule actions. Existing OGraf lifecycle behavior remains unchanged.
+
+## Execution and portability
+
+Expressions and scripts are trusted JavaScript executed synchronously by the host engine,
+without a sandbox or timeout. `console.log` uses the native console. Infinite loops can block
+the host, and async work is unsupported for frame calculations. Use current frame/data values
+rather than persistent counters or external side effects for deterministic playback.
+
+Source, enable flags, and modules survive `.ogs` reload and compiled `.ograf` export/import.
+The exported descriptor embeds module source; the original files are not needed at playback.
+[Sucrase](https://github.com/alangpierce/sucrase) handles module import/export syntax.
+The composition's `expressionApiVersion` defaults to v1; unsupported versions report errors
+and retain sampled values. This is Studio's API version, not a JavaScript language version.
+
+The shared evaluator is used by Studio, SVG snapshots, and exported graphics. References use
+the renderer's sampled layer boxes; scripting does not change text auto-sizing behavior.
+Tests cover dependencies, errors, module loading, seeking, lifecycle timing, and export/import.

@@ -29,12 +29,11 @@ import {
 } from '../state/ografCompatibility';
 import { useFitZoom } from '../canvas/useFitZoom';
 import { transparencyCheckerboardStyle } from '../canvas/compositionBackground';
-import { buildPreviewFormFromTestValues, resolvePreviewDataRecord } from '../state/previewData';
+import { resolvePreviewDataRecord } from '../state/previewData';
 import { canReusePreviewForShaderParameters } from '../state/shaderPreviewReuse';
 import { enterPreviewFullscreen, installPreviewShortcuts } from '../state/previewPresentation';
 import { measureAgentText } from '../state/agentCapture';
 import { Panel } from './Panel';
-import { DataFieldInput } from './DataFieldInput';
 import { resolveSourceOverlayGeometry } from './sourceOverlay';
 import './PreviewExportPanel.css';
 
@@ -78,7 +77,6 @@ export function PreviewExportPanel() {
   const project = useProjectStore((s) => s.project);
   const composition = useActiveComposition();
   const testValues = useTestDataStore((s) => s.values);
-  const setTestValue = useTestDataStore((s) => s.setValue);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -99,9 +97,7 @@ export function PreviewExportPanel() {
   const [currentStep, setCurrentStep] = useState<number | undefined>();
   const [renderType, setRenderType] = useState<RenderType>('realtime');
   const [isPreviewLoaded, setIsPreviewLoaded] = useState(false);
-  const [dataForm, setDataForm] = useState<Record<string, TestValue>>(() =>
-    buildPreviewFormFromTestValues(composition, testValues),
-  );
+  const [dataForm, setDataForm] = useState<Record<string, TestValue>>({});
   const [exportStatus, setExportStatus] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [exportDialogProject, setExportDialogProject] = useState<Project | null>(null);
@@ -185,18 +181,11 @@ export function PreviewExportPanel() {
   const validation = useMemo(() => validateManifest(manifest), [manifest]);
 
   const resetDataForm = () => {
-    setDataForm(buildPreviewFormFromTestValues(composition, testValues));
-  };
-
-  const updateDataFormValue = (
-    field: Project['compositions'][number]['dataFields'][number],
-    value: TestValue,
-  ) => {
-    setDataForm((previous) => ({
-      ...previous,
-      [field.key]: value,
-    }));
-    setTestValue(field.id, value);
+    const next: Record<string, TestValue> = {};
+    for (const field of composition.dataFields) {
+      next[field.key] = testValues[field.id] ?? field.defaultValue;
+    }
+    setDataForm(next);
   };
 
   const appendLog = useCallback((method: string, params: unknown, result: unknown) => {
@@ -236,21 +225,6 @@ export function PreviewExportPanel() {
           statusMessage: err instanceof Error ? err.message : String(err),
         });
       }
-    },
-    [appendLog],
-  );
-
-  const applyLatestPreviewData = useCallback(
-    async (graphic: HTMLElement & Graphic): Promise<boolean> => {
-      const data = latestPreviewDataRef.current;
-      const signature = JSON.stringify(data);
-      if (lastAttemptedDataSignatureRef.current === signature) return true;
-      const params = { data, skipAnimation: true };
-      const result = await graphic.updateAction(params);
-      appendLog('updateAction', params, result);
-      if (!successful(result)) return false;
-      lastAttemptedDataSignatureRef.current = signature;
-      return true;
     },
     [appendLog],
   );
@@ -315,7 +289,7 @@ export function PreviewExportPanel() {
   useEffect(() => {
     resetDataForm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [composition.dataFields, project.mainCompositionId, testValues]);
+  }, [composition.dataFields, project.mainCompositionId]);
 
   useEffect(() => {
     setCompatibility(null);
@@ -338,13 +312,12 @@ export function PreviewExportPanel() {
   const handlePlayAction = useCallback(
     (params: { delta?: number; goto?: number }) => {
       void call('playAction', params, async (g) => {
-        if (!(await applyLatestPreviewData(g))) return { statusCode: 550 };
         const result = await g.playAction(params);
         if (graphicRef.current === g) setCurrentStep(result.currentStep);
         return result;
       });
     },
-    [applyLatestPreviewData, call],
+    [call],
   );
 
   const handleFullscreen = () => {
@@ -392,7 +365,6 @@ export function PreviewExportPanel() {
 
   const handleStop = () =>
     void call('stopAction', {}, async (g) => {
-      if (!(await applyLatestPreviewData(g))) return { statusCode: 550 };
       const result = await g.stopAction({});
       setCurrentStep(undefined);
       return result;
@@ -436,10 +408,7 @@ export function PreviewExportPanel() {
       return;
     }
     const params = { schedule };
-    void call('setActionsSchedule', params, async (g) => {
-      if (!(await applyLatestPreviewData(g))) return { statusCode: 550 };
-      return g.setActionsSchedule(params);
-    });
+    void call('setActionsSchedule', params, (g) => g.setActionsSchedule(params));
   };
 
   const handleGoToTime = () => {
@@ -741,15 +710,15 @@ export function PreviewExportPanel() {
                 <PropertyRow
                   help={`${field.description ? field.description + ' ' : ''}Value sent as ${field.key} by preview lifecycle actions. Use Load, Play or Update to test runtime data; this does not change the saved field default.`}
                   key={field.id}
-                  as="div"
-                  className="data-value-row"
+                  className="preview-data-row"
                 >
                   <span>{field.label || field.key}</span>
-                  <DataFieldInput
-                    field={field}
-                    interactive
-                    value={dataForm[field.key] ?? field.defaultValue}
-                    onChange={(value) => updateDataFormValue(field, value)}
+                  <input
+                    type="text"
+                    value={String(dataForm[field.key] ?? '')}
+                    onChange={(e) =>
+                      setDataForm((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
                   />
                 </PropertyRow>
               ))}
@@ -795,8 +764,7 @@ export function PreviewExportPanel() {
               help={
                 'Choose a reference image to overlay on the preview for visual comparison. This QA overlay is not included in the exported graphic.'
               }
-              as="div"
-              className="data-value-row"
+              className="preview-data-row"
             >
               <span>Source overlay</span>
               <select
@@ -818,8 +786,7 @@ export function PreviewExportPanel() {
                 help={
                   'Opacity of the reference overlay, from 0 for invisible to 1 for fully opaque. Lower it to compare the reference with the rendered graphic.'
                 }
-                as="div"
-                className="data-value-row"
+                className="preview-data-row"
               >
                 <span>Overlay opacity</span>
                 <input
@@ -842,8 +809,7 @@ export function PreviewExportPanel() {
               help={
                 "Include interlaced-output checks in broadcast QA. This changes the checks, not the graphic's render mode or frame rate."
               }
-              as="div"
-              className="data-value-row"
+              className="preview-data-row"
             >
               <span>Interlaced</span>
               <input
@@ -885,8 +851,7 @@ export function PreviewExportPanel() {
             help={
               "Choose the playback modes advertised by the exported package: real-time, non-real-time or both. This output-only choice does not change the editable project's flags."
             }
-            as="div"
-            className="data-value-row"
+            className="preview-data-row"
           >
             <span>Export profile</span>
             <select

@@ -186,11 +186,10 @@ describe('scheduled shader lifecycle replay', () => {
       [3500, 20, 0, 0.5],
     ]) {
       await graphic.goToTime({ timestamp: timestamp! });
-      const [compiled, elements, states, data] = vi.mocked(applyCompiledMasks).mock.calls.at(-1)!;
+      const [compiled, , states, data] = vi.mocked(applyCompiledMasks).mock.calls.at(-1)!;
       const result = resolveFrameExpressions(
         compiled,
         states as Map<string, MaskRenderState>,
-        elements,
         data,
       );
       expect(result.get('shader')!.transform).toMatchObject({
@@ -249,11 +248,10 @@ describe('scheduled shader lifecycle replay', () => {
         expect(await graphic.goToTime({ timestamp: timestamp! })).toMatchObject({
           statusCode: 200,
         });
-        const [compiled, elements, states, data] = vi.mocked(applyCompiledMasks).mock.calls.at(-1)!;
+        const [compiled, , states, data] = vi.mocked(applyCompiledMasks).mock.calls.at(-1)!;
         const result = resolveFrameExpressions(
           compiled,
           states as Map<string, MaskRenderState>,
-          elements,
           data,
         );
         expect(result.get('shader')!.transform).toMatchObject({

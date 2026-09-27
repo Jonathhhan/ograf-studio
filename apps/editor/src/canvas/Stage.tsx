@@ -701,9 +701,6 @@ export function Stage({ style }: { style?: CSSProperties }) {
       moveableRef.current?.updateTarget();
     };
     refreshMasks();
-    const observer = new ResizeObserver(() => refreshMasks());
-    for (const element of layerRefs.current.values()) observer.observe(element);
-    return () => observer.disconnect();
   }, [composition, maskTestValues]);
   useEffect(() => {
     const frameRate = composition.frameRate;

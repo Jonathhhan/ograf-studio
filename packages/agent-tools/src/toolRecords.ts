@@ -824,8 +824,6 @@ function projectSnapshotProjection(
             projectedLayer.designTokenBindings = layer.designTokenBindings;
             projectedLayer.componentLink = layer.componentLink;
             projectedLayer.bindings = layer.bindings;
-            projectedLayer.expressions = layer.expressions;
-            projectedLayer.expressionsEnabled = layer.expressionsEnabled;
             projectedLayer.binding = layer.bindings[0] ?? null;
           }
           if (sections.has('elements')) {

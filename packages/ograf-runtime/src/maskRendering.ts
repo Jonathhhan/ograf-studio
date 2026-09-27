@@ -24,9 +24,8 @@ export function applyCompiledMasks(
   data?: Record<string, unknown>,
   onDiagnostics?: (diagnostics: ExpressionDiagnostic[]) => void,
 ): void {
-  states = new Map(states);
   const diagnostics: ExpressionDiagnostic[] | undefined = onDiagnostics ? [] : undefined;
-  states = resolveFrameExpressions(descriptor, states, elements, data, diagnostics);
+  states = resolveFrameExpressions(descriptor, states, data, diagnostics);
   if (diagnostics) onDiagnostics?.(diagnostics);
   for (const layer of descriptor.layers) {
     const target = elements.get(layer.id);
@@ -99,23 +98,6 @@ export function applyCompiledMasks(
         state.patternFrame === undefined ? state : { ...state, patternFrame: 0 },
       ]),
     );
-    // Auto-sized text layers update their authored DOM box after font/data
-    // resolution. Masks must use that live box while retaining the authored
-    // position, scale and opacity from the animation state.
-    for (const source of sources.values()) {
-      if (source.element.type !== 'text' || source.element.autoFit !== 'auto-size') continue;
-      const state = geometryStates.get(source.id);
-      const sourceElement = elements.get(source.id);
-      if (!state || !sourceElement) continue;
-      const width = Number.parseFloat(sourceElement.style.width);
-      const height = Number.parseFloat(sourceElement.style.height);
-      if (width > 0 && height > 0) {
-        geometryStates.set(source.id, {
-          ...state,
-          transform: { ...state.transform, width, height },
-        });
-      }
-    }
     const markup = layerMaskSvg(layer.id, sources, geometryStates, entry.id);
     if (markup !== entry.markup) {
       entry.svg.innerHTML = `<defs>${markup}</defs>`;

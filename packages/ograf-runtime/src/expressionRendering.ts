@@ -7,42 +7,21 @@ import {
 } from '@ograf-editor/scene-model';
 import type { CompiledGraphicDescriptor } from '@ograf-editor/ograf-types';
 
-/** Resolve individual property dependencies, with measured auto-size boxes as the base pose. */
+/** Apply scripts to the sampled frame before transforms and masks are rendered. */
 export function resolveFrameExpressions(
   descriptor: CompiledGraphicDescriptor,
   states: Map<string, MaskRenderState>,
-  elements?: Map<string, HTMLElement>,
   data: Record<string, unknown> = {},
   diagnostics?: ExpressionDiagnostic[],
 ): Map<string, MaskRenderState> {
   if (!descriptor.scripting?.enabled && !descriptor.layers.some((layer) => layer.expressions))
     return new Map(states);
-  const base = new Map(states);
-  for (const layer of descriptor.layers) {
-    const state = base.get(layer.id);
-    const element = elements?.get(layer.id);
-    if (
-      !state ||
-      !element ||
-      layer.element.type !== 'text' ||
-      layer.element.autoFit !== 'auto-size'
-    )
-      continue;
-    const host = element.firstElementChild?.classList.contains('layer-content-host')
-      ? (element.firstElementChild as HTMLElement)
-      : element;
-    const width = Number.parseFloat(host.style.width),
-      height = Number.parseFloat(host.style.height);
-    if (Number.isFinite(width) && Number.isFinite(height) && width >= 0 && height >= 0) {
-      base.set(layer.id, { ...state, transform: { ...state.transform, width, height } });
-    }
-  }
   const clock = [...states.values()][0] as
     (MaskRenderState & { expressionFrame?: number; expressionExitProgress?: number }) | undefined;
   const frame = clock?.expressionFrame ?? 0;
   const transforms = resolveExpressionTransforms(
     descriptor.layers.flatMap((layer) => {
-      const state = base.get(layer.id);
+      const state = states.get(layer.id);
       if (!state) return [];
       const expressionState = state as MaskRenderState & {
         expressionFrame?: number;
@@ -91,7 +70,7 @@ export function resolveFrameExpressions(
     descriptor.scripting,
   );
   return new Map(
-    [...base].map(([id, state]) => [
+    [...states].map(([id, state]) => [
       id,
       { ...state, transform: transforms.get(id) ?? state.transform },
     ]),

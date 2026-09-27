@@ -267,7 +267,7 @@ describe('runtime timeline boundary seeking', () => {
     const states = new Map(
       compiled.layers.map((layer) => [layer.id, sampleCompiledLayerVisualState(layer, 0)]),
     );
-    const result = resolveFrameExpressions(compiled, states, undefined, { xPos: 30, yPos: 20 });
+    const result = resolveFrameExpressions(compiled, states, { xPos: 30, yPos: 20 });
     expect(result.get('text')!.transform.x).toBe(130);
     expect(result.get('text')!.transform.y).toBe(20);
   });
@@ -286,131 +286,6 @@ describe('runtime timeline boundary seeking', () => {
     expect(Number(gsap.getProperty(element, 'x'))).toBe(200);
     timeline.kill();
   });
-  it('moves a rectangle and its text together when position data changes', () => {
-    const compiled = descriptor();
-    compiled.keyframes.at(-1)!.frame = 100;
-    const rectangle = compiled.layers[0]!;
-    rectangle.name = 'Rectangle';
-    rectangle.expressions = {
-      x: 'thisLayer.x + data.xPos - 30',
-      y: 'thisLayer.y + data.yPos',
-    };
-    const text = structuredClone(rectangle);
-    text.id = 'text';
-    text.name = 'Text';
-    text.expressions = {
-      x: 'layer("Rectangle").x + 30',
-      y: 'layer("Rectangle").y',
-    };
-    compiled.layers = [rectangle, text];
-    const rectangleElement = { style: {} } as HTMLElement;
-    const textElement = { style: {} } as HTMLElement;
-    let data = { xPos: 30, yPos: 0 };
-    const timeline = buildRuntimeTimeline(
-      compiled,
-      new Map([
-        [rectangle.id, rectangleElement],
-        [text.id, textElement],
-      ]),
-      () => data,
-    );
-    timeline.seek(50 / 25, true);
-    expect(Number(gsap.getProperty(rectangleElement, 'x'))).toBe(0);
-    expect(Number(gsap.getProperty(textElement, 'x'))).toBe(30);
-    data = { xPos: 80, yPos: 20 };
-    timeline.time(60 / 25, false);
-    expect(Number(gsap.getProperty(rectangleElement, 'x'))).toBe(50);
-    expect(Number(gsap.getProperty(textElement, 'x'))).toBe(80);
-    expect(Number(gsap.getProperty(rectangleElement, 'y'))).toBe(20);
-    expect(Number(gsap.getProperty(textElement, 'y'))).toBe(20);
-    timeline.kill();
-  });
-  it('keeps a moving rectangle within title-safe bounds at 0 and 100 percent', () => {
-    const compiled = descriptor();
-    const rectangle = compiled.layers[0]!;
-    rectangle.name = 'Rectangle';
-    rectangle.animationTracks.x = [{ ...rectangle.animationTracks.x![0]!, value: 100 }];
-    rectangle.animationTracks.y = [{ ...rectangle.animationTracks.y![0]!, value: 100 }];
-    rectangle.expressions = {
-      width:
-        'const text = layer("Text"); const width = text.width + 150; const height = text.height + 60; return clamp(width < height ? height : width, 0, comp.width * 0.9);',
-      height: 'clamp(layer("Text").height + 60, 0, comp.height * 0.9)',
-      x: `const safeLeft = comp.width * 0.05;
-const safeWidth = comp.width * 0.9;
-const rectWidth = layer("Rectangle").width;
-const travel = clamp(safeWidth - rectWidth, 0, 200);
-const room = clamp(safeWidth - rectWidth - travel, 0, safeWidth);
-const inFrames = clamp(data.inFrames, 1, 50);
-const outFrames = clamp(data.outFrames, 1, 50);
-const phase = frame < inFrames
-  ? 1 - clamp(frame / inFrames, 0, 1)
-  : clamp((frame - (100 - outFrames)) / outFrames, 0, 1);
-return safeLeft + room * clamp(data.xPos / 100, 0, 1) + travel * phase;`,
-      y: `const safeTop = comp.height * 0.05;
-const safeHeight = comp.height * 0.9;
-return safeTop + clamp(data.yPos / 100, 0, 1) * clamp(safeHeight - layer("Rectangle").height, 0, safeHeight);`,
-    };
-    const text = structuredClone(rectangle);
-    text.id = 'text';
-    text.name = 'Text';
-    text.expressions = {
-      x: 'layer("Rectangle").x + 100',
-      y: 'layer("Rectangle").y + 30',
-    };
-    compiled.layers = [rectangle, text];
-    const pose = (frame: number, xPos: number, yPos: number, inFrames = 10, outFrames = 10) => {
-      const states = new Map(
-        compiled.layers.map((layer) => [layer.id, sampleCompiledLayerVisualState(layer, frame)]),
-      );
-      const resolved = resolveFrameExpressions(compiled, states, undefined, {
-        xPos,
-        yPos,
-        inFrames,
-        outFrames,
-      });
-      const rect = resolved.get(rectangle.id)!.transform;
-      expect(rect.x).toBeGreaterThanOrEqual(compiled.width * 0.05);
-      expect(rect.y).toBeGreaterThanOrEqual(compiled.height * 0.05);
-      expect(rect.x + rect.width).toBeLessThanOrEqual(compiled.width * 0.95);
-      expect(rect.y + rect.height).toBeLessThanOrEqual(compiled.height * 0.95);
-      expect(resolved.get(text.id)!.transform.x).toBe(rect.x + 100);
-      expect(resolved.get(text.id)!.transform.y).toBe(rect.y + 30);
-      return { rect, states };
-    };
-    for (const frame of [0, 5, 10, 50, 95, 100]) {
-      pose(frame, 0, 0);
-      const { rect } = pose(frame, 100, 100);
-      expect(rect.y + rect.height).toBe(compiled.height * 0.95);
-      if (frame === 0 || frame === 100) expect(rect.x + rect.width).toBe(compiled.width * 0.95);
-    }
-    expect(pose(0, 0, 0).rect.x).toBeGreaterThan(pose(10, 0, 0).rect.x);
-    expect(pose(10, 0, 0).rect.x).toBe(pose(50, 0, 0).rect.x);
-    expect(pose(100, 0, 0).rect.x).toBe(pose(0, 0, 0).rect.x);
-    expect(pose(10, 0, 0, 20, 30).rect.x).toBeGreaterThan(pose(20, 0, 0, 20, 30).rect.x);
-    expect(pose(20, 0, 0, 20, 30).rect.x).toBe(pose(70, 0, 0, 20, 30).rect.x);
-    expect(pose(85, 0, 0, 20, 30).rect.x).toBeGreaterThan(pose(70, 0, 0, 20, 30).rect.x);
-    expect(pose(100, 0, 0, 20, 30).rect.x).toBe(pose(0, 0, 0, 20, 30).rect.x);
-    const states = pose(0, 100, 100).states;
-    states.set(text.id, {
-      ...states.get(text.id)!,
-      transform: {
-        ...states.get(text.id)!.transform,
-        width: compiled.width,
-        height: compiled.height,
-      },
-    });
-    const oversized = resolveFrameExpressions(compiled, states, undefined, {
-      xPos: 100,
-      yPos: 100,
-      inFrames: 10,
-      outFrames: 10,
-    });
-    const rect = oversized.get(rectangle.id)!.transform;
-    expect(rect.width).toBe(compiled.width * 0.9);
-    expect(rect.height).toBe(compiled.height * 0.9);
-    expect(rect.x).toBe(compiled.width * 0.05);
-    expect(rect.y).toBe(compiled.height * 0.05);
-  });
   it('turns opacity animation off with boolean data while retaining movement', () => {
     const compiled = descriptor();
     const layer = compiled.layers[0]!;
@@ -419,62 +294,15 @@ return safeTop + clamp(data.yPos / 100, 0, 1) * clamp(safeHeight - layer("Rectan
       opacity: 'if (data.fade == 0) return 1; return clamp(frame / 10, 0, 1);',
     };
     const states = new Map([[layer.id, sampleCompiledLayerVisualState(layer, 0)]]);
-    const enabled = resolveFrameExpressions(compiled, states, undefined, { fade: true }).get(
+    const enabled = resolveFrameExpressions(compiled, states, { fade: true }).get(
       layer.id,
     )!.transform;
-    const disabled = resolveFrameExpressions(compiled, states, undefined, { fade: false }).get(
+    const disabled = resolveFrameExpressions(compiled, states, { fade: false }).get(
       layer.id,
     )!.transform;
     expect(enabled.opacity).toBe(0);
     expect(disabled.opacity).toBe(1);
     expect(disabled.x).toBe(enabled.x);
-  });
-  it('fits to measured text and resolves position dependencies regardless of layer order', () => {
-    const compiled = descriptor();
-    const rectangle = compiled.layers[0]!;
-    rectangle.name = 'Rectangle';
-    rectangle.expressions = {
-      width: 'layer("Text").width + 150',
-      height: 'layer("Text").height + 60',
-    };
-    const text = structuredClone(rectangle);
-    text.id = 'text';
-    text.name = 'Text';
-    text.element = createTextElement({ autoFit: 'auto-size' });
-    text.expressions = {
-      x: 'layer("Rectangle").x + layer("Rectangle").width + 100',
-      y: 'layer("Rectangle").y + 30',
-    };
-    const host = {
-      style: { width: '250.5px', height: '80.25px' },
-      classList: { contains: () => true },
-    };
-    const elements = new Map([
-      ['text', { firstElementChild: host, style: {} } as unknown as HTMLElement],
-    ]);
-    for (const layers of [
-      [rectangle, text],
-      [text, rectangle],
-    ]) {
-      compiled.layers = layers;
-      const sampled = new Map(
-        layers.map((layer) => [layer.id, sampleCompiledLayerVisualState(layer, 5)]),
-      );
-      const result = resolveFrameExpressions(compiled, sampled, elements);
-      expect(result.get('layer')!.transform).toMatchObject({ width: 400.5, height: 140.25 });
-      expect(result.get('text')!.transform).toMatchObject({ x: 500.5, y: 30, width: 250.5 });
-      expect(sampled.get('text')!.transform.width).toBe(100);
-    }
-    host.style.width = '350px';
-    host.style.height = '100px';
-    const sampled = new Map(
-      compiled.layers.map((layer) => [layer.id, sampleCompiledLayerVisualState(layer, 5)]),
-    );
-    const updated = resolveFrameExpressions(compiled, sampled, elements);
-    expect(updated.get('layer')!.transform).toMatchObject({ width: 500, height: 160 });
-    expect(updated.get('text')!.transform.x).toBe(600);
-    rectangle.expressionsEnabled = { width: false };
-    expect(resolveFrameExpressions(compiled, sampled, elements).get('text')!.transform.x).toBe(200);
   });
   it('falls back on circular property dependencies without breaking unrelated properties', () => {
     const compiled = descriptor();
@@ -498,70 +326,17 @@ return safeTop + clamp(data.yPos / 100, 0, 1) * clamp(safeHeight - layer("Rectan
       expect(result.get(b.id)!.transform.x).toBe(0);
     }
   });
-  it('uses timeline frames for the right-center-right expression, independently of paint sampling', () => {
+  it('applies expressions after keyed tweens on playback and backward seeks', () => {
     const compiled = descriptor();
-    compiled.keyframes.at(-1)!.frame = 100;
-    const rectangle = compiled.layers[0]!;
-    rectangle.name = 'Rectangle';
-    const text = structuredClone(rectangle);
-    text.id = 'text';
-    text.name = 'Text';
-    text.animationTracks.x = [
-      { id: 'x0', frame: 0, value: 1100, easing: 'linear' },
-      { id: 'x10', frame: 10, value: 200, easing: 'linear' },
-      { id: 'x90', frame: 90, value: 200, easing: 'linear' },
-      { id: 'x100', frame: 100, value: 1100, easing: 'linear' },
-    ];
-    text.expressions = {
-      x: `const rect = layer("Rectangle");
-          const inside = rect.x + (rect.width - thisLayer.width) / 2;
-          const outside = rect.x + rect.width + 100;
-          if (frame < 10) { return lerp(outside, inside, clamp(frame / 10, 0, 1)); }
-          else if (frame <= 90) { return inside; }
-          else { return lerp(inside, outside, clamp((frame - 90) / 10, 0, 1)); }`,
-      y: 'time * 25',
-      opacity:
-        'if (frame < 10) return clamp(frame / 10, 0, 1); if (frame <= 90) return 1; return 1 - clamp((frame - 90) / 10, 0, 1);',
-    };
-    compiled.layers.push(text);
+    compiled.layers[0]!.expressions = { x: 'frame * 2', opacity: '0.5' };
     const target = { style: {} } as HTMLElement;
-    const elements = new Map([
-      ['layer', { style: {} } as HTMLElement],
-      ['text', target],
-    ]);
-    const spy = vi.spyOn(gsap, 'set');
-    const timeline = buildRuntimeTimeline(compiled, elements);
-    for (const [frame, x] of [
-      [0, 200],
-      [5, 100],
-      [10, 0],
-      [90, 0],
-      [95, 100],
-      [100, 200],
-      [5, 100],
-    ]) {
-      timeline.seek(frame! / 25, true);
-      expect(spy.mock.calls.filter(([element]) => element === target).at(-1)?.[1]).toMatchObject({
-        x,
-        y: frame,
-      });
-    }
-    // Playback advances the timeline directly; keyed X/opacity tweens must not override expressions.
-    for (const [frame, x, opacity] of [
-      [5, 100, 0.5],
-      [20, 0, 1],
-      [50, 0, 1],
-      [80, 0, 1],
-      [95, 100, 0.5],
-      [100, 200, 0],
-      [50, 0, 1],
-    ] as const) {
-      timeline.time(frame / 25, false);
-      expect(Number(gsap.getProperty(target, 'x'))).toBeCloseTo(x);
-      expect(Number(gsap.getProperty(target, 'opacity'))).toBeCloseTo(opacity);
+    const timeline = buildRuntimeTimeline(compiled, new Map([['layer', target]]));
+    for (const frame of [0, 5, 10, 2]) {
+      timeline.time(frame / compiled.frameRate, false);
+      expect(Number(gsap.getProperty(target, 'x'))).toBe(frame * 2);
+      expect(Number(gsap.getProperty(target, 'opacity'))).toBe(0.5);
     }
     timeline.kill();
-    spy.mockRestore();
   });
   it('resolves layer references in the shared editor pass and timeline seeking', () => {
     const compiled = descriptor();

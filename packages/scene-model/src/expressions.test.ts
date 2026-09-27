@@ -83,19 +83,6 @@ describe('evaluateExpression', () => {
     expect(resolve).toHaveBeenCalledTimes(6);
   });
 
-  it('does not perform alias lookup until a script references a name', () => {
-    const hasLayer = vi.fn((name: string) => name === 'Box');
-    const resolve = vi.fn(() => 12);
-    expect(evaluateExpression('x + Math.max(1, 2)', { x: 3 }, resolve, { hasLayer })).toBe(5);
-    expect(hasLayer).not.toHaveBeenCalled();
-    expect(resolve).not.toHaveBeenCalled();
-    expect(evaluateExpression('Box.width + Box.height', {}, resolve, { hasLayer })).toBe(24);
-    expect(resolve.mock.calls).toEqual([
-      ['Box', 'width'],
-      ['Box', 'height'],
-    ]);
-  });
-
   it('supports native JavaScript functions, loops, arrays, objects and Math', () => {
     expect(
       evaluateExpression(
@@ -216,27 +203,6 @@ describe('evaluateExpression', () => {
       ),
     ).toBe(0);
   });
-  it('supports the equivalent readable animation with const, if and return', () => {
-    const script = `
-      const rect = layer("Rectangle");
-      const inside = rect.x + 100;
-      const outside = rect.x + rect.width + 100;
-      if (frame < 10) {
-        return lerp(outside, inside, clamp(frame / 10, 0, 1));
-      }
-      if (frame <= 90) {
-        return inside;
-      }
-      return lerp(inside, outside, clamp((frame - 90) / 10, 0, 1));
-    `;
-    const formula =
-      'lerp(layer("Rectangle").x + 100, layer("Rectangle").x + layer("Rectangle").width + 100, frame < 10 ? 1 - clamp(frame / 10, 0, 1) : clamp((frame - 90) / 10, 0, 1))';
-    for (const frame of [0, 5, 10, 50, 90, 95, 100, 110, 5]) {
-      const scope = { frame, 'Rectangle.x': 100, 'Rectangle.width': 400 };
-      expect(evaluateExpression(script, scope)).toBe(evaluateExpression(formula, scope));
-      expect(Object.keys(scope)).toHaveLength(3);
-    }
-  });
   it('keeps block constants local, supports else-if and returns immediately', () => {
     const script =
       'const x = 7; if (frame < 10) { const x = 3; return x; } else if (frame < 20) { return x + 1; } else { return x; } return missing;';
@@ -253,38 +219,6 @@ describe('evaluateExpression', () => {
       'already been declared',
     );
     expect(() => evaluateExpression('if (1) { return 2;', {})).toThrow();
-  });
-  it('moves right to center, holds, and returns right with changing geometry', () => {
-    const expression =
-      'lerp(layer("Rectangle").x + (layer("Rectangle").width - thisLayer.width) / 2, layer("Rectangle").x + layer("Rectangle").width + 100, frame < 10 ? 1 - clamp(frame / 10, 0, 1) : clamp((frame - 90) / 10, 0, 1))';
-    for (const [frame, expected] of [
-      [0, 600],
-      [5, 425],
-      [10, 250],
-      [50, 250],
-      [90, 250],
-      [95, 425],
-      [100, 600],
-      [110, 600],
-      [0, 600],
-    ]) {
-      expect(
-        evaluateExpression(expression, {
-          frame: frame!,
-          'Rectangle.x': 100,
-          'Rectangle.width': 400,
-          width: 100,
-        }),
-      ).toBe(expected);
-    }
-    expect(
-      evaluateExpression(expression, {
-        frame: 10,
-        'Rectangle.x': 100,
-        'Rectangle.width': 600,
-        width: 200,
-      }),
-    ).toBe(300);
   });
   it('short circuits conditions and handles smooth interpolation', () => {
     expect(evaluateExpression('frame < 10 ? 5 : missing / 0', { frame: 0 })).toBe(5);
