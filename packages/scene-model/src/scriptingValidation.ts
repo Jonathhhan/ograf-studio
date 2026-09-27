@@ -48,6 +48,20 @@ export function scriptingErrors(value: unknown, validateModuleNames = true): str
   }
   for (const layer of Array.isArray(value.layers) ? value.layers : []) {
     if (!record(layer)) continue;
+    if (layer.legacyExpressions !== undefined) {
+      if (!record(layer.legacyExpressions)) errors.push('Legacy expressions must be an object.');
+      else
+        for (const entry of Object.values(layer.legacyExpressions)) {
+          if (
+            !record(entry) ||
+            typeof entry.source !== 'string' ||
+            typeof entry.enabled !== 'boolean'
+          )
+            errors.push(
+              'Legacy expressions must contain string source and boolean enabled fields.',
+            );
+        }
+    }
     for (const [field, type] of [
       ['expressions', 'string'],
       ['expressionsEnabled', 'boolean'],

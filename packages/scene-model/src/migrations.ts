@@ -1,3 +1,4 @@
+import { EXPRESSION_PROPERTIES } from './expressions';
 import { scriptingErrors } from './scriptingValidation';
 import {
   createFieldDefinition,
@@ -485,13 +486,71 @@ function normalizeComposition(composition: LegacyComposition): Composition {
   };
 }
 
+/** Retired numeric targets remain recoverable without entering the active expression API. */
+function preserveLegacyExpressions(value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const composition = value as Record<string, unknown>;
+  for (const input of Array.isArray(composition.layers) ? composition.layers : []) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) continue;
+    const layer = input as Record<string, unknown>;
+    const expressions = layer.expressions;
+    const flags = layer.expressionsEnabled;
+    const enabled =
+      flags && typeof flags === 'object' && !Array.isArray(flags)
+        ? (flags as Record<string, unknown>)
+        : undefined;
+    if (expressions && typeof expressions === 'object' && !Array.isArray(expressions)) {
+      for (const [property, source] of Object.entries(expressions)) {
+        if (
+          (EXPRESSION_PROPERTIES as readonly string[]).includes(property) ||
+          !isAnimatableLayerProperty(property) ||
+          typeof source !== 'string'
+        )
+          continue;
+        if (enabled?.[property] !== undefined && typeof enabled[property] !== 'boolean') continue;
+        if (
+          layer.legacyExpressions !== undefined &&
+          (!layer.legacyExpressions ||
+            typeof layer.legacyExpressions !== 'object' ||
+            Array.isArray(layer.legacyExpressions))
+        )
+          throw new Error('Legacy expressions must be an object.');
+        const archived = (layer.legacyExpressions ??= {}) as Record<
+          string,
+          { source: string; enabled: boolean }
+        >;
+        archived[property] = { source, enabled: enabled?.[property] !== false };
+        delete (expressions as Record<string, unknown>)[property];
+      }
+    }
+    if (enabled)
+      for (const [property, flag] of Object.entries(enabled)) {
+        if (
+          !(EXPRESSION_PROPERTIES as readonly string[]).includes(property) &&
+          isAnimatableLayerProperty(property) &&
+          typeof flag === 'boolean'
+        )
+          delete enabled[property];
+      }
+  }
+  for (const component of Array.isArray(composition.components) ? composition.components : [])
+    preserveLegacyExpressions(component);
+  for (const collection of Array.isArray(composition.collections) ? composition.collections : []) {
+    if (collection && typeof collection === 'object')
+      preserveLegacyExpressions({
+        layers: (collection as Record<string, unknown>).prototypeLayers,
+      });
+  }
+}
+
 /** Upgrade an editor project without mutating the parsed/autosaved source object. */
 export function migrateProject(project: Project | LegacyProject): Project {
   // Recover editable filename errors (including autosaved partial edits). Export validation
   // and runtime diagnostics still enforce valid, unique module names.
-  const errors = project.compositions.flatMap((composition) => scriptingErrors(composition, false));
-  if (errors.length) throw new Error(errors.join('\n'));
   const cloned = cloneProject(project as LegacyProject);
+  for (const composition of cloned.compositions) preserveLegacyExpressions(composition);
+  const errors = cloned.compositions.flatMap((composition) => scriptingErrors(composition, false));
+  if (errors.length) throw new Error(errors.join('\n'));
   if (cloned.shaders !== undefined && !Array.isArray(cloned.shaders))
     throw new Error('Project shader library must be an array.');
   if (
