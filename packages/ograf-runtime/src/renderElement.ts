@@ -49,6 +49,27 @@ interface MountedTextFit {
   probe?: HTMLElement;
 }
 
+const scriptElements = new WeakMap<HTMLElement, Element>();
+const contentOptions = new WeakMap<HTMLElement, ElementContentRenderOptions>();
+const contentClocks = new WeakMap<HTMLElement, number>();
+
+/** Reuse the host's backing sizes and absolute media clock when scripts change content. */
+export function applyScriptElement(
+  container: HTMLElement,
+  element: Element,
+  active: boolean,
+): void {
+  if (active) scriptElements.set(container, element);
+  else scriptElements.delete(container);
+  if (container.dataset.ografRenderedElement !== JSON.stringify(element)) {
+    const deterministic = lottieAnimations.get(container)?.deterministic ?? false;
+    renderElementContent(container, element, 0, contentOptions.get(container));
+    const mounted = lottieAnimations.get(container);
+    if (mounted) mounted.deterministic = deterministic;
+  }
+  renderAnimatedElementAtTime(container, element, contentClocks.get(container) ?? 0);
+}
+
 const textFits = new WeakMap<HTMLElement, MountedTextFit>();
 const textFitCallbacks = new WeakMap<HTMLElement, () => void>();
 interface MountedLottie {
@@ -449,6 +470,18 @@ export function applyAnimatedPaint(
   const outerHost = directChild?.classList?.contains('layer-content-host')
     ? directChild
     : container;
+  const scripted = scriptElements.get(outerHost);
+  if (scripted) {
+    tracks =
+      scripted.type === 'text'
+        ? {
+            strokeWidth: [
+              { id: 'script:stroke', frame: 0, value: scripted.strokeWidth, easing: 'linear' },
+            ],
+          }
+        : {};
+    frame = 0;
+  }
   applyShaderPaintTracks(outerHost, tracks, frame);
   if (applyPatternPaint(container, tracks, frame)) return;
   const renderHost = shaderPaintBaseHost(outerHost) ?? outerHost;
@@ -502,6 +535,7 @@ export function renderElementContent(
   frameIndex = 0,
   options: ElementContentRenderOptions = {},
 ): void {
+  contentOptions.set(container, options);
   const shaderFill = element.type !== 'shader' && hasElementShaderPaint(element);
   if (shaderFill && updateShaderPaintContent(container, element, options)) {
     rememberShaderAnimationBase(container, element);
@@ -1040,6 +1074,8 @@ export function renderAnimatedElementAtTime(
   element: Element,
   elapsedMs: number,
 ): void {
+  contentClocks.set(container, elapsedMs);
+  element = scriptElements.get(container) ?? element;
   if (renderShaderPaintAtTime(container, elapsedMs)) return;
   if (element.type === 'shader') {
     renderShaderAtTime(container, elapsedMs);

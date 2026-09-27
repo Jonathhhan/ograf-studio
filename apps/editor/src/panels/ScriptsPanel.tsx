@@ -1,3 +1,4 @@
+import { ScriptPropertyReference } from './ScriptPropertyReference';
 import { ScriptLogWindow } from './ScriptLogWindow';
 import { JavaScriptEditor } from '../components/JavaScriptEditor';
 import { useRef, useState } from 'react';
@@ -202,6 +203,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           {syntaxError}
         </p>
       )}
+      <ScriptPropertyReference />
       {runtimeErrors.map((message) => (
         <p role="alert" className="inspector-error" key={message}>
           {message}

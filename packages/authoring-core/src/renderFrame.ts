@@ -29,6 +29,8 @@ import {
   resolveElementAssetReferences,
   valueAtSourcePath,
   resolveExpressionTransforms,
+  sampleScriptElement,
+  type ScriptLayerVisuals,
   EXPRESSION_PROPERTIES,
   expressionDataScope,
   expressionSourceRect,
@@ -148,6 +150,7 @@ function layerSvg(
   data: Record<string, FieldValue>,
   options: {
     transform?: LayerTransform;
+    scriptVisuals?: ScriptLayerVisuals | undefined;
     itemValue?: FieldValue;
     collectionFieldId?: string;
     offsetX?: number;
@@ -155,6 +158,8 @@ function layerSvg(
     idSuffix?: string;
   } = {},
 ): string {
+  if (options.scriptVisuals)
+    layer = { ...layer, ...options.scriptVisuals, bindings: [], animationTracks: {}, loop: null };
   if (!layer.isVisible || layer.isGuide || layer.isMaskOnly) return '';
   const transform = { ...(options.transform ?? getLayerTransformAtFrame(layer, frame)) };
   if (!options.transform) {
@@ -384,7 +389,52 @@ export function renderCompositionFrameSvg(
             y: pose.y + (index === undefined ? 0 : collection!.offsetPerItem.y * index),
           };
         };
+        const boundElement = layer.bindings.reduce<Element>((resolved, binding) => {
+          const field = composition.dataFields.find((entry) => entry.id === binding.fieldId);
+          const root = field ? data[field.key] : undefined;
+          const item =
+            index !== undefined && collection?.fieldId === field?.id && Array.isArray(root)
+              ? root[index]
+              : root;
+          const value = valueAtSourcePath(item, binding.sourcePath);
+          return value === undefined
+            ? resolved
+            : applyElementDataValue(
+                resolved,
+                binding.targetProperty,
+                binding.valueMap?.[String(value)] ?? value,
+              );
+        }, layer.element);
+        let effects = getLayerEffectsAtFrame(layer, normalizedFrame);
+        for (const binding of layer.bindings) {
+          const field = composition.dataFields.find((entry) => entry.id === binding.fieldId);
+          const root = field ? data[field.key] : undefined;
+          const item =
+            index !== undefined && collection?.fieldId === field?.id && Array.isArray(root)
+              ? root[index]
+              : root;
+          const value = valueAtSourcePath(item, binding.sourcePath);
+          if (value === undefined) continue;
+          const mapped = binding.valueMap?.[String(value)] ?? value;
+          if (binding.targetProperty === 'dropShadowColor')
+            effects = { ...effects, dropShadowColor: String(mapped) };
+          else if (parseEffectProperty(binding.targetProperty))
+            effects = withEffectParameter(effects, binding.targetProperty, mapped);
+        }
         return {
+          scriptVisuals: {
+            element: sampleScriptElement(
+              resolvePatternElement(
+                resolveElementAssetReferences(boundElement, composition.assets),
+                composition.patterns,
+              ),
+              getResolvedLayerAnimationTracks(layer),
+              normalizedFrame,
+            ),
+            effects,
+            isVisible: layer.isVisible,
+            blendMode: layer.blendMode,
+          },
           sampleTransform,
           sourceRectAtTime: (seconds: number, includeExtents: boolean) => {
             let element = layer.bindings.reduce<Element>((resolved, binding) => {
@@ -439,11 +489,13 @@ export function renderCompositionFrameSvg(
     if (!candidate.expressions && !composition.scripting?.enabled) return candidate;
     const transform = expressionTransforms.get(candidate.id);
     if (!transform) return candidate;
-    const animationTracks = { ...candidate.animationTracks };
-    for (const property of EXPRESSION_PROPERTIES) {
+    const animationTracks = transform.scriptVisuals ? {} : { ...candidate.animationTracks };
+    for (const property of TRANSFORM_ANIMATION_PROPERTIES) {
       if (
         !composition.scripting?.enabled &&
-        (!candidate.expressions?.[property] || candidate.expressionsEnabled?.[property] === false)
+        (!candidate.expressions?.[property as (typeof EXPRESSION_PROPERTIES)[number]] ||
+          candidate.expressionsEnabled?.[property as (typeof EXPRESSION_PROPERTIES)[number]] ===
+            false)
       )
         continue;
       animationTracks[property] = [
@@ -455,7 +507,11 @@ export function renderCompositionFrameSvg(
         },
       ];
     }
-    return { ...candidate, animationTracks };
+    return {
+      ...candidate,
+      ...(transform.scriptVisuals ? { ...transform.scriptVisuals, bindings: [], loop: null } : {}),
+      animationTracks,
+    };
   });
   const background =
     composition.backgroundColor === 'transparent'
@@ -486,6 +542,9 @@ export function renderCompositionFrameSvg(
               return prototype
                 ? layerSvg(prototype, normalizedFrame, composition.frameRate, composition, data, {
                     transform: expressionTransforms.get(`${collection.id}::${index}::${layerId}`)!,
+                    scriptVisuals: expressionTransforms.get(
+                      `${collection.id}::${index}::${layerId}`,
+                    )?.scriptVisuals,
                     itemValue,
                     collectionFieldId: collection.fieldId,
                     offsetX: collection.offsetPerItem.x * index,

@@ -1,3 +1,4 @@
+import type { ScriptLayerVisuals } from './scriptLayerProperties';
 import { clipPathSvgForParentBounds } from './clipping';
 import { effectStackToSvg, effectStackPadding } from './effectRendering';
 import { getPaintAtFrame } from './layerAnimation';
@@ -20,6 +21,7 @@ export interface MaskRenderLayer {
   clipParentId?: string | null;
 }
 export interface MaskRenderState {
+  scriptVisuals?: ScriptLayerVisuals | undefined;
   transform: LayerTransform;
   effects: LayerEffects;
   paintTracks: LayerAnimationTracks;

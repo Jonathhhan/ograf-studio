@@ -3,6 +3,7 @@ import { resolveBoundElement } from './renderElement';
 import { measureExpressionText } from './expressionTextBounds';
 import {
   resolveExpressionTransforms,
+  sampleScriptElement,
   expressionSourceRect,
   getTrackValueAtFrame,
   expressionDataScope,
@@ -62,6 +63,16 @@ export function resolveFrameExpressions(
               }
             : {}),
           transform: state.transform,
+          scriptVisuals: {
+            element: sampleScriptElement(
+              resolveBoundElement(layer, data),
+              state.paintTracks,
+              state.paintFrame,
+            ),
+            effects: state.effects,
+            isVisible: layer.isVisible,
+            blendMode: layer.blendMode ?? 'normal',
+          },
           sampleTransform,
           sourceRectAtTime: (seconds: number, includeExtents: boolean) => {
             const at = sampleFrame(seconds);
@@ -118,7 +129,11 @@ export function resolveFrameExpressions(
   return new Map(
     [...states].map(([id, state]) => [
       id,
-      { ...state, transform: transforms.get(id) ?? state.transform },
+      {
+        ...state,
+        transform: transforms.get(id) ?? state.transform,
+        scriptVisuals: transforms.get(id)?.scriptVisuals,
+      },
     ]),
   );
 }

@@ -13,6 +13,17 @@ import {
   waitForShaderEffectStacksReady,
 } from './shaderEffectCompositing';
 
+const clocks = new WeakMap<HTMLElement, number>();
+const scriptEffects = new WeakMap<HTMLElement, LayerEffects>();
+export function applyScriptEffects(
+  host: HTMLElement,
+  effects: LayerEffects,
+  active: boolean,
+): void {
+  if (active) scriptEffects.set(host, effects);
+  else scriptEffects.delete(host);
+  applyLayerEffectsFilter(host, effects, clocks.get(host) ?? 0);
+}
 const mounted = new WeakMap<
   HTMLElement,
   { svg: SVGSVGElement; filter: SVGFilterElement; signature: string }
@@ -25,6 +36,8 @@ export function applyLayerEffectsFilter(
   effects: LayerEffects,
   elapsedMs = 0,
 ): void {
+  clocks.set(host, elapsedMs);
+  effects = scriptEffects.get(host) ?? effects;
   let entry = mounted.get(host);
   if (
     getEffectStack(effects).some(

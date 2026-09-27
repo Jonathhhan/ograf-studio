@@ -674,3 +674,33 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(gain); }`,
 function gsapOpacity(element: HTMLElement): number {
   return Number((element as unknown as { opacity: number }).opacity ?? element.style.opacity);
 }
+
+it('samples data and animation before visual scripts and resets on backwards seeks or disable', () => {
+  const compiled = descriptor();
+  const layer = compiled.layers[0]!;
+  layer.name = 'Title';
+  layer.element = createTextElement({ content: 'Authored', fontSize: 40, strokeWidth: 1 });
+  layer.bindings = [{ dataKey: 'headline', targetProperty: 'content' }];
+  layer.animationTracks.strokeWidth = [{ id: 'stroke', frame: 0, value: 3, easing: 'linear' }];
+  compiled.scripting = {
+    enabled: true,
+    source: `const t = layer('Title'); t.content += ' scripted'; t.fontSize = 40 + frame; t.strokeWidth += 2; t.effects.blur = 4;`,
+    modules: [],
+  };
+  const sample = (frame: number) =>
+    resolveFrameExpressions(
+      compiled,
+      new Map([
+        [layer.id, sampleCompiledLayerVisualState(layer, frame, undefined, { headline: 'Bound' })],
+      ]),
+      { headline: 'Bound' },
+    ).get(layer.id)!;
+  expect(sample(10).scriptVisuals).toMatchObject({
+    element: { content: 'Bound scripted', fontSize: 50, strokeWidth: 5 },
+    effects: { blur: 4 },
+  });
+  expect(sample(0).scriptVisuals?.element).toMatchObject({ fontSize: 40, strokeWidth: 5 });
+  compiled.scripting.enabled = false;
+  expect(sample(0).scriptVisuals).toBeUndefined();
+  expect(layer.element).toMatchObject({ content: 'Authored', fontSize: 40, strokeWidth: 1 });
+});
