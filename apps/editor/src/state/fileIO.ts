@@ -173,7 +173,7 @@ function isProject(value: unknown): value is Project {
   );
 }
 
-export function parseProjectSource(text: string): Project {
+export function parseProjectSource(text: string, fileName?: string): Project {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -181,7 +181,8 @@ export function parseProjectSource(text: string): Project {
     throw new Error('The project source is not valid JSON.');
   }
   if (!isProject(parsed)) throw new Error('That source is not a valid OGraf Studio project.');
-  return parsed;
+  const name = fileName?.replace(/\.(ogs|ogeproj|json)$/i, '').trim();
+  return name ? { ...parsed, name } : parsed;
 }
 
 function requireHttpUrl(value: string, label: string): URL {
@@ -271,7 +272,7 @@ function openProjectViaInputFallback(): Promise<Project | null> {
       file
         .text()
         .then((text) => {
-          resolve(parseProjectSource(text));
+          resolve(parseProjectSource(text, file.name));
         })
         .catch(reject);
     };
@@ -291,7 +292,7 @@ export async function openProjectFromFile(): Promise<Project | null> {
       if (!handle) return null;
       const file = await handle.getFile();
       const text = await file.text();
-      return parseProjectSource(text);
+      return parseProjectSource(text, file.name);
     } catch (err) {
       if (isAbort(err)) return null;
       throw err;

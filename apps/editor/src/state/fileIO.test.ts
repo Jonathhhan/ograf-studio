@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProject } from '@ograf-editor/scene-model';
 import {
   MAX_REMOTE_PROJECT_BYTES,
   openProjectFromUrl,
+  openProjectFromFile,
   parseProjectSource,
   type ProjectFetcher,
 } from './fileIO';
@@ -86,5 +87,41 @@ describe('remote OGraf Studio project loading', () => {
         async () => new Response(oversizedStream),
       ),
     ).rejects.toThrow('32 MiB');
+  });
+});
+
+describe('opening local project names', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each(['Evening News.ogs', 'Evening News.OGS', 'Evening News.ogeproj', 'Evening News.json'])(
+    'uses the selected filename %s instead of stale metadata',
+    async (name) => {
+      const source = JSON.stringify(createProject({ name: 'Untitled Template' }));
+      vi.stubGlobal('window', {
+        showOpenFilePicker: async () => [
+          { getFile: async () => ({ name, text: async () => source }) },
+        ],
+      });
+      expect((await openProjectFromFile())?.name).toBe('Evening News');
+      expect(parseProjectSource(source).name).toBe('Untitled Template');
+    },
+  );
+  it('also uses the filename through the fallback input picker', async () => {
+    const input = {
+      type: '',
+      accept: '',
+      files: [
+        {
+          name: 'News.v2.ogs',
+          text: async () => JSON.stringify(createProject({ name: 'Old title' })),
+        },
+      ],
+      onchange: undefined as (() => void) | undefined,
+      click() {
+        this.onchange?.();
+      },
+    };
+    vi.stubGlobal('window', {});
+    vi.stubGlobal('document', { createElement: () => input });
+    expect((await openProjectFromFile())?.name).toBe('News.v2');
   });
 });
