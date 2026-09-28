@@ -5,6 +5,8 @@ import {
 } from './scriptLayerProperties';
 import {
   evaluateExpression,
+  sampledProperty,
+  sourceRectMethod,
   evaluateCompositionScript,
   EXPRESSION_PROPERTIES,
   type ExpressionScope,
@@ -256,33 +258,16 @@ export function resolveExpressionTransforms(
             );
         },
         {
-          property: (property: string) => {
-            if (!(EXPRESSION_PROPERTIES as readonly string[]).includes(property))
-              throw new Error('Time sampling supports the six expression properties only.');
-            return Object.freeze({
-              name: property,
-              get value() {
-                return transform[property as ExpressionProperty];
-              },
-              valueAtTime: (seconds: number) => {
-                if (typeof seconds !== 'number' || !Number.isFinite(seconds))
-                  throw new Error('Sample time must be finite seconds.');
-                return sample.valueAtTime(property, seconds);
-              },
-            });
-          },
-          sourceRectAtTime: (
-            seconds = typeof scope.time === 'number' ? scope.time : 0,
-            includeExtents = false,
-          ) => {
-            if (
-              typeof seconds !== 'number' ||
-              !Number.isFinite(seconds) ||
-              typeof includeExtents !== 'boolean'
-            )
-              throw new Error('Invalid sourceRectAtTime arguments.');
-            return Object.freeze({ ...sample.sourceRectAtTime(seconds, includeExtents) });
-          },
+          property: (property: string) =>
+            sampledProperty(
+              (name) => transform[name as ExpressionProperty],
+              property,
+              () => sample,
+            ),
+          sourceRectAtTime: sourceRectMethod(
+            () => sample,
+            typeof scope.time === 'number' ? scope.time : 0,
+          ),
         },
       );
       references.set(id!, entry);

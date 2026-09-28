@@ -111,7 +111,7 @@ function sampleTime(value: unknown): number {
     throw new Error('Sample time must be finite seconds.');
   return value;
 }
-function sampledProperty(
+export function sampledProperty(
   resolve: (property: string) => number,
   property: string,
   sampling?: () => ExpressionLayerSampling,
@@ -129,7 +129,7 @@ function sampledProperty(
     },
   });
 }
-function sourceRectMethod(sampling: () => ExpressionLayerSampling, time: number) {
+export function sourceRectMethod(sampling: () => ExpressionLayerSampling, time: number) {
   return (seconds = time, includeExtents = false) => {
     if (typeof includeExtents !== 'boolean') throw new Error('includeExtents must be a boolean.');
     return Object.freeze({ ...sampling().sourceRectAtTime(sampleTime(seconds), includeExtents) });
@@ -218,39 +218,30 @@ function evaluationScope(
       value: Object.freeze({ ...options.currentProperty, valueAtTime }),
     });
   }
+  const reference = (name: string, byId: boolean) => {
+    const scriptReference = options.resolveScriptLayer?.(name, byId);
+    if (scriptReference) return scriptReference;
+    const resolver = byId ? options.resolveLayerById : resolveLayer;
+    const writer = byId ? options.writeLayerById : options.writeLayer;
+    return layerReference(
+      (property) => {
+        if (resolver) return resolver(name, property);
+        if (byId) throw new Error('Layer ID lookup is unavailable.');
+        const key = name + '.' + property;
+        if (!Object.hasOwn(scope, key)) throw new Error('Unknown layer property "' + key + '".');
+        return numeric(scope[key]);
+      },
+      writer ? (property, value) => writer(name, property, value) : undefined,
+      options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(name, byId) : undefined,
+      options.resolveLayerSampling ? () => options.resolveLayerSampling!(name, byId) : undefined,
+      typeof scope.time === 'number' ? scope.time : 0,
+    );
+  };
   Object.assign(context, {
     thisLayer,
     console: scriptConsole,
-    layerById: (id: string) =>
-      options.resolveScriptLayer?.(id, true) ??
-      layerReference(
-        (property) => {
-          if (!options.resolveLayerById) throw new Error('Layer ID lookup is unavailable.');
-          return options.resolveLayerById(id, property);
-        },
-        options.writeLayerById
-          ? (property, value) => options.writeLayerById!(id, property, value)
-          : undefined,
-        options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(id, true) : undefined,
-        options.resolveLayerSampling ? () => options.resolveLayerSampling!(id, true) : undefined,
-        typeof scope.time === 'number' ? scope.time : 0,
-      ),
-    layer: (name: string) =>
-      options.resolveScriptLayer?.(name, false) ??
-      layerReference(
-        (property) => {
-          if (resolveLayer) return resolveLayer(name, property);
-          const key = name + '.' + property;
-          if (!Object.hasOwn(scope, key)) throw new Error('Unknown layer property "' + key + '".');
-          return numeric(scope[key]);
-        },
-        options.writeLayer
-          ? (property, value) => options.writeLayer!(name, property, value)
-          : undefined,
-        options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(name, false) : undefined,
-        options.resolveLayerSampling ? () => options.resolveLayerSampling!(name, false) : undefined,
-        typeof scope.time === 'number' ? scope.time : 0,
-      ),
+    layerById: (id: string) => reference(id, true),
+    layer: (name: string) => reference(name, false),
     lerp: (...args: unknown[]) => helper('lerp', ...args),
     clamp: (...args: unknown[]) => helper('clamp', ...args),
     ease: (...args: unknown[]) => helper('ease', ...args),
