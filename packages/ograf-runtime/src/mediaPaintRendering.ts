@@ -5,12 +5,14 @@ import {
   type MediaPaint,
 } from '@ograf-editor/scene-model';
 import { createShaderPaintMask } from './shaderPaintMask';
+import { renderTextAnimationAtFrame } from './textAnimationRendering';
 import { resolveMediaTimelinePosition } from './mediaTimeline';
 
 interface RenderOptions {
   shaderBackingSize?: { width: number; height: number };
   lottieBackingSize?: { width: number; height: number };
   requiresImageAlpha?: boolean;
+  frameRate?: number;
 }
 
 interface NativeContent {
@@ -212,6 +214,14 @@ function drawRequestedFrame(mounted: MountedMediaPaint): void {
   mounted.busy = true;
   void (async () => {
     mounted.native.renderAtTime(mounted.baseHost, mounted.baseElement, elapsedMs);
+    const textFrame = Number(mounted.container.dataset.ografTextAnimationFrame);
+    if (
+      mounted.baseElement.type === 'text' &&
+      mounted.container.dataset.ografTextAnimationFrame !== undefined &&
+      Number.isFinite(textFrame)
+    ) {
+      renderTextAnimationAtFrame(mounted.baseHost, mounted.baseElement, textFrame);
+    }
     await Promise.all([mounted.ready, mounted.native.ready(mounted.baseHost), mounted.mask.ready]);
     const coverage = await mounted.mask.update(elapsedMs);
     const source = await mediaSource(mounted);

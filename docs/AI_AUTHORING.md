@@ -163,6 +163,34 @@ MCP uses explicit vector definitions and ordinary create/relink operations for t
 See the [shader and pattern authoring reference](../skills/ograf-authoring/references/shaders-and-patterns.md)
 for operation examples, shader animation/data precedence, and the current UI/MCP boundaries.
 
+## Interactive visual rules through MCP
+
+`set_layer_visual_rules` accepts `trigger: "data"` (or no trigger) for an existing Data field, and
+`click`, `double-click`, `pointer-enter`, or `pointer-leave` for pointer input. Pointer rules do not
+need a field. For example, after creating a rectangle named `Button`, add this operation:
+
+```json
+{
+  "type": "set_layer_visual_rules",
+  "layerName": "Button",
+  "rules": [
+    {
+      "id": "button-click",
+      "name": "Highlight on click",
+      "enabled": true,
+      "trigger": "click",
+      "actions": [{ "type": "property", "targetProperty": "fill", "value": "#2680ff" }]
+    }
+  ]
+}
+```
+
+These rules run in an interactive real-time HTML renderer; Studio canvas clicks still select and
+edit objects. Pointer input is not part of non-real-time schedule replay. Use an OGraf custom action
+for a remote or deterministic playout trigger. The authoring skill's
+[rule workflow](../skills/ograf-authoring/references/tool-workflows.md) covers data conditions,
+hover enter/leave pairs, and action references.
+
 ## Claude Desktop configuration on Windows
 
 The server uses Streamable HTTP, while `claude_desktop_config.json` launches local stdio processes.

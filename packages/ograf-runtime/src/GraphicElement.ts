@@ -37,10 +37,13 @@ import {
   getEffectStack,
   getShaderAnimationValue,
   hasElementMediaPaint,
+  normalizeTextAnimation,
   parseShaderAnimationProperty,
   shaderAnimationPropertySpec,
   hasElementShaderPaint,
   resolveShaderParameters,
+  type VisualRuleAction,
+  type VisualRuleTrigger,
 } from '@ograf-editor/scene-model';
 import { shaderStrokePaddingForLayer } from './shaderPaintRendering';
 import {
@@ -69,12 +72,14 @@ import { applyCompiledAutoLayout } from './autoLayoutRendering';
 import { applyCompiledMotionPaths } from './motionPathRendering';
 import {
   layerHasRuntimeVisualInputs,
+  pointerVisualRuleActions,
   triggeredVisualRuleActions,
   updateVisualRuleStateOverride,
   visualRuleLayerVisible,
   type VisualRuleStateOverride,
 } from './runtimeVisualRules';
 import { MediaCueRuntime } from './mediaCueRuntime';
+import { renderTextAnimationAtFrame } from './textAnimationRendering';
 
 function errorPayload(err: unknown): ReturnPayload {
   return {
@@ -83,8 +88,9 @@ function errorPayload(err: unknown): ReturnPayload {
   };
 }
 
-function contentOptions(layer: CompiledGraphicDescriptor['layers'][number]) {
+function contentOptions(layer: CompiledGraphicDescriptor['layers'][number], frameRate: number) {
   return {
+    frameRate,
     ...(layer.element.type === 'lottie'
       ? { lottieBackingSize: lottieBackingSizeForLayer(layer) }
       : {}),
@@ -190,6 +196,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
   #lastData: Record<string, unknown> = {};
   /** Last paint/visibility values emitted by edge-based visual rules, keyed by layer. */
   #visualRuleStateOverrides = new Map<string, VisualRuleStateOverride>();
+  #clickTimers = new Map<string, ReturnType<typeof setTimeout>>();
   #schedule: ScheduledAction[] = [];
   /** Snapshot of `#lastData` taken when `setActionsSchedule` is called — the baseline `goToTime`
    * replays scheduled `updateAction` entries on top of, so scrubbing backward past a scheduled
@@ -197,6 +204,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
   #scheduleBaseData: Record<string, unknown> = {};
   /** Realtime self-animated-content redraw requests. Phase is derived from absolute elapsed time. */
   #contentAnimationFrame: number | null = null;
+  #textAnimationFrame: number | null = null;
+  #textAnimationEpochs = new Map<string, number>();
   #contentPlaybackError: Error | null = null;
   #operationQueue: Promise<void> = Promise.resolve();
   #renderType: LoadParams['renderType'] = 'realtime';
@@ -259,8 +268,11 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#activeTween?.kill();
       this.#timeline?.kill();
       this.#clearContentAnimationFrames();
+      this.#clearTextAnimationFrames();
       this.#stopLoopRendering();
       this.#cancelUpdateAnimations();
+      for (const timer of this.#clickTimers.values()) clearTimeout(timer);
+      this.#clickTimers.clear();
       for (const element of this.#layerEls.values()) disposeElementContent(element);
       this.#mediaCueRuntime?.dispose();
       this.#mediaCueRuntime = null;
@@ -274,6 +286,74 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#cancelFrame(this.#contentAnimationFrame);
     }
     this.#contentAnimationFrame = null;
+  }
+
+  #clearTextAnimationFrames(): void {
+    if (this.#textAnimationFrame !== null && typeof cancelAnimationFrame !== 'undefined') {
+      this.#cancelFrame(this.#textAnimationFrame);
+    }
+    this.#textAnimationFrame = null;
+    this.#textAnimationEpochs.clear();
+    for (const host of this.#layerEls.values()) delete host.dataset.ografTextAnimationFrame;
+  }
+
+  #renderTextAnimationReplays(now: number): void {
+    const frameRate = this.activeDescriptor.frameRate;
+    for (const [layerId, epoch] of this.#textAnimationEpochs) {
+      const layer = this.activeDescriptor.layers.find((candidate) => candidate.id === layerId);
+      const host = this.#layerEls.get(layerId);
+      const element = layer ? this.#resolveLayerElement(layer) : null;
+      if (!host || element?.type !== 'text') {
+        this.#textAnimationEpochs.delete(layerId);
+        continue;
+      }
+      const animation = normalizeTextAnimation(element.textAnimation);
+      const frame = Math.max(0, ((now - epoch) / 1000) * frameRate);
+      host.dataset.ografTextAnimationFrame = String(frame);
+      renderTextAnimationAtFrame(host, element, frame);
+      if (frame >= animation.durationFrames) {
+        this.#textAnimationEpochs.delete(layerId);
+        delete host.dataset.ografTextAnimationFrame;
+      }
+    }
+  }
+
+  #ensureTextAnimationRendering(): void {
+    if (
+      this.#renderType !== 'realtime' ||
+      this.#textAnimationEpochs.size === 0 ||
+      this.#textAnimationFrame !== null ||
+      typeof requestAnimationFrame === 'undefined'
+    )
+      return;
+    const render = (now: number) => {
+      this.#textAnimationFrame = null;
+      this.#renderTextAnimationReplays(now);
+      if (this.#textAnimationEpochs.size > 0) this.#textAnimationFrame = this.#requestFrame(render);
+    };
+    this.#textAnimationFrame = this.#requestFrame(render);
+  }
+
+  #triggerTextAnimationReplays(
+    predicate: (layer: CompiledGraphicDescriptor['layers'][number]) => boolean,
+    epoch = typeof performance !== 'undefined' ? performance.now() : Date.now(),
+  ): string[] {
+    const triggered: string[] = [];
+    for (const layer of this.activeDescriptor.layers) {
+      if (layer.element.type !== 'text' || !predicate(layer)) continue;
+      const element = this.#resolveLayerElement(layer);
+      if (element.type !== 'text' || normalizeTextAnimation(element.textAnimation).type === 'none')
+        continue;
+      this.#textAnimationEpochs.set(layer.id, epoch);
+      const host = this.#layerEls.get(layer.id);
+      if (host) {
+        host.dataset.ografTextAnimationFrame = '0';
+        renderTextAnimationAtFrame(host, element, 0);
+      }
+      triggered.push(layer.id);
+    }
+    this.#ensureTextAnimationRendering();
+    return triggered;
   }
 
   #cancelUpdateAnimations(): void {
@@ -296,10 +376,23 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
             (binding) => binding.dataKey,
           ),
           ...(layer.collectionItem ? [layer.collectionItem.dataKey] : []),
-          ...(layer.visualRules ?? []).map((rule) => rule.dataKey),
+          ...(layer.visualRules ?? [])
+            .filter((rule) => !rule.trigger || rule.trigger === 'data')
+            .map((rule) => rule.dataKey),
         ])
         .filter((key): key is string => key !== undefined && Object.hasOwn(patch, key)),
     );
+  }
+
+  #replayUpdatedText(dataKeys: Set<string>): void {
+    this.#triggerTextAnimationReplays((layer) => {
+      if (layer.element.type !== 'text') return false;
+      const animation = normalizeTextAnimation(layer.element.textAnimation);
+      if (!animation.replayOnUpdate) return false;
+      return (layer.bindings ?? (layer.binding ? [layer.binding] : [])).some(
+        (binding) => binding.targetProperty === 'content' && dataKeys.has(binding.dataKey),
+      );
+    });
   }
 
   /** Deterministic scheduled-update opacity used by non-realtime goToTime replay. */
@@ -308,7 +401,9 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       const bindings = layer.bindings ?? (layer.binding ? [layer.binding] : []);
       if (
         !bindings.some((binding) => dataKeys.has(binding.dataKey)) &&
-        !(layer.visualRules ?? []).some((rule) => dataKeys.has(rule.dataKey)) &&
+        !(layer.visualRules ?? []).some(
+          (rule) => (!rule.trigger || rule.trigger === 'data') && dataKeys.has(rule.dataKey),
+        ) &&
         !dataKeys.has(layer.collectionItem?.dataKey ?? '')
       )
         continue;
@@ -324,7 +419,9 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       const bindings = layer.bindings ?? (layer.binding ? [layer.binding] : []);
       if (
         !bindings.some((binding) => dataKeys.has(binding.dataKey)) &&
-        !(layer.visualRules ?? []).some((rule) => dataKeys.has(rule.dataKey)) &&
+        !(layer.visualRules ?? []).some(
+          (rule) => (!rule.trigger || rule.trigger === 'data') && dataKeys.has(rule.dataKey),
+        ) &&
         !dataKeys.has(layer.collectionItem?.dataKey ?? '')
       ) {
         continue;
@@ -645,6 +742,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     this.#documentFontsReady = registerDocumentFonts(this.ownerDocument, descriptor.fonts ?? []);
     this.#renderDescriptor = expandRuntimeCollections(descriptor);
     const renderDescriptor = this.activeDescriptor;
+    for (const timer of this.#clickTimers.values()) clearTimeout(timer);
+    this.#clickTimers.clear();
     for (const element of this.#layerEls.values()) disposeElementContent(element);
     this.#mediaCueRuntime?.dispose();
     this.#mediaCueRuntime = null;
@@ -692,6 +791,42 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       el.style.top = '0';
       el.style.boxSizing = 'border-box';
       el.style.display = this.#visualRuleVisible(layer) ? '' : 'none';
+      const pointerRules = (layer.visualRules ?? []).filter(
+        (rule) => rule.enabled && rule.trigger && rule.trigger !== 'data',
+      );
+      el.style.pointerEvents = pointerRules.length > 0 ? 'auto' : 'none';
+      if (pointerRules.some((rule) => rule.trigger === 'click' || rule.trigger === 'double-click'))
+        el.style.cursor = 'pointer';
+      if (pointerRules.length > 0) {
+        el.addEventListener('pointerenter', (event) => {
+          if (event.pointerType !== 'touch') this.#triggerPointerRule(layer, 'pointer-enter');
+        });
+        el.addEventListener('pointerleave', (event) => {
+          if (event.pointerType !== 'touch') this.#triggerPointerRule(layer, 'pointer-leave');
+        });
+        el.addEventListener('click', (event) => {
+          if (event.detail > 1) return;
+          if (pointerRules.some((rule) => rule.trigger === 'double-click')) {
+            const pending = this.#clickTimers.get(layer.id);
+            if (pending) clearTimeout(pending);
+            this.#clickTimers.set(
+              layer.id,
+              setTimeout(() => {
+                this.#clickTimers.delete(layer.id);
+                this.#triggerPointerRule(layer, 'click');
+              }, 500),
+            );
+          } else {
+            this.#triggerPointerRule(layer, 'click');
+          }
+        });
+        el.addEventListener('dblclick', () => {
+          const pending = this.#clickTimers.get(layer.id);
+          if (pending) clearTimeout(pending);
+          this.#clickTimers.delete(layer.id);
+          this.#triggerPointerRule(layer, 'double-click');
+        });
+      }
       if (layer.collectionItem) {
         el.dataset.ografCollectionId = layer.collectionItem.collectionId;
         el.dataset.ografCollectionIndex = String(layer.collectionItem.slot);
@@ -705,7 +840,12 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         el.style.height = `${firstTransform.height}px`;
       }
       shadow.appendChild(el);
-      renderElementContent(el, this.#resolveLayerElement(layer), 0, contentOptions(layer));
+      renderElementContent(
+        el,
+        this.#resolveLayerElement(layer),
+        0,
+        contentOptions(layer, descriptor.frameRate),
+      );
       applyLayerEffectsFilter(el, layer.effects, 0);
       this.#layerEls.set(layer.id, el);
     }
@@ -774,7 +914,12 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         muted: true as const,
       },
     };
-    renderElementContent(element, nextElement, 0, contentOptions(layer));
+    renderElementContent(
+      element,
+      nextElement,
+      0,
+      contentOptions(layer, this.activeDescriptor.frameRate),
+    );
     await waitForElementContentReady(element);
     if (!outgoing) return;
     element.appendChild(outgoing);
@@ -810,7 +955,12 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         continue;
       const element = this.#layerEls.get(layer.id);
       if (!element) continue;
-      renderElementContent(element, this.#resolveLayerElement(layer), 0, contentOptions(layer));
+      renderElementContent(
+        element,
+        this.#resolveLayerElement(layer),
+        0,
+        contentOptions(layer, this.activeDescriptor.frameRate),
+      );
     }
   }
 
@@ -913,7 +1063,12 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         const element = this.#resolveLayerElement(layer);
         const serialized = JSON.stringify(element);
         if (el.dataset.ografRenderedElement !== serialized) {
-          renderElementContent(el, element, 0, contentOptions(layer));
+          renderElementContent(
+            el,
+            element,
+            0,
+            contentOptions(layer, this.activeDescriptor.frameRate),
+          );
           setLottieDeterministicRendering(el, this.#renderType === 'non-realtime');
         }
         const state = sampleCompiledLayerVisualState(
@@ -928,6 +1083,13 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           layer.animationTracks,
           (this.#timeline?.time() ?? 0) * this.descriptor.frameRate,
         );
+        if (element.type === 'text') {
+          renderTextAnimationAtFrame(
+            el,
+            element,
+            (this.#timeline?.time() ?? 0) * this.activeDescriptor.frameRate,
+          );
+        }
       }
     }
     this.#syncCollectionVisibility();
@@ -994,6 +1156,39 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     const triggered = this.activeDescriptor.layers.flatMap((layer) =>
       triggeredVisualRuleActions(layer, nextData, previousData),
     );
+    this.#runVisualRuleEventActions(triggered);
+  }
+
+  #triggerPointerRule(
+    layer: CompiledGraphicDescriptor['layers'][number],
+    trigger: Exclude<VisualRuleTrigger, 'data'>,
+  ): void {
+    if (this.#renderType !== 'realtime') return;
+    const actions = pointerVisualRuleActions(layer, trigger);
+    if (actions.length === 0) return;
+    let override = this.#visualRuleStateOverrides.get(layer.id);
+    let changed = false;
+    for (const action of actions) {
+      if (action.type === 'property') {
+        override = {
+          properties: { ...override?.properties, [action.targetProperty]: action.value },
+          ...(override?.visibility === undefined ? {} : { visibility: override.visibility }),
+        };
+        changed = true;
+      } else if (action.type === 'visibility') {
+        override = { properties: { ...override?.properties }, visibility: action.visible };
+        changed = true;
+      }
+    }
+    if (changed && override) {
+      this.#visualRuleStateOverrides.set(layer.id, override);
+      this.#refreshBoundLayers();
+      this.#renderLoopSnapshot(typeof performance !== 'undefined' ? performance.now() : Date.now());
+    }
+    this.#runVisualRuleEventActions(actions);
+  }
+
+  #runVisualRuleEventActions(triggered: VisualRuleAction[]): void {
     const eventKeys = new Set<string>();
     for (const action of triggered) {
       const eventKey = JSON.stringify(action);
@@ -1003,6 +1198,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         void this.#customActionUnlocked({ id: action.actionId, payload: {}, skipAnimation: false });
         continue;
       }
+      if (action.type !== 'play-sound' && action.type !== 'take-media') continue;
       const cue = this.activeDescriptor.mediaCues?.find(
         (candidate) => candidate.id === action.cueId,
       );
@@ -1079,9 +1275,12 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
 
   async #loadUnlocked(params: LoadParams): Promise<ReturnPayload | undefined> {
     try {
+      for (const timer of this.#clickTimers.values()) clearTimeout(timer);
+      this.#clickTimers.clear();
       this.#cancelUpdateAnimations();
       this.#stopLoopRendering();
       this.#clearContentAnimationFrames();
+      this.#clearTextAnimationFrames();
       this.#contentPlaybackError = null;
       this.#mediaCueRuntime?.reset();
       this.#renderType = params.renderType;
@@ -1117,10 +1316,13 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#activeTween?.kill();
       this.#activeTween = null;
       this.#clearContentAnimationFrames();
+      this.#clearTextAnimationFrames();
       this.#stopLoopRendering();
       this.#cancelUpdateAnimations();
       this.#schedule = [];
       this.#directLifecycleTransition = null;
+      for (const timer of this.#clickTimers.values()) clearTimeout(timer);
+      this.#clickTimers.clear();
       for (const element of this.#layerEls.values()) disposeElementContent(element);
       this.#layerEls.clear();
       this.#mediaCueRuntime?.dispose();
@@ -1157,6 +1359,13 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       }
       this.#cancelUpdateAnimations();
       const keys = this.#changedBindingKeys(params.data);
+      const changedTextKeys = new Set(
+        params.data && typeof params.data === 'object'
+          ? Object.entries(params.data as Record<string, unknown>)
+              .filter(([key, value]) => !Object.is(this.#lastData[key], value))
+              .map(([key]) => key)
+          : [],
+      );
       const hasTransition = this.activeDescriptor.layers.some((layer) => {
         const transition = layer.updateTransition;
         return (
@@ -1167,12 +1376,14 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       });
       if (params.skipAnimation || !hasTransition || keys.size === 0) {
         this.#applyData(params.data);
+        if (!params.skipAnimation) this.#replayUpdatedText(changedTextKeys);
         await this.#awaitContentReady();
         return { statusCode: 200 };
       }
       await this.#animateBoundContent(keys, 'out');
       if (generation !== this.#updateGeneration) return { statusCode: 200 };
       this.#applyData(params.data);
+      this.#replayUpdatedText(changedTextKeys);
       await this.#awaitContentReady();
       await this.#animateBoundContent(keys, 'in');
       if (generation !== this.#updateGeneration) return { statusCode: 200 };
@@ -1310,9 +1521,23 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           layer.loop?.activation.type === 'customAction' &&
           layer.loop.activation.customActionId === params.id,
       );
+      const textLayers = this.activeDescriptor.layers.filter(
+        (layer) =>
+          layer.element.type === 'text' &&
+          normalizeTextAnimation(layer.element.textAnimation).type !== 'none' &&
+          normalizeTextAnimation(layer.element.textAnimation).customActionId === params.id,
+      );
       const epoch = typeof performance !== 'undefined' ? performance.now() : Date.now();
       await this.#mediaCueRuntime?.triggerCustomAction(params.id, params.payload);
-      if (params.skipAnimation || layers.length === 0 || action.durationFrames <= 0) {
+      if (!params.skipAnimation && textLayers.length > 0) {
+        const textLayerIds = new Set(textLayers.map((layer) => layer.id));
+        this.#triggerTextAnimationReplays((layer) => textLayerIds.has(layer.id), epoch);
+      }
+      if (
+        params.skipAnimation ||
+        (layers.length === 0 && textLayers.length === 0) ||
+        action.durationFrames <= 0
+      ) {
         return { statusCode: 200 };
       }
 
@@ -1382,6 +1607,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     let stepArrivalTimestamp: number | undefined;
     let lifecycleEpoch: number | undefined;
     const customActionEpochs = new Map<string, number>();
+    const textAnimationEpochs = new Map<string, number>();
 
     const loopEpochsAt = (atTimestamp: number): Map<string, number> => {
       const epochs = new Map<string, number>();
@@ -1465,6 +1691,10 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       if (type === 'updateAction') {
         const updateParams = params as UpdateActionParams;
         if (updateParams.data && typeof updateParams.data === 'object') {
+          const updatePatch = updateParams.data as Record<string, unknown>;
+          const changedKeys = new Set(
+            Object.keys(updatePatch).filter((key) => !Object.is(data[key], updatePatch[key])),
+          );
           if (dataAnimation) {
             displayData = { ...data };
             updateOpacity = 1;
@@ -1472,6 +1702,34 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
             dataAnimation = undefined;
           }
           data = { ...data, ...(updateParams.data as Record<string, unknown>) };
+          if (!updateParams.skipAnimation) {
+            for (const layer of this.activeDescriptor.layers) {
+              if (layer.element.type !== 'text') continue;
+              const textAnimation = normalizeTextAnimation(layer.element.textAnimation);
+              if (
+                textAnimation.type !== 'none' &&
+                textAnimation.replayOnUpdate &&
+                (layer.bindings ?? (layer.binding ? [layer.binding] : [])).some(
+                  (binding) =>
+                    binding.targetProperty === 'content' && changedKeys.has(binding.dataKey),
+                )
+              ) {
+                const transition = layer.updateTransition ?? {
+                  style: 'inherit' as const,
+                  durationFrames: 0,
+                  distance: 24,
+                };
+                const transitionFrames =
+                  transition.style === 'none'
+                    ? 0
+                    : transition.durationFrames || this.descriptor.updateTransitionFrames || 0;
+                textAnimationEpochs.set(
+                  layer.id,
+                  scheduled.timestamp + (transitionFrames / this.activeDescriptor.frameRate) * 500,
+                );
+              }
+            }
+          }
           const durationMs =
             ((this.descriptor.updateTransitionFrames ?? 0) / this.descriptor.frameRate) * 1000;
           const keys = this.#changedBindingKeys(updateParams.data);
@@ -1588,6 +1846,13 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         }
         if (!customParams.skipAnimation) {
           customActionEpochs.set(customParams.id, scheduled.timestamp);
+          for (const layer of this.activeDescriptor.layers) {
+            if (layer.element.type !== 'text') continue;
+            const textAnimation = normalizeTextAnimation(layer.element.textAnimation);
+            if (textAnimation.type !== 'none' && textAnimation.customActionId === customParams.id) {
+              textAnimationEpochs.set(layer.id, scheduled.timestamp);
+            }
+          }
         }
       }
     }
@@ -1604,6 +1869,19 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#renderDirectLifecycleTransition(directSample.transition, directSample.progress);
     } else {
       this.#renderLoopSnapshot(timestamp, epochs);
+    }
+    for (const layer of this.activeDescriptor.layers) {
+      if (layer.element.type !== 'text') continue;
+      const host = this.#layerEls.get(layer.id);
+      const element = this.#resolveLayerElement(layer, displayData);
+      if (!host || element.type !== 'text') continue;
+      const epoch = textAnimationEpochs.get(layer.id);
+      const frame =
+        epoch === undefined
+          ? positionSeconds * this.activeDescriptor.frameRate
+          : Math.max(0, ((timestamp - epoch) / 1000) * this.activeDescriptor.frameRate);
+      host.dataset.ografTextAnimationFrame = String(frame);
+      renderTextAnimationAtFrame(host, element, frame);
     }
   }
 
@@ -1647,6 +1925,9 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     try {
       this.#schedule = [...params.schedule].sort((a, b) => a.timestamp - b.timestamp);
       this.#scheduleBaseData = { ...this.#lastData };
+      if (this.#schedule.length === 0) {
+        for (const host of this.#layerEls.values()) delete host.dataset.ografTextAnimationFrame;
+      }
       return { statusCode: 200 };
     } catch (err) {
       return errorPayload(err);

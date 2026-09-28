@@ -1800,6 +1800,20 @@ export function createOGrafToolRecords(
               values: ['auto-size', 'shrink-to-fit', 'fit-to-width', 'squeeze', 'fixed'],
               default: 'auto-size',
             },
+            textAnimation: {
+              type: 'object',
+              description:
+                'Deterministic text reveal sampled from the OGraf frame clock. Patch through update_element.patch.textAnimation.',
+              shape: {
+                type: 'none | typewriter | fade | rise | pop | word-reveal',
+                split: 'grapheme | word',
+                durationFrames: 'positive integer',
+                cursor: 'none | bar | block (Typewriter only)',
+                cursorBlinkFrames: 'positive integer (Typewriter only)',
+                replayOnUpdate: 'boolean',
+                customActionId: 'existing custom action id or null',
+              },
+            },
           },
           image: {
             fill: { type: 'shader-or-media-or-omitted' },
@@ -2058,6 +2072,12 @@ export function createOGrafToolRecords(
           operations: ['set_layer_bindings', 'set_layer_binding (legacy single-binding replace)'],
           semantics:
             'A layer may bind multiple independent element properties. Bindings are applied in order and a target property may appear only once. sourcePath is a segment array for nested object leaves; array paths are item-relative inside a registered runtime collection prototype.',
+          visualRules: {
+            operation: 'set_layer_visual_rules',
+            triggers: ['data', 'click', 'double-click', 'pointer-enter', 'pointer-leave'],
+            semantics:
+              'Data rules require fieldId. Pointer-triggered rules require no Data field and can run ordered visibility, property, custom-action, shader-animation, sound, or media actions in interactive real-time HTML playback. Pointer input is unavailable to deterministic non-real-time schedule replay; use a custom action for remote playout.',
+          },
           fieldTypes: [
             'text',
             'textarea',

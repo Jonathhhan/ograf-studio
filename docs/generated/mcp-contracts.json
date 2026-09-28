@@ -2163,9 +2163,28 @@
                           "id": { "type": "string", "minLength": 1 },
                           "name": { "type": "string", "minLength": 1 },
                           "enabled": { "type": "boolean" },
-                          "fieldId": { "type": "string", "minLength": 1 },
-                          "sourcePath": { "type": "array", "items": { "type": "string" } },
+                          "trigger": {
+                            "type": "string",
+                            "enum": [
+                              "data",
+                              "click",
+                              "double-click",
+                              "pointer-enter",
+                              "pointer-leave"
+                            ]
+                          },
+                          "fieldId": {
+                            "default": "",
+                            "description": "Required for data rules; pointer rules do not need a Data field.",
+                            "type": "string"
+                          },
+                          "sourcePath": {
+                            "default": [],
+                            "type": "array",
+                            "items": { "type": "string" }
+                          },
                           "operator": {
+                            "default": "equals",
                             "type": "string",
                             "enum": [
                               "equals",
@@ -2244,15 +2263,7 @@
                             }
                           }
                         },
-                        "required": [
-                          "id",
-                          "name",
-                          "enabled",
-                          "fieldId",
-                          "sourcePath",
-                          "operator",
-                          "actions"
-                        ],
+                        "required": ["id", "name", "enabled", "actions"],
                         "additionalProperties": false
                       }
                     }

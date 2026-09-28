@@ -2,6 +2,7 @@ import { getElementShaderPaint } from '@ograf-editor/scene-model';
 import { describe, expect, it } from 'vitest';
 import {
   createComposition,
+  createCustomActionDefinition,
   createFieldDefinition,
   createKeyframe,
   createLayerKeyframe,
@@ -37,6 +38,48 @@ const POSE = {
 };
 
 describe('compileDescriptor', () => {
+  it('publishes typewriter replay duration on its OGraf custom action', () => {
+    const text = createLayerOfKind('text');
+    if (text.element.type !== 'text') throw new Error('Expected text layer.');
+    text.element.textAnimation = {
+      ...text.element.textAnimation,
+      type: 'typewriter',
+      durationFrames: 18,
+      customActionId: 'retype',
+    };
+    const descriptor = compileDescriptor(
+      compositionWith([text], {
+        customActions: [createCustomActionDefinition({ actionId: 'retype', name: 'Retype' })],
+      }),
+    );
+    expect(descriptor.customActions).toEqual([
+      expect.objectContaining({ id: 'retype', durationFrames: 18 }),
+    ]);
+  });
+
+  it('carries a word reveal preset and its replay duration into playout', () => {
+    const text = createLayerOfKind('text');
+    if (text.element.type !== 'text') throw new Error('Expected text layer.');
+    text.element.textAnimation = {
+      ...text.element.textAnimation,
+      type: 'word-reveal',
+      durationFrames: 16,
+      customActionId: 'reveal',
+    };
+    const descriptor = compileDescriptor(
+      compositionWith([text], {
+        customActions: [createCustomActionDefinition({ actionId: 'reveal', name: 'Reveal' })],
+      }),
+    );
+    expect(descriptor.layers[0]?.element).toMatchObject({
+      type: 'text',
+      textAnimation: { type: 'word-reveal', durationFrames: 16 },
+    });
+    expect(descriptor.customActions).toContainEqual(
+      expect.objectContaining({ id: 'reveal', durationFrames: 16 }),
+    );
+  });
+
   it('retains only active Auto layout parent relationships for runtime flow', () => {
     const parent = createLayerOfKind('rectangle');
     const child = createLayerOfKind('text');

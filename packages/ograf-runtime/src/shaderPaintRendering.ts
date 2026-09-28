@@ -7,6 +7,7 @@ import {
   type ShaderPaintSlot,
 } from '@ograf-editor/scene-model';
 import { createShaderPaintMask } from './shaderPaintMask';
+import { renderTextAnimationAtFrame } from './textAnimationRendering';
 import {
   mountShader,
   disposeShader,
@@ -20,6 +21,7 @@ interface RenderOptions {
   shaderStrokePadding?: number;
   lottieBackingSize?: { width: number; height: number };
   requiresImageAlpha?: boolean;
+  frameRate?: number;
 }
 interface NativeContent {
   render(host: HTMLElement, element: Element, options: RenderOptions): void;
@@ -186,6 +188,14 @@ function drawRequestedFrame(mounted: MountedPaint): void {
   mounted.busy = true;
   void (async () => {
     mounted.native.renderAtTime(mounted.baseHost, mounted.baseElement, elapsedMs);
+    const textFrame = Number(mounted.container.dataset.ografTextAnimationFrame);
+    if (
+      mounted.baseElement.type === 'text' &&
+      mounted.container.dataset.ografTextAnimationFrame !== undefined &&
+      Number.isFinite(textFrame)
+    ) {
+      renderTextAnimationAtFrame(mounted.baseHost, mounted.baseElement, textFrame);
+    }
     await mounted.native.ready(mounted.baseHost);
     for (const entry of slots) {
       if (mounted.disposed || mounted.configuration !== configuration) return;

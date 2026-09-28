@@ -55,6 +55,22 @@ export interface TextRun {
   fontFamily?: string;
 }
 
+export interface TextAnimation {
+  /** Frame-sampled segment preset, starting at the lifecycle Start frame. */
+  type: 'none' | 'typewriter' | 'fade' | 'rise' | 'pop' | 'word-reveal';
+  /** Unicode grapheme clusters keep emoji/combining marks intact; word mode reveals whole tokens. */
+  split: 'grapheme' | 'word';
+  /** Fixed OGraf-frame duration keeps realtime playback and non-realtime seeking deterministic. */
+  durationFrames: number;
+  cursor: 'none' | 'bar' | 'block';
+  /** Deterministic cursor blink period in OGraf frames. */
+  cursorBlinkFrames: number;
+  /** Replay after a content-bound data value changes through updateAction. */
+  replayOnUpdate: boolean;
+  /** Optional public OGraf customAction id that replays this text animation. */
+  customActionId: string | null;
+}
+
 export interface TextElement {
   type: 'text';
   content: string;
@@ -87,6 +103,7 @@ export interface TextElement {
   runs: TextRun[];
   direction: 'auto' | 'ltr' | 'rtl';
   language: string;
+  textAnimation: TextAnimation;
 }
 
 export interface ImageElement {
@@ -339,6 +356,9 @@ export type VisualRuleOperator =
   | 'increased'
   | 'decreased';
 
+export type VisualRuleTrigger =
+  'data' | 'click' | 'double-click' | 'pointer-enter' | 'pointer-leave';
+
 export type VisualRuleAction =
   | { type: 'visibility'; visible: boolean }
   | { type: 'property'; targetProperty: string; value: unknown }
@@ -351,6 +371,8 @@ export interface LayerVisualRule {
   id: string;
   name: string;
   enabled: boolean;
+  /** Missing in older projects means a data condition. */
+  trigger?: VisualRuleTrigger;
   fieldId: string;
   sourcePath: string[];
   operator: VisualRuleOperator;

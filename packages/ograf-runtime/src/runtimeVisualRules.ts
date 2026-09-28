@@ -4,6 +4,7 @@ import {
   visualRuleValue,
 } from '@ograf-editor/scene-model';
 import type { CompiledLayer } from '@ograf-editor/ograf-types';
+import type { VisualRuleAction, VisualRuleTrigger } from '@ograf-editor/scene-model';
 
 export interface VisualRuleStateOverride {
   properties: Record<string, unknown>;
@@ -26,13 +27,23 @@ export function matchingVisualRules(
   previousData?: Record<string, unknown>,
 ) {
   return (layer.visualRules ?? []).filter((rule) => {
-    if (!rule.enabled) return false;
+    if (!rule.enabled || (rule.trigger && rule.trigger !== 'data')) return false;
     const current = visualRuleValue(currentData[rule.dataKey], rule.sourcePath);
     const previous = previousData
       ? visualRuleValue(previousData[rule.dataKey], rule.sourcePath)
       : undefined;
     return visualRuleMatches(rule.operator, current, rule.value, previous);
   });
+}
+
+/** Pointer triggers are discrete events, independent of the OGraf data-field contract. */
+export function pointerVisualRuleActions(
+  layer: CompiledLayer,
+  trigger: Exclude<VisualRuleTrigger, 'data'>,
+): VisualRuleAction[] {
+  return (layer.visualRules ?? [])
+    .filter((rule) => rule.enabled && rule.trigger === trigger)
+    .flatMap((rule) => rule.actions);
 }
 
 export function resolveVisualRuleElement(

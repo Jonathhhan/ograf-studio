@@ -11,6 +11,7 @@ import {
   createMediaPaint,
   createMediaCue,
   createProject,
+  createLayerVisualRule,
   createTransition,
   defaultTransformForRole,
   syncShaderParameterFields,
@@ -20,6 +21,23 @@ import { validateManifest } from './validateManifest';
 import { validateProject } from './validateProject';
 
 describe('canonical OGraf validation', () => {
+  it('allows pointer-triggered rules without a data field', () => {
+    const project = createProject();
+    const layer = createLayerOfKind('rectangle');
+    layer.visualRules = [
+      createLayerVisualRule({
+        trigger: 'click',
+        fieldId: '',
+        actions: [{ type: 'visibility', visible: false }],
+      }),
+    ];
+    project.compositions[0]!.layers.push(layer);
+    expect(
+      validateProject(project).errors.some((error) =>
+        error.includes('visual rule references a missing data field'),
+      ),
+    ).toBe(false);
+  });
   it('validates media clip assets and keeps live sources realtime-only', () => {
     const project = createProject();
     const composition = project.compositions[0]!;

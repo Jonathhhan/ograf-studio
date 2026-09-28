@@ -37,6 +37,7 @@ import type {
 import { normalizeAuthoredTransform } from './authoredTransform';
 import { normalizeCornerRadii } from './cornerRadii';
 import { normalizeShaderElement } from './shader';
+import { normalizeTextAnimation } from './textAnimation';
 
 const BASE_TRANSFORM: LayerTransform = {
   x: 100,
@@ -90,6 +91,7 @@ export function createTextElement(overrides: Partial<TextElement> = {}): TextEle
     language: '',
     ...overrides,
     fontSize,
+    textAnimation: normalizeTextAnimation(overrides.textAnimation),
   };
 }
 
@@ -605,7 +607,7 @@ export function createComposition(overrides: Partial<Composition> = {}): Composi
   };
 }
 
-export const PROJECT_DOCUMENT_VERSION = 36;
+export const PROJECT_DOCUMENT_VERSION = 37;
 
 export function createProject(overrides: Partial<Project> = {}): Project {
   const mainComposition = createComposition({ name: 'Main' });

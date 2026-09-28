@@ -51,6 +51,7 @@ export function createLayerVisualRule(overrides: Partial<LayerVisualRule> = {}):
     id: overrides.id ?? crypto.randomUUID(),
     name: overrides.name ?? 'Visual rule',
     enabled: overrides.enabled ?? true,
+    trigger: overrides.trigger ?? 'data',
     fieldId: overrides.fieldId ?? '',
     sourcePath: overrides.sourcePath ?? [],
     operator: overrides.operator ?? 'equals',

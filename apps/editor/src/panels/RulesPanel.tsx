@@ -5,6 +5,7 @@ import {
   visualRuleValue,
   type LayerVisualRule,
   type VisualRuleAction,
+  type VisualRuleTrigger,
 } from '@ograf-editor/scene-model';
 import { bindableProperties } from '../state/dataBinding';
 import { useProjectStore, useActiveComposition } from '../state/projectStore';
@@ -47,6 +48,7 @@ export function RulesPanel() {
   const duplicateRule = useProjectStore((state) => state.duplicateLayerVisualRule);
   const removeRule = useProjectStore((state) => state.removeLayerVisualRule);
   const [selectedOnly, setSelectedOnly] = useState(false);
+  const [newTrigger, setNewTrigger] = useState<VisualRuleTrigger>('data');
   const [targetLayerId, setTargetLayerId] = useState(
     () => selectedLayerId ?? composition.layers[0]?.id ?? '',
   );
@@ -112,18 +114,28 @@ export function RulesPanel() {
             />
             Selected object only
           </label>
+          <select
+            className="rules-toolbar-trigger"
+            aria-label="New rule trigger"
+            value={newTrigger}
+            onChange={(event) => setNewTrigger(event.target.value as VisualRuleTrigger)}
+          >
+            <option value="data">Data condition</option>
+            <option value="click">Clicked</option>
+            <option value="double-click">Double-clicked</option>
+            <option value="pointer-enter">Mouse over</option>
+            <option value="pointer-leave">Mouse leave</option>
+          </select>
           <button
             type="button"
-            disabled={!targetLayer || targetLayer.isLocked || composition.dataFields.length === 0}
-            onClick={() => targetLayerId && addRule(targetLayerId)}
+            disabled={!targetLayer || targetLayer.isLocked}
+            onClick={() => targetLayerId && addRule(targetLayerId, newTrigger)}
           >
             + Add Rule
           </button>
         </div>
 
-        {composition.dataFields.length === 0 ? (
-          <p className="panel-placeholder">Add a Data field before creating rules.</p>
-        ) : visibleEntries.length === 0 ? (
+        {visibleEntries.length === 0 ? (
           <p className="panel-placeholder">
             {selectedOnly ? 'No rules affect the selected object.' : 'No rules yet.'}
           </p>
@@ -136,13 +148,14 @@ export function RulesPanel() {
               const root = Object.hasOwn(testValues, rule.fieldId)
                 ? testValues[rule.fieldId]
                 : field?.defaultValue;
-              const matches = EVENT_OPERATORS.has(rule.operator)
-                ? null
-                : visualRuleMatches(
-                    rule.operator,
-                    visualRuleValue(root, rule.sourcePath),
-                    rule.value,
-                  );
+              const matches =
+                (rule.trigger && rule.trigger !== 'data') || EVENT_OPERATORS.has(rule.operator)
+                  ? null
+                  : visualRuleMatches(
+                      rule.operator,
+                      visualRuleValue(root, rule.sourcePath),
+                      rule.value,
+                    );
               const needsValue = ![
                 'empty',
                 'not-empty',
@@ -217,49 +230,69 @@ export function RulesPanel() {
                     <div className="rules-condition-grid">
                       <span className="rules-when">When</span>
                       <select
-                        aria-label="Condition field"
-                        value={rule.fieldId}
-                        onChange={(event) =>
-                          updateRule(layer.id, rule.id, { fieldId: event.target.value })
-                        }
-                      >
-                        {composition.dataFields.map((candidate) => (
-                          <option key={candidate.id} value={candidate.id}>
-                            {candidate.label || candidate.key}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        aria-label="Condition operator"
-                        value={rule.operator}
+                        className="rules-trigger"
+                        aria-label="Rule trigger"
+                        value={rule.trigger ?? 'data'}
                         onChange={(event) =>
                           updateRule(layer.id, rule.id, {
-                            operator: event.target.value as LayerVisualRule['operator'],
+                            trigger: event.target.value as VisualRuleTrigger,
                           })
                         }
                       >
-                        <option value="equals">Equals</option>
-                        <option value="not-equals">Does not equal</option>
-                        <option value="empty">Is empty</option>
-                        <option value="not-empty">Is not empty</option>
-                        <option value="greater-than">Greater than</option>
-                        <option value="less-than">Less than</option>
-                        <option value="changed">Changed</option>
-                        <option value="increased">Increased</option>
-                        <option value="decreased">Decreased</option>
+                        <option value="data">Data</option>
+                        <option value="click">Clicked</option>
+                        <option value="double-click">Double-clicked</option>
+                        <option value="pointer-enter">Mouse over</option>
+                        <option value="pointer-leave">Mouse leave</option>
                       </select>
-                      {needsValue ? (
-                        <input
-                          aria-label="Comparison value"
-                          value={String(rule.value ?? '')}
-                          onChange={(event) =>
-                            updateRule(layer.id, rule.id, {
-                              value: ['greater-than', 'less-than'].includes(rule.operator)
-                                ? Number(event.target.value)
-                                : event.target.value,
-                            })
-                          }
-                        />
+                      {!rule.trigger || rule.trigger === 'data' ? (
+                        <>
+                          <select
+                            aria-label="Condition field"
+                            value={rule.fieldId}
+                            onChange={(event) =>
+                              updateRule(layer.id, rule.id, { fieldId: event.target.value })
+                            }
+                          >
+                            {composition.dataFields.map((candidate) => (
+                              <option key={candidate.id} value={candidate.id}>
+                                {candidate.label || candidate.key}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            aria-label="Condition operator"
+                            value={rule.operator}
+                            onChange={(event) =>
+                              updateRule(layer.id, rule.id, {
+                                operator: event.target.value as LayerVisualRule['operator'],
+                              })
+                            }
+                          >
+                            <option value="equals">Equals</option>
+                            <option value="not-equals">Does not equal</option>
+                            <option value="empty">Is empty</option>
+                            <option value="not-empty">Is not empty</option>
+                            <option value="greater-than">Greater than</option>
+                            <option value="less-than">Less than</option>
+                            <option value="changed">Changed</option>
+                            <option value="increased">Increased</option>
+                            <option value="decreased">Decreased</option>
+                          </select>
+                          {needsValue ? (
+                            <input
+                              aria-label="Comparison value"
+                              value={String(rule.value ?? '')}
+                              onChange={(event) =>
+                                updateRule(layer.id, rule.id, {
+                                  value: ['greater-than', 'less-than'].includes(rule.operator)
+                                    ? Number(event.target.value)
+                                    : event.target.value,
+                                })
+                              }
+                            />
+                          ) : null}
+                        </>
                       ) : null}
                     </div>
 

@@ -922,19 +922,27 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
           id: z.string().min(1),
           name: z.string().min(1),
           enabled: z.boolean(),
-          fieldId: z.string().min(1),
-          sourcePath: z.array(z.string()),
-          operator: z.enum([
-            'equals',
-            'not-equals',
-            'empty',
-            'not-empty',
-            'greater-than',
-            'less-than',
-            'changed',
-            'increased',
-            'decreased',
-          ]),
+          trigger: z
+            .enum(['data', 'click', 'double-click', 'pointer-enter', 'pointer-leave'])
+            .optional(),
+          fieldId: z
+            .string()
+            .default('')
+            .describe('Required for data rules; pointer rules do not need a Data field.'),
+          sourcePath: z.array(z.string()).default([]),
+          operator: z
+            .enum([
+              'equals',
+              'not-equals',
+              'empty',
+              'not-empty',
+              'greater-than',
+              'less-than',
+              'changed',
+              'increased',
+              'decreased',
+            ])
+            .default('equals'),
           value: z.unknown().optional(),
           actions: z.array(
             z.discriminatedUnion('type', [
@@ -961,7 +969,16 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
             ]),
           ),
         })
-        .strict(),
+        .strict()
+        .superRefine((rule, context) => {
+          if ((!rule.trigger || rule.trigger === 'data') && !rule.fieldId) {
+            context.addIssue({
+              code: 'custom',
+              path: ['fieldId'],
+              message: 'Data rules require a fieldId; pointer rules do not.',
+            });
+          }
+        }),
     ),
   }),
   z.object({

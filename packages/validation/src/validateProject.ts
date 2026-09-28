@@ -9,6 +9,7 @@ import {
   parseShaderAnimationProperty,
   shaderAnimationPropertySpec,
   shaderAnimationValueErrors,
+  normalizeTextAnimation,
 } from '@ograf-editor/scene-model';
 import {
   effectStackErrors,
@@ -1196,7 +1197,13 @@ function validateComposition(composition: Composition, errors: string[], warning
       errors.push(`${prefix}: layer "${layer.name}" repeats visual rule id "${ruleId}".`);
     }
     for (const rule of layer.visualRules ?? []) {
-      if (!fieldIds.has(rule.fieldId)) {
+      if (
+        rule.trigger &&
+        !['data', 'click', 'double-click', 'pointer-enter', 'pointer-leave'].includes(rule.trigger)
+      ) {
+        errors.push(`${prefix}: layer "${layer.name}" visual rule has an unknown trigger.`);
+      }
+      if ((!rule.trigger || rule.trigger === 'data') && !fieldIds.has(rule.fieldId)) {
         errors.push(
           `${prefix}: layer "${layer.name}" visual rule references a missing data field.`,
         );
@@ -1327,6 +1334,7 @@ function validateComposition(composition: Composition, errors: string[], warning
       )
         errors.push(`${prefix}: audio layer "${layer.name}" has invalid trim/timeline values.`);
     } else if (layer.element.type === 'text') {
+      const textAnimation = normalizeTextAnimation(layer.element.textAnimation);
       if (
         !(['auto-size', 'shrink-to-fit', 'fit-to-width', 'squeeze', 'fixed'] as const).includes(
           layer.element.autoFit,
@@ -1380,6 +1388,27 @@ function validateComposition(composition: Composition, errors: string[], warning
           (!Number.isFinite(run.fontWeight) || run.fontWeight < 1)
         )
           errors.push(`${prefix}: text layer "${layer.name}" has an invalid styled-run weight.`);
+      }
+      if (
+        textAnimation.type !== 'none' &&
+        (!Number.isInteger(textAnimation.durationFrames) || textAnimation.durationFrames < 1)
+      ) {
+        errors.push(
+          `${prefix}: text layer "${layer.name}" animation duration must be a positive frame count.`,
+        );
+      }
+      if (
+        textAnimation.type === 'typewriter' &&
+        (!Number.isInteger(textAnimation.cursorBlinkFrames) || textAnimation.cursorBlinkFrames < 1)
+      ) {
+        errors.push(
+          `${prefix}: text layer "${layer.name}" cursor blink period must be a positive frame count.`,
+        );
+      }
+      if (textAnimation.customActionId && !customActionIds.has(textAnimation.customActionId)) {
+        errors.push(
+          `${prefix}: text layer "${layer.name}" animation references missing custom action "${textAnimation.customActionId}".`,
+        );
       }
     }
   }

@@ -53,6 +53,8 @@ import {
 } from './mediaPaintRendering';
 import { hasElementMediaPaint } from '@ograf-editor/scene-model';
 import { resolveMediaTimelinePosition } from './mediaTimeline';
+import { mountTextAnimationContent, renderTextAnimationAtFrame } from './textAnimationRendering';
+import { normalizeTextAnimation } from '@ograf-editor/scene-model';
 
 interface MountedTextFit {
   observer?: ResizeObserver;
@@ -106,6 +108,7 @@ export interface ElementContentRenderOptions {
   shaderBackingSize?: { width: number; height: number };
   shaderStrokePadding?: number;
   requiresImageAlpha?: boolean;
+  frameRate?: number;
 }
 
 function constrainLottieBackingSize(
@@ -518,6 +521,9 @@ export function renderElementContent(
   frameIndex = 0,
   options: ElementContentRenderOptions = {},
 ): void {
+  if (options.frameRate !== undefined) {
+    container.dataset.ografFrameRate = String(Math.max(1, options.frameRate));
+  }
   const shaderFill = element.type !== 'shader' && hasElementShaderPaint(element);
   const mediaFill = element.type !== 'shader' && hasElementMediaPaint(element);
   if (mediaFill && updateMediaPaintContent(container, element, options)) {
@@ -668,7 +674,9 @@ export function renderElementContent(
             overflow: 'visible',
           });
         }
-        if (element.runs.length > 0) {
+        if (normalizeTextAnimation(element.textAnimation).type !== 'none') {
+          mountTextAnimationContent(content, element);
+        } else if (element.runs.length > 0) {
           for (const run of element.runs) {
             const span = document.createElement('span');
             span.textContent = run.text;
@@ -680,6 +688,7 @@ export function renderElementContent(
           }
         } else content.textContent = element.content;
         container.appendChild(content);
+        renderTextAnimationAtFrame(container, element, frameIndex);
         if (
           element.autoFit === 'shrink-to-fit' ||
           element.autoFit === 'fit-to-width' ||
@@ -1098,6 +1107,11 @@ export function renderAnimatedElementAtTime(
 ): void {
   if (renderMediaPaintAtTime(container, elapsedMs)) return;
   if (renderShaderPaintAtTime(container, elapsedMs)) return;
+  if (element.type === 'text') {
+    const frameRate = Math.max(1, Number(container.dataset.ografFrameRate) || 25);
+    renderTextAnimationAtFrame(container, element, (elapsedMs / 1000) * frameRate);
+    return;
+  }
   if (element.type === 'shader') {
     renderShaderAtTime(container, elapsedMs);
     return;

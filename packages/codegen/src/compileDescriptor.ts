@@ -4,6 +4,7 @@ import {
   compositionWithShaderParameterFields,
   getResolvedLayerAnimationTracks,
   normalizeLayerAutoLayout,
+  normalizeTextAnimation,
   resolveElementAssetReferences,
   resolveAssetValue,
   resolvePatternElement,
@@ -170,8 +171,9 @@ export function compileDescriptor(
             ];
       }),
       visualRules: (layer.visualRules ?? []).flatMap((rule) => {
-        const dataKey = fieldKeyById.get(rule.fieldId);
-        if (!dataKey) return [];
+        const dataKey =
+          rule.trigger && rule.trigger !== 'data' ? '' : fieldKeyById.get(rule.fieldId);
+        if (dataKey === undefined) return [];
         const { fieldId: _fieldId, ...compiledRule } = structuredClone(rule);
         return [{ ...compiledRule, dataKey }];
       }),
@@ -297,6 +299,12 @@ export function compileDescriptor(
       name: action.name,
       durationFrames: Math.max(
         composition.layers.reduce((longest, layer) => {
+          if (layer.element.type === 'text') {
+            const textAnimation = normalizeTextAnimation(layer.element.textAnimation);
+            if (textAnimation.type !== 'none' && textAnimation.customActionId === action.actionId) {
+              longest = Math.max(longest, textAnimation.durationFrames);
+            }
+          }
           const loop = layer.loop;
           if (
             loop?.activation.type !== 'customAction' ||

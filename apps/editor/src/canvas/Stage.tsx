@@ -26,6 +26,7 @@ import {
   normalizeAuthoredTransformPatch,
   type Layer,
   type LayerTransform,
+  type TextElement,
 } from '@ograf-editor/scene-model';
 import { ContextMenu } from '../components/ContextMenu';
 import { useLayerClipboardStore } from '../state/layerClipboardStore';
@@ -75,6 +76,8 @@ import { ShaderPreviewClock } from './shaderPreviewClock';
 import { StageLoopPreviewClock } from './stageLoopPreviewClock';
 import { isInteractiveShortcutTarget } from '../state/keyboardShortcuts';
 import { duplicateLayerSelection } from '../state/editorShortcuts';
+import { inlineTextEditTarget } from './inlineTextEditing';
+import { measureAutoSizedText } from '../panels/textAutoSize';
 import './Stage.css';
 
 export function Stage({ style }: { style?: CSSProperties }) {
@@ -83,6 +86,15 @@ export function Stage({ style }: { style?: CSSProperties }) {
   const pathFrame = useTimelineStore((s) => (pathLayerId ? s.currentFrame : 0));
   const imagePlacement = useImagePlacement();
   const [draggingImages, setDraggingImages] = useState(false);
+  const [inlineTextEditingLayerId, setInlineTextEditingLayerId] = useState<string | null>(null);
+  const [inlineTextCaretPoint, setInlineTextCaretPoint] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [inlineTextPreview, setInlineTextPreview] = useState<{
+    layerId: string;
+    transform: Partial<LayerTransform>;
+  } | null>(null);
   const composition = useActiveComposition();
   const shaderClockRef = useRef<{
     compositionId: string;
@@ -107,6 +119,8 @@ export function Stage({ style }: { style?: CSSProperties }) {
   const loopPreviewClock = shaderClockRef.current.loopClock;
   const previewLoopLayerId = useTimelineStore((state) => state.previewLoopLayerId);
   const updateLayerTransform = useProjectStore((s) => s.updateLayerTransform);
+  const updateLayerElement = useProjectStore((s) => s.updateLayerElement);
+  const setTestValue = useTestDataStore((s) => s.setValue);
   const pasteLayers = useProjectStore((s) => s.pasteLayers);
   const removeLayer = useProjectStore((s) => s.removeLayer);
   const removeLayerKeyframe = useProjectStore((s) => s.removeLayerKeyframe);
@@ -130,6 +144,48 @@ export function Stage({ style }: { style?: CSSProperties }) {
   const setPlaying = useTimelineStore((s) => s.setPlaying);
   const setDurationFrames = useTimelineStore((s) => s.setDurationFrames);
   const setController = useTimelineStore((s) => s.setController);
+
+  const commitInlineText = useCallback(
+    (layer: Layer, value: string) => {
+      const target = inlineTextEditTarget(layer, composition.dataFields);
+      if (!target) return;
+      if (target.type === 'test-data') {
+        setTestValue(target.fieldId, value, composition.layers, composition.dataFields);
+        return;
+      }
+      if (layer.element.type !== 'text') return;
+      const element: TextElement = { ...layer.element, content: value, runs: [] };
+      updateLayerElement(layer.id, { content: value, runs: [] });
+      if (element.autoFit === 'auto-size')
+        updateLayerTransform(
+          layer.id,
+          Math.round(useTimelineStore.getState().currentFrame),
+          measureAutoSizedText(element),
+        );
+    },
+    [
+      composition.dataFields,
+      composition.layers,
+      setTestValue,
+      updateLayerElement,
+      updateLayerTransform,
+    ],
+  );
+  const handleInlineTextEditingChange = useCallback(
+    (layerId: string, editing: boolean, caretPoint?: { x: number; y: number }) => {
+      setInlineTextEditingLayerId(editing ? layerId : null);
+      setInlineTextCaretPoint(editing ? (caretPoint ?? null) : null);
+      if (!editing) setInlineTextPreview(null);
+    },
+    [],
+  );
+  const previewInlineText = useCallback((layer: Layer, value: string) => {
+    if (layer.element.type !== 'text' || layer.element.autoFit !== 'auto-size') return;
+    setInlineTextPreview({
+      layerId: layer.id,
+      transform: measureAutoSizedText({ ...layer.element, content: value, runs: [] }),
+    });
+  }, []);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -974,6 +1030,27 @@ export function Stage({ style }: { style?: CSSProperties }) {
               });
           }}
           onPointerDownCapture={beginViewportPan}
+          onDoubleClickCapture={(event) => {
+            if (isPlaying || editingPath) return;
+            const layer = [...composition.layers].reverse().find((candidate) => {
+              if (!inlineTextEditTarget(candidate, composition.dataFields)) return false;
+              const element = layerRefs.current.get(candidate.id);
+              if (!element) return false;
+              const bounds = element.getBoundingClientRect();
+              return (
+                event.clientX >= bounds.left &&
+                event.clientX <= bounds.right &&
+                event.clientY >= bounds.top &&
+                event.clientY <= bounds.bottom
+              );
+            });
+            if (!layer) return;
+            event.preventDefault();
+            event.stopPropagation();
+            selectMany(selectionIdsForLayer(composition, layer.id));
+            setInlineTextEditingLayerId(layer.id);
+            setInlineTextCaretPoint({ x: event.clientX, y: event.clientY });
+          }}
           onPointerMoveCapture={updateViewportPan}
           onPointerUpCapture={endViewportPan}
           onPointerCancelCapture={endViewportPan}
@@ -1045,7 +1122,11 @@ export function Stage({ style }: { style?: CSSProperties }) {
               >
                 {composition.layers.map((layer) => {
                   const frame = useTimelineStore.getState().currentFrame;
-                  const pose = getLayerTransformAtFrame(layer, frame);
+                  const authoredPose = getLayerTransformAtFrame(layer, frame);
+                  const pose =
+                    inlineTextPreview?.layerId === layer.id
+                      ? { ...authoredPose, ...inlineTextPreview.transform }
+                      : authoredPose;
                   const parent = layer.parentId
                     ? composition.layers.find(
                         (candidate) => candidate.id === layer.parentId && candidate.clipChildren,
@@ -1091,6 +1172,16 @@ export function Stage({ style }: { style?: CSSProperties }) {
                       compositionFrameRate={composition.frameRate}
                       shaderPreviewClock={shaderPreviewClock}
                       patterns={composition.patterns}
+                      allowInlineTextEditing={!isPlaying && !editingPath}
+                      editingInlineText={inlineTextEditingLayerId === layer.id}
+                      inlineTextCaretPoint={
+                        inlineTextEditingLayerId === layer.id
+                          ? (inlineTextCaretPoint ?? undefined)
+                          : undefined
+                      }
+                      onCommitInlineText={commitInlineText}
+                      onPreviewInlineText={previewInlineText}
+                      onInlineTextEditingChange={handleInlineTextEditingChange}
                     />
                   );
                 })}
@@ -1103,7 +1194,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
               style={{ width: composition.width * zoom, height: composition.height * zoom }}
             />
           </div>
-          {moveableTarget && !isPlaying && !editingPath && (
+          {moveableTarget && !isPlaying && !editingPath && !inlineTextEditingLayerId && (
             <Moveable
               key={isGroupSelection ? 'group-selection' : 'single-selection'}
               ref={moveableRef}

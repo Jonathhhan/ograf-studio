@@ -68,6 +68,7 @@ import {
   isMediaPaint,
   isShaderPaint,
   normalizeMediaPaint,
+  normalizeTextAnimation,
   syncShaderParameterFields,
   syncCompositionShaderParameterFields,
   createTransition,
@@ -132,6 +133,7 @@ import {
   type LayerConstraints,
   type LayerAutoLayout,
   type LayerVisualRule,
+  type VisualRuleTrigger,
   type DataConnectionDefinition,
   DEFAULT_LAYER_AUTO_LAYOUT,
   retimeAnimationPhase as retimeAnimationPhaseModel,
@@ -162,6 +164,7 @@ import { useLayerClipboardStore } from './layerClipboardStore';
 import { planLifecycleRetime, type LifecycleRetimePlan } from './lifecycleRetime';
 import { buildSvgBundle } from './svgBundleImport';
 import { placeImages, prepareImage, readImageSize, type ImagePlacement } from './imageImport';
+import { createNextBinding } from './bindingFieldCreation';
 import {
   defaultShaderResourceName,
   isStoredShaderResourceTarget,
@@ -387,7 +390,7 @@ interface ProjectActions {
   setLayerAutoLayout: (layerId: string, layout: Partial<LayerAutoLayout>) => void;
   setLayerUpdateTransition: (layerId: string, patch: Partial<Layer['updateTransition']>) => void;
   setLayerMotionPath: (layerId: string, link: Layer['motionPath']) => void;
-  addLayerVisualRule: (layerId: string) => string | null;
+  addLayerVisualRule: (layerId: string, trigger?: VisualRuleTrigger) => string | null;
   updateLayerVisualRule: (
     layerId: string,
     ruleId: string,
@@ -460,6 +463,7 @@ interface ProjectActions {
     >,
   ) => void;
   setLayerBindings: (layerId: string, bindings: LayerBinding[]) => void;
+  addLayerBinding: (layerId: string) => string | null;
   addRuntimeCollection: (
     fieldId: string,
     prototypeLayerIds: string[],
@@ -530,6 +534,16 @@ function generateUniqueKey(existingKeys: string[], prefix: string): string {
   let n = existingKeys.length + 1;
   while (used.has(`${prefix}${n}`)) n++;
   return `${prefix}${n}`;
+}
+
+function createRuleConditionField(composition: Composition, layer: Layer): FieldDefinition {
+  const key = generateUniqueKey(
+    composition.dataFields.map((candidate) => candidate.key),
+    'ruleCondition',
+  );
+  const field = createFieldDefinition('text', { key, label: `${layer.name} condition` });
+  composition.dataFields.push(field);
+  return field;
 }
 
 export type ProjectStore = ProjectState & ProjectActions;
@@ -913,7 +927,9 @@ function appendLayerCopies(
           .filter((layer) => linkedInstanceKey(layer) === instanceKey)
           .flatMap((layer) => [
             ...layer.bindings.map((binding) => binding.fieldId),
-            ...(layer.visualRules ?? []).map((rule) => rule.fieldId),
+            ...(layer.visualRules ?? [])
+              .filter((rule) => !rule.trigger || rule.trigger === 'data')
+              .map((rule) => rule.fieldId),
           ]),
       ),
     ];
@@ -973,6 +989,8 @@ function appendLayerCopies(
         return fieldId ? [{ ...structuredClone(binding), fieldId }] : [];
       }),
       visualRules: (source.visualRules ?? []).flatMap((rule) => {
+        if (rule.trigger && rule.trigger !== 'data')
+          return [{ ...structuredClone(rule), id: createId('visual-rule') }];
         const fieldId =
           fieldIds?.get(rule.fieldId) ??
           (composition.dataFields.some((field) => field.id === rule.fieldId)
@@ -2190,6 +2208,12 @@ export const useProjectStore = create<ProjectStore>()(
               const inspection = inspectShaderElement(paint);
               if (!inspection.valid) throw new Error(inspection.errors.join('\n'));
             }
+            if (layer.element.type === 'text' && patch.textAnimation !== undefined) {
+              patch.textAnimation = normalizeTextAnimation({
+                ...layer.element.textAnimation,
+                ...patch.textAnimation,
+              });
+            }
             Object.assign(layer.element, patch);
             enforceMediaRuntimeProfile(state.project);
             syncShaderParameterFields(composition, layer);
@@ -2976,14 +3000,22 @@ export const useProjectStore = create<ProjectStore>()(
           layer.motionPath = link ? structuredClone(link) : null;
         }),
 
-      addLayerVisualRule: (layerId) => {
+      addLayerVisualRule: (layerId, trigger = 'data') => {
         let id: string | null = null;
         set((state) => {
           const composition = getActiveComposition(state.project, state.activeCompositionId);
           const layer = composition.layers.find((candidate) => candidate.id === layerId);
-          const field = composition.dataFields[0];
-          if (!layer || layer.isLocked || !field) return;
-          const rule = createLayerVisualRule({ fieldId: field.id });
+          if (!layer || layer.isLocked) return;
+          const createdField = trigger === 'data' && composition.dataFields.length === 0;
+          const field =
+            trigger === 'data'
+              ? (composition.dataFields[0] ?? createRuleConditionField(composition, layer))
+              : null;
+          const rule = createLayerVisualRule({
+            trigger,
+            fieldId: field?.id ?? '',
+            ...(createdField ? { operator: 'not-empty' as const } : {}),
+          });
           layer.visualRules ??= [];
           layer.visualRules.push(rule);
           id = rule.id;
@@ -2998,6 +3030,16 @@ export const useProjectStore = create<ProjectStore>()(
           const rule = layer?.visualRules?.find((candidate) => candidate.id === ruleId);
           if (!layer || layer.isLocked || !rule) return;
           Object.assign(rule, structuredClone(patch));
+          if (
+            rule.trigger === 'data' &&
+            !composition.dataFields.some((field) => field.id === rule.fieldId)
+          ) {
+            const createdField = composition.dataFields.length === 0;
+            rule.fieldId = (
+              composition.dataFields[0] ?? createRuleConditionField(composition, layer)
+            ).id;
+            if (createdField) rule.operator = 'not-empty';
+          }
         }),
 
       moveLayerVisualRule: (layerId, ruleId, direction) =>
@@ -3404,7 +3446,7 @@ export const useProjectStore = create<ProjectStore>()(
           for (const layer of composition.layers) {
             layer.bindings = layer.bindings.filter((binding) => binding.fieldId !== fieldId);
             layer.visualRules = (layer.visualRules ?? []).filter(
-              (rule) => rule.fieldId !== fieldId,
+              (rule) => (rule.trigger && rule.trigger !== 'data') || rule.fieldId !== fieldId,
             );
           }
         }),
@@ -3458,6 +3500,22 @@ export const useProjectStore = create<ProjectStore>()(
             syncShaderParameterFields(composition, layer);
           }
         }),
+
+      addLayerBinding: (layerId) => {
+        let fieldId: string | null = null;
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          if (!layer || layer.isLocked) return;
+          const created = createNextBinding(layer, composition.dataFields);
+          if (!created) return;
+          composition.dataFields.push(created.field);
+          layer.bindings.push(created.binding);
+          syncShaderParameterFields(composition, layer);
+          fieldId = created.field.id;
+        });
+        return fieldId;
+      },
 
       addRuntimeCollection: (fieldId, prototypeLayerIds, offsetPerItem, capacity) => {
         let id = '';
@@ -3545,6 +3603,12 @@ export const useProjectStore = create<ProjectStore>()(
               ) {
                 layer.loop = null;
               }
+              if (
+                layer.element.type === 'text' &&
+                layer.element.textAnimation.customActionId === removed.actionId
+              ) {
+                layer.element.textAnimation.customActionId = null;
+              }
             }
           }
         }),
@@ -3570,6 +3634,12 @@ export const useProjectStore = create<ProjectStore>()(
                   layer.loop.activation.customActionId === previousActionId
                 ) {
                   layer.loop.activation.customActionId = trimmed;
+                }
+                if (
+                  layer.element.type === 'text' &&
+                  layer.element.textAnimation.customActionId === previousActionId
+                ) {
+                  layer.element.textAnimation.customActionId = trimmed;
                 }
               }
             }

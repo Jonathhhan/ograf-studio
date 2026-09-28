@@ -18,9 +18,13 @@ const mock = vi.hoisted(() => {
   const frames: FrameRequestCallback[] = [];
   let nextFrameId = 0;
   class Host {
-    style = {};
+    style: Record<string, string> = {};
     dataset: Record<string, string> = {};
     children: Host[] = [];
+    listeners = new Map<
+      string,
+      Array<(event: { pointerType?: string; detail?: number }) => void>
+    >();
     firstElementChild: Host | null = null;
     shadowRoot: Host | null = null;
     ownerDocument = {};
@@ -34,6 +38,17 @@ const mock = vi.hoisted(() => {
       this.children.push(child);
       return child;
     }
+    addEventListener(
+      type: string,
+      listener: (event: { pointerType?: string; detail?: number }) => void,
+    ) {
+      const listeners = this.listeners.get(type) ?? [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    }
+    emit(type: string, event: { pointerType?: string; detail?: number } = {}) {
+      for (const listener of this.listeners.get(type) ?? []) listener(event);
+    }
   }
   vi.stubGlobal('HTMLElement', Host);
   vi.stubGlobal('document', { createElement: () => new Host() });
@@ -42,7 +57,7 @@ const mock = vi.hoisted(() => {
     return ++nextFrameId;
   });
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
-  return { paint: vi.fn(), content: vi.fn(), render: vi.fn(), frames };
+  return { Host, paint: vi.fn(), content: vi.fn(), render: vi.fn(), frames };
 });
 vi.mock('./buildRuntimeTimeline', () => ({
   buildRuntimeTimeline: () => {
@@ -76,6 +91,115 @@ vi.mock('./renderElement', async (importOriginal) => {
   };
 });
 import { GraphicElement } from './GraphicElement';
+
+describe('pointer-triggered visual rules', () => {
+  it('applies mouse-over and mouse-leave visibility in realtime playback', async () => {
+    const compiled = descriptor();
+    compiled.layers[0]!.visualRules = [
+      {
+        id: 'enter',
+        name: 'Hide on hover',
+        enabled: true,
+        trigger: 'pointer-enter',
+        dataKey: '',
+        sourcePath: [],
+        operator: 'equals',
+        actions: [{ type: 'visibility', visible: false }],
+      },
+      {
+        id: 'leave',
+        name: 'Show on leave',
+        enabled: true,
+        trigger: 'pointer-leave',
+        dataKey: '',
+        sourcePath: [],
+        operator: 'equals',
+        actions: [{ type: 'visibility', visible: true }],
+      },
+    ];
+    class Graphic extends GraphicElement {
+      static descriptor = compiled;
+    }
+    const graphic = new Graphic();
+    graphic.connectedCallback();
+    expect(
+      await graphic.load({
+        renderType: 'realtime',
+        renderCharacteristics: { resolution: { width: 640, height: 360 }, frameRate: 10 },
+        data: {},
+      }),
+    ).toMatchObject({ statusCode: 200 });
+
+    const layerHost = (
+      graphic.shadowRoot as unknown as InstanceType<typeof mock.Host>
+    ).children.find((child) => child.style.position === 'absolute')!;
+    layerHost.emit('pointerenter', { pointerType: 'touch' });
+    expect(layerHost.style.display).toBe('');
+    layerHost.emit('pointerenter', { pointerType: 'mouse' });
+    expect(layerHost.style.display).toBe('none');
+    layerHost.emit('pointerleave', { pointerType: 'mouse' });
+    expect(layerHost.style.display).toBe('');
+
+    expect(await graphic.dispose()).toMatchObject({ statusCode: 200 });
+  });
+
+  it('does not fire a single-click rule during a double-click', async () => {
+    const compiled = descriptor();
+    compiled.layers[0]!.visualRules = [
+      {
+        id: 'click',
+        name: 'Hide on click',
+        enabled: true,
+        trigger: 'click',
+        dataKey: '',
+        sourcePath: [],
+        operator: 'equals',
+        actions: [{ type: 'visibility', visible: false }],
+      },
+      {
+        id: 'double-click',
+        name: 'Show on double-click',
+        enabled: true,
+        trigger: 'double-click',
+        dataKey: '',
+        sourcePath: [],
+        operator: 'equals',
+        actions: [{ type: 'visibility', visible: true }],
+      },
+    ];
+    class Graphic extends GraphicElement {
+      static descriptor = compiled;
+    }
+    const graphic = new Graphic();
+    graphic.connectedCallback();
+    expect(
+      await graphic.load({
+        renderType: 'realtime',
+        renderCharacteristics: { resolution: { width: 640, height: 360 }, frameRate: 10 },
+        data: {},
+      }),
+    ).toMatchObject({ statusCode: 200 });
+    const layerHost = (
+      graphic.shadowRoot as unknown as InstanceType<typeof mock.Host>
+    ).children.find((child) => child.style.position === 'absolute')!;
+
+    vi.useFakeTimers();
+    try {
+      layerHost.emit('click', { detail: 1 });
+      layerHost.emit('click', { detail: 2 });
+      layerHost.emit('dblclick');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(layerHost.style.display).toBe('');
+
+      layerHost.emit('click', { detail: 1 });
+      await vi.advanceTimersByTimeAsync(500);
+      expect(layerHost.style.display).toBe('none');
+    } finally {
+      vi.useRealTimers();
+      expect(await graphic.dispose()).toMatchObject({ statusCode: 200 });
+    }
+  });
+});
 
 function descriptor(): CompiledGraphicDescriptor {
   const authored = createRectangleLayer();

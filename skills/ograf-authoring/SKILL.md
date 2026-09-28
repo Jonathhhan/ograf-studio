@@ -1,6 +1,6 @@
 ---
 name: ograf-authoring
-description: Create, inspect, animate, review, validate, certify, save, and export editable EBU OGraf-compatible broadcast graphics through OGraf Studio MCP. Use for lower thirds, scoreboards, tickers, Lottie layers, shader and Media paints, exposed shader animation, procedural pattern presets, composable effects stacks, semantic scene authoring, Brand Kits, finite repeaters, runtime GDD collections, reusable components, HTML5 broadcast templates, .ogs source, .ograf.zip packages, per-property animation, data binding, and OGraf compliance work.
+description: Create, inspect, animate, review, validate, certify, save, and export editable EBU OGraf-compatible broadcast graphics through OGraf Studio MCP. Use for lower thirds, scoreboards, tickers, Lottie layers, shader and Media paints, exposed shader animation, procedural pattern presets, composable effects stacks, semantic scene authoring, Brand Kits, finite repeaters, runtime GDD collections, reusable components, HTML5 broadcast templates, .ogs source, .ograf.zip packages, per-property animation, data binding, interactive visual rules, and OGraf compliance work.
 ---
 
 # OGraf Authoring
@@ -280,6 +280,9 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
 - Use `set_layer_bindings` when one layer exposes more than one data-driven property. Each binding
   accepts a stable `fieldId` or unique `fieldKey`, and each target property may appear only once.
   `set_layer_binding` remains a legacy single-binding replacement and clears any additional rows.
+  In the Studio Properties UI, **+ Add Binding** creates a field seeded from the next unbound
+  property's current value and connects it in one undoable edit; the Field menu can then retarget
+  that binding to an existing field. MCP operations still require explicit field creation.
 - Treat the data schema as the operator contract. Author meaningful field `description`, select
   `options`, file extensions, and JSON Schema constraints through `add_data_field` or
   `update_data_field`; every compiled field emits `gddType`. Give bound on-air text a realistic
@@ -303,12 +306,14 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
   viewport's solid 20% gray surround outside the composition only. `presentationBackground` can
   use the bundled video or an editor-only still-image URL; local still-image embedding is available
   in Canvas Layout. Never recreate these authoring aids as exported layers or backgrounds.
-- Use `set_layer_visual_rules` to replace one layer's ordered no-code rules. Conditions can compare,
-  test emptiness, or react to changed/increased/decreased field values. Actions show/hide the layer,
-  set a bindable property or exposed shader parameter, trigger an existing custom/shader-animation
-  action, play a Sound Event, or take an audio/video/live Media Cue. Event actions fire on false→true entry;
-  later matching state actions win. The dockable Rules pane aggregates composition rules and can
-  filter to the selected object. Hidden results collapse from Auto layout when `collapseHidden` is enabled.
+- `set_layer_visual_rules` replaces a layer's ordered rules. Data rules require an existing
+  `fieldId` in MCP; Studio **+ Add Rule** creates the first field automatically. Pointer triggers
+  `click`, `double-click`, `pointer-enter`, and `pointer-leave` need no field and run only in
+  interactive real-time HTML. Actions can change visibility/properties or trigger custom actions,
+  shader animation, sound, or media. Pair enter/leave for hover styling; use a custom action for
+  remote or deterministic non-real-time playout. Later matching state actions win, and hidden
+  results collapse from Auto layout when `collapseHidden` is enabled. See
+  [rule workflows](./references/tool-workflows.md) for condition semantics.
 - Data Connections are UI-authored preview adapters for JSON/CSV URLs or imported text. They map
   into Test Data only and never add a proprietary connector dependency to exported OGraf output.
 - Author designed data changes with `set_composition.updateTransitionFrames/updateInterruption` and
@@ -324,6 +329,15 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
 - Text supports ordered `runs` with color/weight/style/font overrides plus explicit `direction` and
   BCP 47 `language`. Keep run text concatenated exactly to `content`; runtime content bindings clear
   runs and produce plain operator text.
+- Text `textAnimation` supports deterministic `typewriter`, `fade`, `rise`, `pop`, and
+  `word-reveal` presets without character layers. Patch the complete object through
+  `update_element`: `split` is `grapheme|word`, `durationFrames` is positive, and word reveal
+  always uses word segmentation. Typewriter alone uses `cursor:none|bar|block` and positive
+  `cursorBlinkFrames`. `replayOnUpdate` responds to changed Content bindings;
+  `customActionId` references an existing OGraf custom action. The initial animation begins at
+  frame zero; keep its duration inside IN when text must be complete at the first Step. Grapheme
+  mode preserves emoji and combining marks. Playback and cursor blinking remain frame-sampled
+  under backward `goToTime()` seeks.
 - Treat the exposed action/title safe bounds as EBU R 95 16:9 geometry: action safe is inset 3.5%
   per axis and title/graphics safe is inset 5% per axis, with pixel margins rounded to the nearest
   integer. At 1920x1080 this is 67/38 px and 96/54 px; at 3840x2160 it is 134/76 px and 192/108 px.
@@ -375,7 +389,8 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
 - Omitted easing on newly authored generic keys and transitions is linear. Recipes must specify any
   intentional non-linear entrance, exit, update, or loop motion explicitly.
 - Preserve Start and End lifecycle states. Only Step states are pausable OGraf steps.
-- Do not encode editor-only automation or cross-timeline triggers into output. Compile only deterministic OGraf lifecycle, schedule, data, and animation behavior.
+- Do not encode editor-only automation or cross-timeline triggers into output. Pointer rules are
+  real-time HTML interactions, not deterministic non-real-time scheduled actions.
 - Use `ograf_undo` to reverse the last agent transaction. Direct browser edits retain their own browser history.
 - Use `ograf_get_changes` after a revision conflict to distinguish browser edits from agent edits.
 - Use `ograf_reset_project` with explicit confirmation for a genuinely fresh visible session; the

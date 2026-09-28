@@ -9,13 +9,15 @@ import {
   isGradientStopOffsetProperty,
   parseShaderAnimationProperty,
   TRANSFORM_ANIMATION_PROPERTIES,
+  normalizeTextAnimation,
   type AnimatableLayerProperty,
   type LayerEffects,
   type LayerTransform,
 } from '@ograf-editor/scene-model';
 import type { CompiledLayer } from '@ograf-editor/ograf-types';
 import { easingForGsap } from './easing';
-import { resolveBoundEffects } from './renderElement';
+import { resolveBoundEffects, resolveBoundElement } from './renderElement';
+import { renderTextAnimationAtFrame } from './textAnimationRendering';
 import { applyCompiledMasks } from './maskRendering';
 import { sampleCompiledLayerVisualState, applyCompiledLayerVisualState } from './loopRendering';
 import { compiledLoopElapsedFrames } from './loopRendering';
@@ -178,6 +180,14 @@ export function buildRuntimeTimeline(
       if (child && state) applyCompiledLayerVisualState(child, state, tl.time() * 1000);
       if (child && layer.element.type === 'pattern')
         renderPatternAtElapsed(child, compiledLoopElapsedFrames(descriptor, layer, frame) ?? 0);
+      if (
+        child &&
+        layer.element.type === 'text' &&
+        normalizeTextAnimation(layer.element.textAnimation).type !== 'none'
+      ) {
+        const resolved = resolveBoundElement(layer, data);
+        if (resolved.type === 'text') renderTextAnimationAtFrame(child, resolved, frame);
+      }
       if (!layer.clipParentId) continue;
       const parent = layerEls.get(layer.clipParentId);
       if (!child || !parent) {
@@ -207,6 +217,8 @@ export function buildRuntimeTimeline(
       layer.motionPath ||
       layer.mask ||
       layer.element.type === 'pattern' ||
+      (layer.element.type === 'text' &&
+        normalizeTextAnimation(layer.element.textAnimation).type !== 'none') ||
       layer.lighting ||
       layer.effects.stack?.some((e) => !e.legacy) ||
       layer.isMaskOnly ||

@@ -29,6 +29,7 @@ import { compositionWithShaderParameterFields } from './shaderFields';
 import { isMediaPaint, normalizeMediaPaint } from './mediaPaint';
 import { normalizeLayerAutoLayout } from './autoLayout';
 import { parseShaderAnimationProperty } from './shaderAnimation';
+import { normalizeTextAnimation } from './textAnimation';
 import type {
   Composition,
   Element,
@@ -217,6 +218,7 @@ function normalizeElement(element: Element): Element {
     runs: element.runs ?? [],
     direction: element.direction ?? 'auto',
     language: element.language ?? '',
+    textAnimation: normalizeTextAnimation(element.textAnimation),
   };
 }
 

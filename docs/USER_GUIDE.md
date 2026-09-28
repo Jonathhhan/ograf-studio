@@ -231,7 +231,10 @@ playback; nested Auto layout containers move with their descendants.
 ### Visual rules
 
 Open the dockable **Rules** pane from the Window menu to edit ordered rules across the composition;
-optionally filter to the selected object. Rules
+optionally filter to the selected object. Its default undocked width is 800 px; a saved custom width
+is preserved. If the composition has no Data fields, **+ Add Rule**
+creates a text condition field automatically; enter its value in the Data pane or through playout
+data to activate the new rule. Rules
 support equality, emptiness, numeric comparison, and changed/increased/decreased conditions. A
 matching rule can show or hide the layer, set one or more bindable visual or exposed shader
 properties, trigger a custom action or shader-animation action, play a Sound Event, or start an
@@ -239,6 +242,16 @@ audio/video/live Media Cue. State actions remain active while matched; event act
 condition enters the matching state. Rules run after ordinary bindings, in authored order; later
 matching state actions win. Hidden rule results participate in Auto layout's **Collapse hidden**
 spacing.
+
+Rules can also start from **Clicked**, **Double-clicked**, **Mouse over**, or **Mouse leave** on
+their target object. Choose the trigger beside **+ Add Rule**; pointer-triggered rules do not need a
+Data field. Their actions work in the OGraf Preview and exported real-time HTML graphic. Click/tap
+uses the object's rectangular bounds, and mouse-over/leave apply to mouse or pen hover. Studio's
+editing canvas keeps clicks for selecting and editing objects. If both click and double-click rules
+exist on the same object, a single-click action waits briefly so a double-click fires only the
+double-click rule. For a hover highlight, pair a Mouse over property action with a Mouse leave
+action that restores the original property. Pointer events are not part of non-real-time scheduled
+rendering; use a playout custom action for a deterministic or remote trigger.
 
 ### Data connections
 
@@ -304,6 +317,25 @@ language tag for browser shaping and accessibility. **Enable mixed styles** divi
 into ordered editable runs; each run can override color, weight, italics, and font family while the
 layer retains one transform, outline, animation, and data identity. A runtime content binding
 intentionally replaces styled runs with plain operator text to avoid applying stale character ranges.
+
+### Text animation presets
+
+Select a text layer and open the separate **Animation** section below **Text** in Properties. Choose
+**Typewriter**, **Fade in**, **Rise in**, **Pop in**, or **Word reveal**. Typewriter reveals letters or
+words in steps and can draw a blinking bar or block cursor. Fade in changes each segment's opacity;
+Rise in moves it upward while fading; Pop in grows it with a small overshoot; Word reveal slides each
+word upward through its own mask. The first four presets can split by Unicode-safe Characters or
+Words. Word reveal always splits by words.
+
+Set a fixed frame duration for any preset. For Typewriter, **Typing speed** converts the current
+sample text into a fixed duration. Timeline scrubbing and non-real-time OGraf seeking sample these
+effects from the same frame clock. The full text stays measured while it animates, so auto-size and
+wrapping do not jump between segments.
+
+The first animation starts at frame 0. Keep its duration within the IN transition when the full text
+must be visible at the first OGraf Step. **Replay on update** restarts it when `updateAction`
+changes the field bound to Content. **Replay action** links an existing Data → Custom Action so a
+playout can restart the effect without changing the lifecycle step.
 
 ### Shader fills
 
@@ -415,7 +447,11 @@ Clicking blank canvas keeps path editing active. Choose **Done** or press **Esca
 For recent changes, see the [release notes](releases/0.21.md).
 
 Manage a selected layer's data links under **Properties → Data Bindings**. Binding indicators are
-not drawn over the canvas artwork.
+not drawn over the canvas artwork. **+ Add Binding** creates a new data field for the next unbound
+property and binds it immediately, even when the project has no fields yet. The new field starts
+with that property's current value, so adding the binding does not change the graphic. Choose a
+different existing field in the binding's **Field** menu if you want to reuse one, or open **Data**
+to rename and edit the new field.
 
 ## Fullscreen preview
 

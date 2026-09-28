@@ -36,7 +36,12 @@ export function updateVisualRuleStateOverrides(
   for (const layer of layers) {
     let layerOverride = current[layer.id];
     for (const rule of layer.visualRules ?? []) {
-      if (!rule.enabled || !EVENT_OPERATORS.has(rule.operator)) continue;
+      if (
+        !rule.enabled ||
+        (rule.trigger && rule.trigger !== 'data') ||
+        !EVENT_OPERATORS.has(rule.operator)
+      )
+        continue;
       const field = fields.find((candidate) => candidate.id === rule.fieldId);
       const currentValue = visualRuleValue(valueForField(nextValues, field), rule.sourcePath);
       const previousValue = visualRuleValue(valueForField(previousValues, field), rule.sourcePath);

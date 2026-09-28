@@ -34,6 +34,7 @@ export interface CompiledLayerVisualRule {
   id: string;
   name: string;
   enabled: boolean;
+  trigger?: import('@ograf-editor/scene-model').VisualRuleTrigger;
   dataKey: string;
   sourcePath: string[];
   operator: import('@ograf-editor/scene-model').VisualRuleOperator;

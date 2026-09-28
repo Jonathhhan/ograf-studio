@@ -21,6 +21,7 @@ import {
 import { useSelectionStore } from '../state/selectionStore';
 import { useShaderParameterPreviewStore } from '../state/shaderParameterPreviewStore';
 import { bindableProperties } from '../state/dataBinding';
+import { nextBindingProperty } from '../state/bindingFieldCreation';
 import type {
   BlendMode,
   CornerRadii,
@@ -30,6 +31,7 @@ import type {
   ShaderPaintSlot,
   ShaderParameterValue,
   TextElement,
+  VisualRuleTrigger,
 } from '@ograf-editor/scene-model';
 import {
   BLEND_MODES,
@@ -51,6 +53,10 @@ import {
   isPixelTransformKey,
   parseLottieJson,
   normalizeLayerAutoLayout,
+  normalizeTextAnimation,
+  segmentTextAnimationUnits,
+  isAnimatedTextSegment,
+  textAnimationSplit,
   type EasingPreset,
   type SemanticLayerRole,
 } from '@ograf-editor/scene-model';
@@ -67,13 +73,14 @@ import { isPersistentGroupSelection } from '../canvas/groupSelection';
 import { PropertiesFilter } from './PropertiesFilter';
 import { usePropertiesFilter } from './propertiesFilterLogic';
 import { audioFileImportError } from './mediaFileImport';
+import { TextAnimationEditor } from './TextAnimationEditor';
 import './InspectorPanel.css';
 
 const TRANSFORM_FIELDS: { key: keyof LayerTransform; label: string; step?: number }[] = [
   { key: 'x', label: 'X' },
   { key: 'y', label: 'Y' },
-  { key: 'width', label: 'W' },
-  { key: 'height', label: 'H' },
+  { key: 'width', label: 'Width' },
+  { key: 'height', label: 'Height' },
   { key: 'rotation', label: 'Rotation' },
 ];
 
@@ -276,6 +283,7 @@ export function InspectorPanel() {
   const updateLayerPaint = useProjectStore((s) => s.updateLayerPaint);
   const updateLayerShaderParameter = useProjectStore((s) => s.updateLayerShaderParameter);
   const setLayerBindings = useProjectStore((s) => s.setLayerBindings);
+  const addLayerBinding = useProjectStore((s) => s.addLayerBinding);
   const toggleLayerLock = useProjectStore((s) => s.toggleLayerLock);
   const setLayerParent = useProjectStore((s) => s.setLayerParent);
   const setLayerClipChildren = useProjectStore((s) => s.setLayerClipChildren);
@@ -291,6 +299,7 @@ export function InspectorPanel() {
   const bindDesignToken = useProjectStore((s) => s.bindDesignToken);
   const unbindDesignToken = useProjectStore((s) => s.unbindDesignToken);
   const [propertyFilter, setPropertyFilter] = useState('');
+  const [newRuleTrigger, setNewRuleTrigger] = useState<VisualRuleTrigger>('data');
   const [audioImportError, setAudioImportError] = useState<string | null>(null);
   const inspectorRef = useRef<HTMLDivElement>(null);
   usePropertiesFilter(inspectorRef, propertyFilter);
@@ -325,6 +334,21 @@ export function InspectorPanel() {
   const visualRules = layer.visualRules ?? [];
   const pathStretchInsets = layer.element.type === 'path' ? layer.element.stretchInsets : undefined;
   const selectedTextElement = layer.element.type === 'text' ? layer.element : null;
+  const selectedTextAnimation = selectedTextElement
+    ? normalizeTextAnimation(selectedTextElement.textAnimation)
+    : null;
+  const selectedTextAnimationUnitCount =
+    selectedTextElement && selectedTextAnimation
+      ? segmentTextAnimationUnits(
+          selectedTextElement.runs.length
+            ? selectedTextElement.runs.map((run) => run.text).join('')
+            : selectedTextElement.content,
+          textAnimationSplit(selectedTextAnimation),
+          selectedTextElement.language,
+        ).filter((segment) =>
+          isAnimatedTextSegment(segment, textAnimationSplit(selectedTextAnimation)),
+        ).length
+      : 0;
   const selectedAudioElement = layer.element.type === 'audio' ? layer.element : null;
 
   const roundedFrame = Math.round(currentFrame);
@@ -377,7 +401,7 @@ export function InspectorPanel() {
     return isPixelTransformKey(key) ? Math.round(value) : value;
   };
 
-  const evaluatedPixelSummary = `X ${authoredPose.x.toFixed(3)} · Y ${authoredPose.y.toFixed(3)} · W ${authoredPose.width.toFixed(3)} · H ${authoredPose.height.toFixed(3)}`;
+  const evaluatedPixelSummary = `X ${authoredPose.x.toFixed(3)} · Y ${authoredPose.y.toFixed(3)} · Width ${authoredPose.width.toFixed(3)} · Height ${authoredPose.height.toFixed(3)}`;
 
   const setTransform = (key: keyof LayerTransform, value: number) => {
     updateLayerTransform(layer.id, roundedFrame, { [key]: value });
@@ -394,6 +418,16 @@ export function InspectorPanel() {
     if (next.autoFit === 'auto-size') {
       updateLayerTransform(layer.id, roundedFrame, measureAutoSizedText(next));
     }
+  };
+
+  const setTextAnimation = (patch: Partial<TextElement['textAnimation']>) => {
+    if (layer.element.type !== 'text') return;
+    setTextElement({
+      textAnimation: normalizeTextAnimation({
+        ...layer.element.textAnimation,
+        ...patch,
+      }),
+    });
   };
 
   const setTextStroke = (
@@ -1203,7 +1237,7 @@ export function InspectorPanel() {
                 }
                 className="inspector-row"
               >
-                <span>ViewBox W</span>
+                <span>ViewBox Width</span>
                 <input
                   type="number"
                   value={layer.element.viewBoxWidth}
@@ -1216,7 +1250,7 @@ export function InspectorPanel() {
                 }
                 className="inspector-row"
               >
-                <span>ViewBox H</span>
+                <span>ViewBox Height</span>
                 <input
                   type="number"
                   value={layer.element.viewBoxHeight}
@@ -1610,6 +1644,15 @@ export function InspectorPanel() {
             </>
           )}
         </CollapsibleSection>
+        {layer.element.type === 'text' && selectedTextAnimation ? (
+          <TextAnimationEditor
+            animation={selectedTextAnimation}
+            unitCount={selectedTextAnimationUnitCount}
+            frameRate={composition.frameRate}
+            customActions={composition.customActions}
+            onChange={setTextAnimation}
+          />
+        ) : null}
         {tokenTargets.length > 0 && (
           <CollapsibleSection sectionId="properties.brand-tokens" title="Brand tokens">
             {tokenTargets.map((target) => {
@@ -2081,18 +2124,29 @@ export function InspectorPanel() {
           sectionId="properties.visual-rules"
           title="Visual rules"
           actions={
-            <button
-              type="button"
-              disabled={composition.dataFields.length === 0 || layer.isLocked}
-              onClick={() => addLayerVisualRule(layer.id)}
-            >
-              + Add Rule
-            </button>
+            <>
+              <select
+                aria-label="New visual rule trigger"
+                value={newRuleTrigger}
+                onChange={(event) => setNewRuleTrigger(event.target.value as VisualRuleTrigger)}
+              >
+                <option value="data">Data</option>
+                <option value="click">Clicked</option>
+                <option value="double-click">Double-clicked</option>
+                <option value="pointer-enter">Mouse over</option>
+                <option value="pointer-leave">Mouse leave</option>
+              </select>
+              <button
+                type="button"
+                disabled={layer.isLocked}
+                onClick={() => addLayerVisualRule(layer.id, newRuleTrigger)}
+              >
+                + Add Rule
+              </button>
+            </>
           }
         >
-          {composition.dataFields.length === 0 ? (
-            <p className="inspector-hint">Add a Data field before creating a visual rule.</p>
-          ) : visualRules.length === 0 ? (
+          {visualRules.length === 0 ? (
             <p className="inspector-hint">No visual rules on this layer.</p>
           ) : (
             visualRules.map((rule) => {
@@ -2114,55 +2168,79 @@ export function InspectorPanel() {
                     }
                   />
                   <label>
-                    Field
+                    Trigger
                     <select
-                      value={rule.fieldId}
-                      onChange={(event) =>
-                        updateLayerVisualRule(layer.id, rule.id, { fieldId: event.target.value })
-                      }
-                    >
-                      {composition.dataFields.map((field) => (
-                        <option key={field.id} value={field.id}>
-                          {field.label || field.key}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Condition
-                    <select
-                      value={rule.operator}
+                      aria-label="Visual rule trigger"
+                      value={rule.trigger ?? 'data'}
                       onChange={(event) =>
                         updateLayerVisualRule(layer.id, rule.id, {
-                          operator: event.target.value as typeof rule.operator,
+                          trigger: event.target.value as VisualRuleTrigger,
                         })
                       }
                     >
-                      <option value="equals">Equals</option>
-                      <option value="not-equals">Does not equal</option>
-                      <option value="empty">Is empty</option>
-                      <option value="not-empty">Is not empty</option>
-                      <option value="greater-than">Greater than</option>
-                      <option value="less-than">Less than</option>
-                      <option value="changed">Changed</option>
-                      <option value="increased">Increased</option>
-                      <option value="decreased">Decreased</option>
+                      <option value="data">Data</option>
+                      <option value="click">Clicked</option>
+                      <option value="double-click">Double-clicked</option>
+                      <option value="pointer-enter">Mouse over</option>
+                      <option value="pointer-leave">Mouse leave</option>
                     </select>
                   </label>
-                  {needsValue ? (
-                    <label>
-                      Compare value
-                      <input
-                        value={String(rule.value ?? '')}
-                        onChange={(event) =>
-                          updateLayerVisualRule(layer.id, rule.id, {
-                            value: ['greater-than', 'less-than'].includes(rule.operator)
-                              ? Number(event.target.value)
-                              : event.target.value,
-                          })
-                        }
-                      />
-                    </label>
+                  {!rule.trigger || rule.trigger === 'data' ? (
+                    <>
+                      <label>
+                        Field
+                        <select
+                          value={rule.fieldId}
+                          onChange={(event) =>
+                            updateLayerVisualRule(layer.id, rule.id, {
+                              fieldId: event.target.value,
+                            })
+                          }
+                        >
+                          {composition.dataFields.map((field) => (
+                            <option key={field.id} value={field.id}>
+                              {field.label || field.key}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Condition
+                        <select
+                          value={rule.operator}
+                          onChange={(event) =>
+                            updateLayerVisualRule(layer.id, rule.id, {
+                              operator: event.target.value as typeof rule.operator,
+                            })
+                          }
+                        >
+                          <option value="equals">Equals</option>
+                          <option value="not-equals">Does not equal</option>
+                          <option value="empty">Is empty</option>
+                          <option value="not-empty">Is not empty</option>
+                          <option value="greater-than">Greater than</option>
+                          <option value="less-than">Less than</option>
+                          <option value="changed">Changed</option>
+                          <option value="increased">Increased</option>
+                          <option value="decreased">Decreased</option>
+                        </select>
+                      </label>
+                      {needsValue ? (
+                        <label>
+                          Compare value
+                          <input
+                            value={String(rule.value ?? '')}
+                            onChange={(event) =>
+                              updateLayerVisualRule(layer.id, rule.id, {
+                                value: ['greater-than', 'less-than'].includes(rule.operator)
+                                  ? Number(event.target.value)
+                                  : event.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      ) : null}
+                    </>
                   ) : null}
                   <label>
                     Action
@@ -2400,29 +2478,9 @@ export function InspectorPanel() {
             })}
             <button
               type="button"
-              disabled={
-                composition.dataFields.length === 0 ||
-                bindableProperties(layer.element, layer.effects).every((property) =>
-                  layer.bindings.some((binding) => binding.targetProperty === property.value),
-                )
-              }
-              onClick={() => {
-                const targetProperty = bindableProperties(layer.element, layer.effects).find(
-                  (property) =>
-                    !layer.bindings.some((binding) => binding.targetProperty === property.value),
-                )?.value;
-                const fieldId = composition.dataFields[0]?.id;
-                if (targetProperty && fieldId) {
-                  const field = composition.dataFields[0]!;
-                  const sourcePath =
-                    listFieldLeafPaths(field, { fromArrayItem: field.type === 'array' })[0]?.path ??
-                    [];
-                  setLayerBindings(layer.id, [
-                    ...layer.bindings,
-                    { fieldId, targetProperty, sourcePath },
-                  ]);
-                }
-              }}
+              disabled={layer.isLocked || !nextBindingProperty(layer)}
+              title="Create a data field from the next unbound property and bind it to this layer"
+              onClick={() => addLayerBinding(layer.id)}
             >
               + Add Binding
             </button>

@@ -3,6 +3,8 @@ import {
   activateDockPane,
   closeDockPane,
   createDefaultDockLayout,
+  DEFAULT_RULES_UNDOCKED_WIDTH,
+  detachedWindowWidth,
   DOCK_PANE_LABELS,
   dockPaneAdjacentToTab,
   dockPaneToGroup,
@@ -11,6 +13,7 @@ import {
   dockZoneNearPointer,
   findDockGroup,
   floatDockPane,
+  initialFloatingWidth,
   moveFloatingDockPane,
   parseDockLayout,
   reopenDockPane,
@@ -19,6 +22,17 @@ import {
 } from './dockModel';
 
 describe('dock layout model', () => {
+  it('starts undocked Rules at 800px when space allows without replacing saved widths', () => {
+    expect(DEFAULT_RULES_UNDOCKED_WIDTH).toBe(800);
+    expect(detachedWindowWidth('rules')).toBe(800);
+    expect(detachedWindowWidth('layers')).toBe(480);
+    expect(initialFloatingWidth('rules', 1600, 360)).toBe(800);
+    expect(initialFloatingWidth('rules', 700, 360)).toBe(676);
+    expect(initialFloatingWidth('layers', 1600, 360)).toBe(360);
+
+    const saved = floatDockPane(createDefaultDockLayout(), 'rules', { width: 700 });
+    expect(parseDockLayout(saved).floating[0]?.width).toBe(700);
+  });
   it('reveals AI review in its dock group and reopens a closed pane without floating it', () => {
     const initial = createDefaultDockLayout();
     const revealed = revealDockPane(initial, 'chat');

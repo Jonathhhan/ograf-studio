@@ -285,12 +285,13 @@ and is remapped by `duplicate_group`. Parent translation and composition resize 
 regular tracks.
 Unlock a layer before attempting content, transform, binding, effect, or timeline mutations.
 
-`set_layer_visual_rules` replaces the target layer's ordered rule list. Each rule has a stable ID,
-field ID, optional nested `sourcePath`, one comparison/empty/change operator, and one or more
-visibility, property, custom-action, shader-animation, play-sound, or take-media actions. Property
-actions use the same target paths as data bindings, including exposed shader parameters. Event
-actions fire only when the condition enters a matching state. Changed/increased/decreased rules
-require a previous update. Validate referenced fields, custom actions, and media cue IDs before applying.
+`set_layer_visual_rules` replaces ordered rules. A data rule (default `trigger`) needs an existing
+`fieldId` in MCP; `sourcePath` is optional and `operator` tests the value. Pointer triggers `click`,
+`double-click`, `pointer-enter`, and `pointer-leave` omit field and operator; they run only in
+interactive real-time HTML, not canvas editing or non-real-time replay. Actions include visibility,
+property, custom-action, shader-animation, play-sound, and take-media. Changed/increased/decreased
+need previous data; other data events fire on matching entry. Pair enter/leave to restore hover
+styling; use custom actions for remote playout. Validate action and media cue references.
 
 `create_timeline_group` accepts at least two existing `layerIds`, plus optional `name` and
 `#RRGGBB` `color`, and returns a stable timeline-group ID. Prefer one named/color-coded group for

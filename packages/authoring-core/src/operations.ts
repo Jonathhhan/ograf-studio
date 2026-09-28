@@ -7,6 +7,7 @@ import {
   createShaderPaint,
   normalizeMediaPaint,
   normalizeLayerAutoLayout,
+  normalizeTextAnimation,
   migrateShaderBindingTarget,
   shaderPaintConflictsWithBinding,
   parseShaderAnimationProperty,
@@ -574,7 +575,9 @@ function duplicateGroup(
         ...new Set(
           sources.flatMap((layer) => [
             ...layer.bindings.map((binding) => binding.fieldId),
-            ...(layer.visualRules ?? []).map((rule) => rule.fieldId),
+            ...(layer.visualRules ?? [])
+              .filter((rule) => !rule.trigger || rule.trigger === 'data')
+              .map((rule) => rule.fieldId),
           ]),
         ),
       ];
@@ -1742,7 +1745,7 @@ export function applyAuthoringOperations(
         const fieldIds = new Set(composition.dataFields.map((field) => field.id));
         const actionIds = new Set(composition.customActions.map((action) => action.actionId));
         for (const rule of operation.rules) {
-          if (!fieldIds.has(rule.fieldId))
+          if ((!rule.trigger || rule.trigger === 'data') && !fieldIds.has(rule.fieldId))
             throw new Error(`Visual rule field not found: ${rule.fieldId}`);
           for (const action of rule.actions) {
             if (
@@ -1896,6 +1899,15 @@ export function applyAuthoringOperations(
               ? { ...layer.element.borderRadius, ...radiusPatch }
               : (radiusPatch as never),
           );
+        }
+        if (layer.element.type === 'text' && elementPatch.textAnimation !== undefined) {
+          if (!elementPatch.textAnimation || typeof elementPatch.textAnimation !== 'object') {
+            throw new Error('Text textAnimation must be an object.');
+          }
+          elementPatch.textAnimation = normalizeTextAnimation({
+            ...layer.element.textAnimation,
+            ...(elementPatch.textAnimation as Record<string, unknown>),
+          });
         }
         Object.assign(layer.element, elementPatch);
         if (
@@ -2638,6 +2650,12 @@ export function applyAuthoringOperations(
             ) {
               layer.loop.activation.customActionId = nextActionId;
             }
+            if (
+              layer.element.type === 'text' &&
+              layer.element.textAnimation.customActionId === previousActionId
+            ) {
+              layer.element.textAnimation.customActionId = nextActionId;
+            }
           }
         }
         if (operation.name !== undefined) action.name = operation.name;
@@ -2658,6 +2676,12 @@ export function applyAuthoringOperations(
             layer.loop.activation.customActionId === action.actionId
           ) {
             layer.loop = null;
+          }
+          if (
+            layer.element.type === 'text' &&
+            layer.element.textAnimation.customActionId === action.actionId
+          ) {
+            layer.element.textAnimation.customActionId = null;
           }
         }
         break;

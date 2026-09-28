@@ -22,6 +22,12 @@
   flex: 1;
 }
 
+.rules-toolbar > .rules-toolbar-trigger {
+  min-width: 102px;
+  max-width: 124px;
+  flex: none;
+}
+
 .rules-toolbar label,
 .rules-enabled {
   display: flex;
@@ -106,6 +112,12 @@
   flex: 1;
 }
 
+.rules-condition-grid > .rules-trigger {
+  min-width: 96px;
+  max-width: 112px;
+  flex: none;
+}
+
 .rules-when,
 .rules-arrow {
   flex: none;
@@ -171,6 +183,10 @@
 }
 
 @media (max-width: 560px) {
+  .rules-toolbar {
+    flex-wrap: wrap;
+  }
+
   .rules-editor-row {
     align-items: stretch;
     flex-direction: column;

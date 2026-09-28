@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { createPortal } from 'react-dom';
 import { gsap } from 'gsap';
 import { useProjectFonts } from '../state/useProjectFonts';
-import { DOCK_PANE_LABELS, type DockPaneId } from './dockModel';
+import { detachedWindowWidth, DOCK_PANE_LABELS, type DockPaneId } from './dockModel';
 import { EditorWindowContext, type EditorWindow } from './EditorWindow';
 import { NumericScrubController } from '../components/NumericScrubController';
 import { installEditorShortcuts } from '../state/editorShortcuts';
@@ -40,7 +40,7 @@ export function DetachedWindowsProvider({ children }: { children: ReactNode }) {
     const popup = window.open(
       '',
       `ograf-pane-${instance.current}-${pane}`,
-      `popup,width=${pane === 'timeline' ? 1100 : pane === 'export' ? 1000 : 480},height=760`,
+      `popup,width=${detachedWindowWidth(pane)},height=760`,
     ) as EditorWindow | null;
     if (!popup) {
       setError('The browser blocked this window. Allow popups for Studio, then try again.');

@@ -26,6 +26,76 @@ describe('OGraf MCP authoring host', () => {
   const host = createOGrafAuthoringHost();
   const client = new Client({ name: 'ograf-mcp-test', version: '1.0.0' });
   let testEditorSocket: WebSocket | null = null;
+  it('authors a pointer rule without a Data field through the advertised MCP contract', async () => {
+    const sessionId = 'pointer-visual-rule';
+    host.workspace.create(sessionId);
+    const capabilities = await client.callTool({
+      name: 'ograf_get_capabilities',
+      arguments: { sections: ['bindings'] },
+    });
+    expect(capabilities.structuredContent).toMatchObject({
+      bindings: { visualRules: { triggers: expect.arrayContaining(['click', 'pointer-enter']) } },
+    });
+
+    const applied = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 0,
+        operations: [
+          { type: 'add_layer', kind: 'rectangle', name: 'Button' },
+          {
+            type: 'set_layer_visual_rules',
+            layerName: 'Button',
+            rules: [
+              {
+                id: 'button-click',
+                name: 'Highlight on click',
+                enabled: true,
+                trigger: 'click',
+                actions: [{ type: 'property', targetProperty: 'fill', value: '#2680ff' }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(applied.isError, JSON.stringify(applied.content)).not.toBe(true);
+    const composition = host.workspace.get(sessionId).snapshot().project.compositions[0]!;
+    expect(composition.dataFields).toHaveLength(0);
+    expect(composition.layers[0]!.visualRules[0]).toMatchObject({
+      id: 'button-click',
+      trigger: 'click',
+      fieldId: '',
+      sourcePath: [],
+      operator: 'equals',
+    });
+
+    const invalid = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 1,
+        operations: [
+          {
+            type: 'set_layer_visual_rules',
+            layerName: 'Button',
+            rules: [
+              {
+                id: 'invalid-data-rule',
+                name: 'Missing field',
+                enabled: true,
+                trigger: 'data',
+                actions: [{ type: 'visibility', visible: true }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(invalid.isError).toBe(true);
+    expect(host.workspace.get(sessionId).revision).toBe(1);
+  });
   it('authors the advertised visual pattern presets through their documented patch contract', async () => {
     const result = await client.callTool({
       name: 'ograf_get_capabilities',

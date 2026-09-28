@@ -8,6 +8,7 @@ import {
 import { compileDescriptor } from '@ograf-editor/codegen';
 import {
   layerHasRuntimeVisualInputs,
+  pointerVisualRuleActions,
   resolveVisualRuleElement,
   triggeredVisualRuleActions,
   updateVisualRuleStateOverride,
@@ -100,5 +101,34 @@ describe('compiled visual rules', () => {
     expect(updateVisualRuleStateOverride(layer, { result: 1 }, { result: 2 }, increased)).toEqual({
       properties: { fill: '#ff0000' },
     });
+  });
+
+  it('compiles pointer rules without data fields and keeps them out of data evaluation', () => {
+    const layer = createLayerOfKind('rectangle');
+    layer.visualRules = [
+      createLayerVisualRule({
+        trigger: 'pointer-enter',
+        fieldId: '',
+        actions: [{ type: 'property', targetProperty: 'fill', value: '#ffffff' }],
+      }),
+      createLayerVisualRule({
+        trigger: 'click',
+        fieldId: '',
+        actions: [{ type: 'custom-action', actionId: 'open' }],
+      }),
+    ];
+    const compiled = compileDescriptor(createComposition({ layers: [layer], dataFields: [] }))
+      .layers[0]!;
+
+    expect(compiled.visualRules).toHaveLength(2);
+    expect(layerHasRuntimeVisualInputs(compiled)).toBe(true);
+    expect(resolveVisualRuleElement(compiled, {})).toEqual(compiled.element);
+    expect(triggeredVisualRuleActions(compiled, {}, {})).toEqual([]);
+    expect(pointerVisualRuleActions(compiled, 'pointer-enter')).toEqual([
+      { type: 'property', targetProperty: 'fill', value: '#ffffff' },
+    ]);
+    expect(pointerVisualRuleActions(compiled, 'click')).toEqual([
+      { type: 'custom-action', actionId: 'open' },
+    ]);
   });
 });

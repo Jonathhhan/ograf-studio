@@ -75,6 +75,7 @@ export function resolveEffectiveElement(
     return applyElementDataValue(resolved, binding.targetProperty, mapped);
   }, layer.element);
   for (const rule of layer.visualRules ?? []) {
+    if (rule.trigger && rule.trigger !== 'data') continue;
     const field = dataFields.find((candidate) => candidate.id === rule.fieldId);
     const root = Object.prototype.hasOwnProperty.call(testValues, rule.fieldId)
       ? testValues[rule.fieldId]
@@ -102,6 +103,7 @@ export function resolveEffectiveVisibility(
 ): boolean {
   let visible = layer.isVisible;
   for (const rule of layer.visualRules ?? []) {
+    if (rule.trigger && rule.trigger !== 'data') continue;
     const field = dataFields.find((candidate) => candidate.id === rule.fieldId);
     const root = Object.prototype.hasOwnProperty.call(testValues, rule.fieldId)
       ? testValues[rule.fieldId]
