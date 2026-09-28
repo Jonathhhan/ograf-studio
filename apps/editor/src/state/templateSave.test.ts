@@ -56,7 +56,12 @@ describe('saving a template with its thumbnail', () => {
     const project = createProject({ name: 'News', thumbnailFrame: 7 });
     expect(await saveProjectToFile(project, { baseName: 'My Template' })).toBe('saved');
     expect([...saved.keys()]).toEqual(['My Template.ogs', `${project.id}_thumb.png`]);
-    expect(JSON.parse(await saved.get('My Template.ogs')!.text()).thumbnailFrame).toBe(7);
+    expect(JSON.parse(await saved.get('My Template.ogs')!.text())).toMatchObject({
+      name: 'My Template',
+      thumbnailFrame: 7,
+    });
+    expect(certifyProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'My Template' }));
+    expect(project.name).toBe('News');
     expect(saved.get(`${project.id}_thumb.png`)!.type).toBe('image/png');
     expect(events).toEqual(['picker', 'thumbnail', 'write', 'write', 'close', 'close']);
   });
@@ -89,10 +94,14 @@ describe('saving a template with its thumbnail', () => {
     });
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     const project = createProject({ name: 'Lower Third' });
-    expect(await saveProjectToFile(project)).toBe('downloaded');
-    expect(anchor.download).toBe('Lower Third.source.zip');
+    expect(await saveProjectToFile(project, { baseName: 'Evening News.ogs' })).toBe('downloaded');
+    expect(anchor.download).toBe('Evening News.source.zip');
     const zip = await JSZip.loadAsync(await output!.arrayBuffer());
-    expect(Object.keys(zip.files)).toEqual(['Lower Third.ogs', `${project.id}_thumb.png`]);
+    expect(Object.keys(zip.files)).toEqual(['Evening News.ogs', `${project.id}_thumb.png`]);
     expect(await zip.file(`${project.id}_thumb.png`)!.async('string')).toBe('png-bytes');
+    expect(JSON.parse(await zip.file('Evening News.ogs')!.async('string')).name).toBe(
+      'Evening News',
+    );
+    expect(project.name).toBe('Lower Third');
   });
 });

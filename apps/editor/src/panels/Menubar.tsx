@@ -207,13 +207,13 @@ export function Menubar({
         <TemplateSaveDialog
           project={project}
           onClose={() => setSaveDialogOpen(false)}
-          onSaved={(mode, frame) => {
+          onSaved={(mode, frame, name) => {
             const current = useProjectStore.getState();
             if (
               current.project.id === project.id &&
-              (current.project.thumbnailFrame ?? null) !== frame
+              ((current.project.thumbnailFrame ?? null) !== frame || current.project.name !== name)
             )
-              current.setProjectMeta({ thumbnailFrame: frame });
+              current.setProjectMeta({ thumbnailFrame: frame, name });
             setSaveDialogOpen(false);
             setStatus(
               mode === 'saved'

@@ -75,6 +75,7 @@ export async function saveProjectToFile(
 ): Promise<'saved' | 'cancelled' | 'downloaded'> {
   const snapshot = JSON.parse(JSON.stringify(project)) as Project;
   const baseName = templateBaseName(options.baseName ?? snapshot.name);
+  snapshot.name = baseName;
   let directory: FileSystemDirectoryHandle | undefined;
   if (window.showDirectoryPicker && !options.downloadOnly) {
     try {

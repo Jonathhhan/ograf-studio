@@ -19,7 +19,7 @@ export function TemplateSaveDialog({
 }: {
   project: Project;
   onClose: () => void;
-  onSaved: (mode: 'saved' | 'downloaded', frame: number | null) => void;
+  onSaved: (mode: 'saved' | 'downloaded', frame: number | null, name: string) => void;
   exportOptions?: {
     fileName: string;
     save: (snapshot: Project) => Promise<'saved' | 'cancelled' | 'downloaded'>;
@@ -75,7 +75,7 @@ export function TemplateSaveDialog({
       const result = exportOptions
         ? await exportOptions.save(snapshot)
         : await saveProjectToFile(snapshot, { baseName, downloadOnly });
-      if (result !== 'cancelled') onSaved(result, frame);
+      if (result !== 'cancelled') onSaved(result, frame, exportOptions ? snapshot.name : baseName);
     } catch (cause) {
       setError(
         cause instanceof Error
