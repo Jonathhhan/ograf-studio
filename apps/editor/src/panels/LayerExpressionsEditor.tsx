@@ -1,9 +1,5 @@
 import { useState } from 'react';
-import {
-  expressionSyntaxError,
-  EXPRESSION_PROPERTIES,
-  animatablePropertyLabel,
-} from '@ograf-editor/scene-model';
+import { EXPRESSION_PROPERTIES, animatablePropertyLabel } from '@ograf-editor/scene-model';
 import { JavaScriptEditor } from '../components/JavaScriptEditor';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useSelectionStore } from '../state/selectionStore';
@@ -32,7 +28,7 @@ export function LayerExpressionsEditor() {
                   entry.layerId === layer.id && entry.property === key && entry.source === source,
               )?.message
             : undefined;
-        const error = expressionSyntaxError(source) ?? runtimeError;
+        const error = runtimeError;
         const identity = `${layer.id}:${key}`;
         const bodyId = `expression-body-${identity}`;
         const errorId = `expression-error-${identity}`;
@@ -61,6 +57,7 @@ export function LayerExpressionsEditor() {
             <div id={bodyId} className="scripts-expression-value" hidden={!open}>
               {open && (
                 <JavaScriptEditor
+                  key={layer.id}
                   context={{ composition, mode: 'expression', layer }}
                   invalid={Boolean(error)}
                   describedBy={error ? errorId : undefined}
