@@ -291,6 +291,10 @@ display while preserving its proportions, with black margins where needed.
 
 ## Compatibility notes
 
+- For Resolve, extract packages into a folder without dots, such as `my-template`, and select
+  the `.ograf.json` file inside it. A folder ending in `.ograf` caused a blank graphic and
+  missing data controls in our Resolve checks; changing the folder name resolved it.
+
 - Importing arbitrary third-party OGraf packages is best-effort; opaque JavaScript cannot always
   be recovered as editable layers.
 - Package font assets when consistent typography across computers matters. Embedded project fonts stay active even when Resources is closed, and are included in captures, review images, contact sheets, and saved/exported thumbnails. Detached windows register their own copies.
