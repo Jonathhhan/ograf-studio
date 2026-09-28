@@ -1,3 +1,10 @@
+import {
+  SCRIPT_ELEMENT_CATALOG,
+  SCRIPT_ELEMENT_PROPERTIES,
+  SCRIPT_VISUAL_CATALOG,
+  SCRIPT_EFFECT_CATALOG,
+  SCRIPT_TRANSFORM_CATALOG,
+} from './scriptPropertyCatalog';
 import { getPaintAtFrame, getTrackValueAtFrame } from './layerAnimation';
 import { EFFECT_CATALOG } from './effectStack';
 import { sampleShaderAnimationTracks } from './shaderAnimation';
@@ -35,90 +42,6 @@ export function sampleScriptElement(
   return sampled;
 }
 
-const textFields = [
-  'content',
-  'color',
-  'fill',
-  'strokeColor',
-  'strokePaint',
-  'strokeWidth',
-  'fontFamily',
-  'fontSize',
-  'fontWeight',
-  'textAlign',
-  'lineHeight',
-  'letterSpacing',
-  'textTransform',
-  'verticalAlign',
-  'baselineShift',
-  'minFontSize',
-  'overflowPolicy',
-  'autoFit',
-];
-export const SCRIPT_ELEMENT_PROPERTIES: Record<Element['type'], readonly string[]> = {
-  text: textFields,
-  rectangle: ['fill', 'strokeColor', 'strokeWidth', 'borderRadius'],
-  ellipse: ['fill', 'strokeColor', 'strokeWidth'],
-  path: [
-    'd',
-    'fill',
-    'fillRule',
-    'strokeColor',
-    'strokeWidth',
-    'viewBoxWidth',
-    'viewBoxHeight',
-    'overflow',
-  ],
-  image: ['src', 'fill'],
-  'image-sequence': ['frames', 'fps', 'loop', 'fill'],
-  lottie: ['animationData', 'speed', 'fill'],
-  pattern: ['fill', 'strokeColor', 'strokeWidth', 'definition'],
-  shader: ['name', 'fragmentSource', 'speed', 'resolutionScale', 'parameters', 'inputImage'],
-};
-const enums: Record<string, readonly string[]> = {
-  textAlign: ['left', 'center', 'right'],
-  verticalAlign: ['top', 'middle', 'bottom'],
-  textTransform: ['none', 'uppercase', 'lowercase', 'capitalize'],
-  overflowPolicy: ['visible', 'clip', 'ellipsis'],
-  autoFit: ['auto-size', 'shrink-to-fit', 'fit-to-width', 'squeeze', 'fixed'],
-  fillRule: ['nonzero', 'evenodd'],
-  overflow: ['visible'],
-  blendMode: [
-    'normal',
-    'multiply',
-    'screen',
-    'overlay',
-    'darken',
-    'lighten',
-    'color-dodge',
-    'color-burn',
-    'hard-light',
-    'soft-light',
-    'difference',
-    'exclusion',
-  ],
-};
-const numericFields = new Set([
-  'strokeWidth',
-  'fontSize',
-  'fontWeight',
-  'lineHeight',
-  'letterSpacing',
-  'baselineShift',
-  'minFontSize',
-  'viewBoxWidth',
-  'viewBoxHeight',
-  'fps',
-  'speed',
-  'resolutionScale',
-]);
-const objectFields = new Set([
-  'borderRadius',
-  'animationData',
-  'definition',
-  'parameters',
-  'inputImage',
-]);
 const forbidden = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** Reject non-JSON values rather than letting a script leak functions, cycles or non-finite values into rendering. */
@@ -191,21 +114,20 @@ function validateElement(element: Element): void {
   for (const key of SCRIPT_ELEMENT_PROPERTIES[element.type]) {
     const value = values[key];
     if (value === undefined) continue;
-    if (enums[key]) {
-      if (!enums[key]!.includes(value as string)) throw new Error('Invalid ' + key + ': ' + value);
-    } else if (numericFields.has(key)) requireType(value, 'number', key);
-    else if (key === 'fill' || key === 'strokePaint') {
+    const spec = SCRIPT_ELEMENT_CATALOG[element.type][key]!;
+    if (value === null && spec.nullable) continue;
+    if (spec.values) {
+      if (!spec.values.includes(value as string)) throw new Error('Invalid ' + key + ': ' + value);
+    } else if (spec.type === 'number') requireType(value, 'number', key);
+    else if (spec.type === 'paint') {
       validatePaint(value);
-      if (
-        (key === 'strokePaint' || ['image', 'image-sequence', 'lottie'].includes(element.type)) &&
-        (value as any)?.type !== 'shader'
-      )
+      if (spec.shaderOnly && (value as any)?.type !== 'shader')
         throw new Error(key + ' requires a shader paint for this layer.');
     } else if (key === 'frames') {
       if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string'))
         throw new Error('frames must contain image URL strings.');
     } else if (key === 'loop') requireType(value, 'boolean', key);
-    else if (objectFields.has(key)) {
+    else if (spec.type === 'object') {
       if (
         !(key === 'animationData' && value === null) &&
         (!value || typeof value !== 'object' || Array.isArray(value))
@@ -288,7 +210,7 @@ export function scriptLayerReference(
           }
         : {}),
     });
-  for (const key of Object.keys(transform) as (keyof LayerTransform)[])
+  for (const key of Object.keys(SCRIPT_TRANSFORM_CATALOG) as (keyof LayerTransform)[])
     define(
       key,
       () => transform[key],
@@ -327,7 +249,8 @@ export function scriptLayerReference(
       'blendMode',
       () => getDraft().blendMode,
       (value) => {
-        if (!enums.blendMode!.includes(value)) throw new Error('Invalid blendMode.');
+        if (!SCRIPT_VISUAL_CATALOG.blendMode!.values!.includes(value))
+          throw new Error('Invalid blendMode.');
         getDraft().blendMode = value;
       },
     );
@@ -391,16 +314,7 @@ export function scriptLayerReference(
               requireType(effect.params[key], typeof spec.default, 'effects.params.' + key);
             if (effect.type === 'shader') validatePaint(effect.shader);
           }
-        } else
-          requireType(
-            value,
-            key === 'dropShadowEnabled'
-              ? 'boolean'
-              : key === 'dropShadowColor'
-                ? 'string'
-                : 'number',
-            'effects.' + key,
-          );
+        } else requireType(value, SCRIPT_EFFECT_CATALOG[key]?.type ?? 'number', 'effects.' + key);
       }
       return jsonCopy(draft);
     },

@@ -185,6 +185,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
         </label>
       )}
       <JavaScriptEditor
+        context={{ composition, mode: file ? 'module' : 'composition' }}
         key={selected}
         label={file ? 'Module source' : 'Composition script'}
         value={file?.source ?? scripting.source}

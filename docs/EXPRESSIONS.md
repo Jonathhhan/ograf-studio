@@ -6,6 +6,14 @@ The Scripts tab provides JavaScript syntax highlighting, line numbers, indentati
 matching. Edits save directly with Studio's Undo/Redo. Expression checkboxes toggle only when
 the checkbox itself is activated; clicking the property name does not toggle it.
 
+Press **Ctrl+Space** for completion. Expressions and composition scripts suggest layer names/IDs,
+data fields, API members and statically declared helper exports. Direct layer references and
+unambiguous top-level `const title = layer('Title')` aliases provide type-specific members.
+Suggestions show types, read-only access and enum choices. Helper modules retain ordinary local
+JavaScript completion; scene objects must be passed as arguments. Completion never executes
+module code and is not a full JavaScript type checker (dynamic exports and arbitrary aliasing
+are not inferred). Syntax errors are underlined in the editor; runtime diagnostics remain below it.
+
 ## Property expressions
 
 Open **Scripts > Layer expressions** for a selected layer. An expression controls `x`, `y`,
