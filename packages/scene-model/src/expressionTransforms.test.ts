@@ -86,6 +86,29 @@ describe('resolveExpressionTransforms', () => {
     expect(errors).toEqual([]);
   });
 
+  it.each([
+    'layer("Title").property("fontSize").value',
+    'layer("Title").property("x").valueAtTime(NaN)',
+    'layer("Title").sourceRectAtTime(Infinity).width',
+    'layer("Title").sourceRectAtTime(0, "yes").width',
+  ])('uses the same sampling validation in expressions and scripts: %s', (source) => {
+    const target = layer('Title', { x: source });
+    target.sampleTransform = () => ({ ...target.transform });
+    target.sourceRectAtTime = () => ({ left: 0, top: 0, width: 100, height: 50 });
+    const expressionErrors: ExpressionDiagnostic[] = [];
+    resolveExpressionTransforms([target], {}, expressionErrors);
+    target.expressions = {};
+    const scriptErrors: ExpressionDiagnostic[] = [];
+    resolveExpressionTransforms([target], {}, scriptErrors, 1, {
+      enabled: true,
+      source: `layer("Title").x = ${source};`,
+      modules: [],
+    });
+    expect(expressionErrors).toHaveLength(1);
+    expect(scriptErrors).toHaveLength(1);
+    expect(scriptErrors[0]!.message).toBe(expressionErrors[0]!.message);
+  });
+
   it('provides the sampled value and read-only metadata for each current property', () => {
     const target = layer('Title');
     target.expressions = Object.fromEntries(
