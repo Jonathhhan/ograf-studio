@@ -165,34 +165,6 @@
   padding-top: 8px;
 }
 
-.preview-data-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.preview-data-row span {
-  flex: none;
-  width: 90px;
-  color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.preview-data-row input {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg-canvas);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  padding: 3px 6px;
-  font: inherit;
-  font-size: 11px;
-}
-
 .preview-log {
   display: flex;
   flex-direction: column;
@@ -288,27 +260,4 @@
 /* Data overrides follow the shared two-column configuration-row contract. */
 .preview-data-form {
   gap: 0;
-}
-
-.preview-data-row {
-  min-height: 30px;
-  display: grid;
-  grid-template-columns: var(--property-label-width, minmax(118px, 42%)) minmax(0, 1fr);
-  gap: 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.preview-data-row > span:first-child {
-  width: auto;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  padding: 0 8px;
-  border-right: 1px solid var(--border);
-  color: var(--text);
-}
-
-.preview-data-row > input {
-  width: calc(100% - 12px);
-  margin: 3px 6px;
 }

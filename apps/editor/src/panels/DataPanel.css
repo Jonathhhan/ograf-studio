@@ -86,7 +86,8 @@
   background: none;
 }
 
-.data-table-delete {
+.data-table-delete,
+.data-table-move {
   flex: none;
   background: transparent;
   border: none;
@@ -96,8 +97,14 @@
   padding: 2px 4px;
 }
 
-.data-table-delete:hover {
+.data-table-delete:hover,
+.data-table-move:hover:not(:disabled) {
   color: var(--text);
+}
+
+.data-table-move:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .data-field-details-row td {
@@ -140,40 +147,6 @@
   gap: 6px;
 }
 
-.test-data-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.test-data-row span {
-  flex: none;
-  width: 90px;
-  color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.test-data-row input,
-.test-data-row select,
-.test-data-row textarea {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg-canvas);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  padding: 3px 6px;
-  font: inherit;
-  font-size: 11px;
-}
-
-.test-data-row select[multiple] {
-  min-height: 58px;
-}
-
 .data-json-preview {
   background: var(--bg-canvas);
   border: 1px solid var(--border);
@@ -186,10 +159,6 @@
   max-height: 180px;
   overflow-y: auto;
   margin: 0 0 8px;
-}
-
-.data-json-invalid {
-  border-color: #e45c5c !important;
 }
 
 .data-field-schema-editor {
@@ -257,29 +226,6 @@
 
 .test-data-form {
   gap: 0;
-}
-
-.test-data-row {
-  min-height: 30px;
-  display: grid;
-  grid-template-columns: var(--property-label-width, minmax(118px, 42%)) minmax(0, 1fr);
-  gap: 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.test-data-row > span:first-child {
-  width: auto;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  padding: 0 8px;
-  border-right: 1px solid var(--border);
-  color: var(--text);
-}
-
-.test-data-row > :is(input, select, textarea) {
-  width: calc(100% - 12px);
-  margin: 3px 6px;
 }
 
 .data-field-schema-node > .data-field-details {

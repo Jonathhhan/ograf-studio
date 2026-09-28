@@ -29,11 +29,13 @@ import {
 } from '../state/ografCompatibility';
 import { useFitZoom } from '../canvas/useFitZoom';
 import { transparencyCheckerboardStyle } from '../canvas/compositionBackground';
-import { resolvePreviewDataRecord } from '../state/previewData';
+import { buildPreviewFormFromTestValues, resolvePreviewDataRecord } from '../state/previewData';
 import { canReusePreviewForShaderParameters } from '../state/shaderPreviewReuse';
+import { PreviewDataUpdates } from '../state/previewDataUpdates';
 import { enterPreviewFullscreen, installPreviewShortcuts } from '../state/previewPresentation';
 import { measureAgentText } from '../state/agentCapture';
 import { Panel } from './Panel';
+import { DataFieldInput } from './DataFieldInput';
 import { resolveSourceOverlayGeometry } from './sourceOverlay';
 import './PreviewExportPanel.css';
 
@@ -77,6 +79,7 @@ export function PreviewExportPanel() {
   const project = useProjectStore((s) => s.project);
   const composition = useActiveComposition();
   const testValues = useTestDataStore((s) => s.values);
+  const setTestValue = useTestDataStore((s) => s.setValue);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -97,7 +100,9 @@ export function PreviewExportPanel() {
   const [currentStep, setCurrentStep] = useState<number | undefined>();
   const [renderType, setRenderType] = useState<RenderType>('realtime');
   const [isPreviewLoaded, setIsPreviewLoaded] = useState(false);
-  const [dataForm, setDataForm] = useState<Record<string, TestValue>>({});
+  const [dataForm, setDataForm] = useState<Record<string, TestValue>>(() =>
+    buildPreviewFormFromTestValues(composition, testValues),
+  );
   const [exportStatus, setExportStatus] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [exportDialogProject, setExportDialogProject] = useState<Project | null>(null);
@@ -172,7 +177,7 @@ export function PreviewExportPanel() {
     [composition, dataForm],
   );
   const latestPreviewDataRef = useRef(previewData);
-  const lastAttemptedDataSignatureRef = useRef<string | null>(null);
+  const previewUpdatesRef = useRef(new WeakMap<Graphic, PreviewDataUpdates>());
   latestPreviewDataRef.current = previewData;
   const manifest = useMemo(
     () => assembleManifest(project, composition, descriptor),
@@ -181,11 +186,18 @@ export function PreviewExportPanel() {
   const validation = useMemo(() => validateManifest(manifest), [manifest]);
 
   const resetDataForm = () => {
-    const next: Record<string, TestValue> = {};
-    for (const field of composition.dataFields) {
-      next[field.key] = testValues[field.id] ?? field.defaultValue;
-    }
-    setDataForm(next);
+    setDataForm(buildPreviewFormFromTestValues(composition, testValues));
+  };
+
+  const updateDataFormValue = (
+    field: Project['compositions'][number]['dataFields'][number],
+    value: TestValue,
+  ) => {
+    setDataForm((previous) => ({
+      ...previous,
+      [field.key]: value,
+    }));
+    setTestValue(field.id, value);
   };
 
   const appendLog = useCallback((method: string, params: unknown, result: unknown) => {
@@ -229,6 +241,22 @@ export function PreviewExportPanel() {
     [appendLog],
   );
 
+  const applyLatestPreviewData = useCallback(
+    async (graphic: HTMLElement & Graphic): Promise<boolean> => {
+      const updates = previewUpdatesRef.current.get(graphic);
+      if (!updates) return false;
+      while (graphicRef.current === graphic) {
+        const data = latestPreviewDataRef.current;
+        const signature = JSON.stringify(data);
+        if (!(await updates.apply(data, true))) return false;
+        if (graphicRef.current !== graphic) return false;
+        if (signature === JSON.stringify(latestPreviewDataRef.current)) return true;
+      }
+      return false;
+    },
+    [],
+  );
+
   // Public shader value changes flow through the normal updateAction data path below. Retaining
   // the instance keeps its current Step, content clock and GPU resources while a control moves.
   // Source, bindings, backing and other structural authoring edits still create a fresh preview.
@@ -245,7 +273,6 @@ export function PreviewExportPanel() {
     setLog([]);
 
     const data = latestPreviewDataRef.current;
-    const dataSignature = JSON.stringify(data);
     const params = {
       data,
       renderType,
@@ -261,7 +288,24 @@ export function PreviewExportPanel() {
         if (graphicRef.current !== el) return;
         appendLog('load', params, result);
         if (!successful(result)) return;
-        lastAttemptedDataSignatureRef.current = dataSignature;
+        previewUpdatesRef.current.set(
+          el,
+          new PreviewDataUpdates(data, async (params) => {
+            try {
+              const result = await el.updateAction(params);
+              if (graphicRef.current !== el) return false;
+              appendLog('updateAction', params, result);
+              return successful(result);
+            } catch (error) {
+              if (graphicRef.current === el)
+                appendLog('updateAction', params, {
+                  statusCode: 550,
+                  statusMessage: error instanceof Error ? error.message : String(error),
+                });
+              return false;
+            }
+          }),
+        );
         setIsPreviewLoaded(true);
       })
       .catch((error) => {
@@ -273,6 +317,7 @@ export function PreviewExportPanel() {
       });
 
     return () => {
+      previewUpdatesRef.current.get(el)?.dispose();
       if (graphicRef.current === el) graphicRef.current = null;
       void el.dispose({});
       el.remove();
@@ -289,7 +334,7 @@ export function PreviewExportPanel() {
   useEffect(() => {
     resetDataForm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [composition.dataFields, project.mainCompositionId]);
+  }, [composition.dataFields, project.mainCompositionId, testValues]);
 
   useEffect(() => {
     setCompatibility(null);
@@ -297,27 +342,26 @@ export function PreviewExportPanel() {
 
   useEffect(() => {
     if (!isPreviewLoaded) return;
-    const signature = JSON.stringify(previewData);
-    if (lastAttemptedDataSignatureRef.current === signature) return;
-
+    const graphic = graphicRef.current;
+    const updates = graphic && previewUpdatesRef.current.get(graphic);
+    if (!updates) return;
     const timeout = window.setTimeout(() => {
-      lastAttemptedDataSignatureRef.current = signature;
-      const params = { data: previewData };
-      void call('updateAction', params, (graphic) => graphic.updateAction(params));
+      void updates.apply(previewData);
     }, 150);
 
     return () => window.clearTimeout(timeout);
-  }, [call, isPreviewLoaded, previewData, window]);
+  }, [isPreviewLoaded, previewData, window]);
 
   const handlePlayAction = useCallback(
     (params: { delta?: number; goto?: number }) => {
       void call('playAction', params, async (g) => {
+        if (!(await applyLatestPreviewData(g))) return { statusCode: 550 };
         const result = await g.playAction(params);
         if (graphicRef.current === g) setCurrentStep(result.currentStep);
         return result;
       });
     },
-    [call],
+    [applyLatestPreviewData, call],
   );
 
   const handleFullscreen = () => {
@@ -365,6 +409,7 @@ export function PreviewExportPanel() {
 
   const handleStop = () =>
     void call('stopAction', {}, async (g) => {
+      if (!(await applyLatestPreviewData(g))) return { statusCode: 550 };
       const result = await g.stopAction({});
       setCurrentStep(undefined);
       return result;
@@ -408,7 +453,10 @@ export function PreviewExportPanel() {
       return;
     }
     const params = { schedule };
-    void call('setActionsSchedule', params, (g) => g.setActionsSchedule(params));
+    void call('setActionsSchedule', params, async (g) => {
+      if (!(await applyLatestPreviewData(g))) return { statusCode: 550 };
+      return g.setActionsSchedule(params);
+    });
   };
 
   const handleGoToTime = () => {
@@ -710,15 +758,15 @@ export function PreviewExportPanel() {
                 <PropertyRow
                   help={`${field.description ? field.description + ' ' : ''}Value sent as ${field.key} by preview lifecycle actions. Use Load, Play or Update to test runtime data; this does not change the saved field default.`}
                   key={field.id}
-                  className="preview-data-row"
+                  as="div"
+                  className="data-value-row"
                 >
                   <span>{field.label || field.key}</span>
-                  <input
-                    type="text"
-                    value={String(dataForm[field.key] ?? '')}
-                    onChange={(e) =>
-                      setDataForm((prev) => ({ ...prev, [field.key]: e.target.value }))
-                    }
+                  <DataFieldInput
+                    field={field}
+                    interactive
+                    value={dataForm[field.key] ?? field.defaultValue}
+                    onChange={(value) => updateDataFormValue(field, value)}
                   />
                 </PropertyRow>
               ))}
@@ -764,7 +812,8 @@ export function PreviewExportPanel() {
               help={
                 'Choose a reference image to overlay on the preview for visual comparison. This QA overlay is not included in the exported graphic.'
               }
-              className="preview-data-row"
+              as="div"
+              className="data-value-row"
             >
               <span>Source overlay</span>
               <select
@@ -786,7 +835,8 @@ export function PreviewExportPanel() {
                 help={
                   'Opacity of the reference overlay, from 0 for invisible to 1 for fully opaque. Lower it to compare the reference with the rendered graphic.'
                 }
-                className="preview-data-row"
+                as="div"
+                className="data-value-row"
               >
                 <span>Overlay opacity</span>
                 <input
@@ -809,7 +859,8 @@ export function PreviewExportPanel() {
               help={
                 "Include interlaced-output checks in broadcast QA. This changes the checks, not the graphic's render mode or frame rate."
               }
-              className="preview-data-row"
+              as="div"
+              className="data-value-row"
             >
               <span>Interlaced</span>
               <input
@@ -851,7 +902,8 @@ export function PreviewExportPanel() {
             help={
               "Choose the playback modes advertised by the exported package: real-time, non-real-time or both. This output-only choice does not change the editable project's flags."
             }
-            className="preview-data-row"
+            as="div"
+            className="data-value-row"
           >
             <span>Export profile</span>
             <select

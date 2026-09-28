@@ -4,7 +4,18 @@ import {
   createRectangleLayer,
   createTextLayer,
 } from '@ograf-editor/scene-model';
-import { resolveEffectiveElement } from './dataBinding';
+import {
+  previewBindingData,
+  resolveEffectiveElement,
+  resolveEffectiveEffects,
+} from './dataBinding';
+import {
+  buildPreviewDataFromTestValues,
+  buildPreviewFormFromTestValues,
+  resolvePreviewDataRecord,
+  resolvePreviewFormValue,
+} from './previewData';
+import { createComposition } from '@ograf-editor/scene-model';
 
 describe('resolveEffectiveElement', () => {
   it('uses the declared field default when no explicit test value exists', () => {
@@ -52,5 +63,68 @@ describe('resolveEffectiveElement', () => {
     expect(
       resolveEffectiveElement(layer, { [field.id]: [{ name: 'Grace' }] }, [], [field]),
     ).toMatchObject({ content: 'Grace' });
+  });
+});
+
+describe('effective Select data after schema edits', () => {
+  it('uses the same fallback in forms, scripts, element bindings and effects', () => {
+    const field = createFieldDefinition('select', {
+      key: 'language',
+      defaultValue: 'latin',
+      options: [{ value: 'latin', label: 'Latin' }],
+    });
+    const composition = createComposition({ dataFields: [field] });
+    const values = { [field.id]: 'arabic' };
+    const layer = createTextLayer();
+    layer.bindings = [
+      {
+        fieldId: field.id,
+        targetProperty: 'fontFamily',
+        valueMap: { latin: 'Arial', arabic: 'Noto Sans Arabic' },
+      },
+      {
+        fieldId: field.id,
+        targetProperty: 'dropShadowColor',
+        valueMap: { latin: '#ff0000', arabic: '#0000ff' },
+      },
+    ];
+    expect(resolvePreviewFormValue(field, values[field.id])).toBe('latin');
+    expect(previewBindingData([field], values)).toEqual({ language: 'latin' });
+    expect(buildPreviewDataFromTestValues(composition, values)).toEqual({ language: 'latin' });
+    expect(buildPreviewFormFromTestValues(composition, values)).toEqual({ language: 'latin' });
+    expect(resolvePreviewDataRecord(composition, { language: 'arabic' })).toEqual({
+      language: 'latin',
+    });
+    expect(resolveEffectiveElement(layer, values, [], [field])).toMatchObject({
+      fontFamily: 'Arial',
+    });
+    expect(resolveEffectiveEffects(layer, layer.effects, values, [field])).toMatchObject({
+      dropShadowColor: '#ff0000',
+    });
+    expect(values[field.id]).toBe('arabic'); // Rendering must not mutate persisted test data.
+  });
+  it('filters removed multiple selections and resolves nested selection fields', () => {
+    const choice = createFieldDefinition('select', {
+      key: 'language',
+      defaultValue: 'latin',
+      options: [{ value: 'latin', label: 'Latin' }],
+    });
+    const multiple = createFieldDefinition('select-multiple', {
+      key: 'languages',
+      defaultValue: [],
+      options: choice.options,
+    });
+    expect(resolvePreviewFormValue(multiple, ['arabic', 'latin'])).toEqual(['latin']);
+    expect(resolvePreviewFormValue(multiple, [])).toEqual([]);
+    expect(resolvePreviewFormValue(choice, 42)).toBe('latin');
+    const object = createFieldDefinition('object', {
+      key: 'item',
+      properties: [choice],
+      defaultValue: {},
+    });
+    const array = createFieldDefinition('array', { key: 'items', items: object, defaultValue: [] });
+    expect(previewBindingData([array], { [array.id]: [{ language: 'arabic', score: 0 }] })).toEqual(
+      { items: [{ language: 'latin', score: 0 }] },
+    );
   });
 });

@@ -378,6 +378,7 @@ interface ProjectActions {
   moveLifecycleKeyframe: (keyframeId: string, targetFrame: number) => LifecycleRetimePlan | null;
 
   addDataField: (type: FieldType) => string;
+  moveDataField: (fieldId: string, direction: -1 | 1) => void;
   removeDataField: (fieldId: string) => void;
   updateDataField: (
     fieldId: string,
@@ -2866,6 +2867,16 @@ export const useProjectStore = create<ProjectStore>()(
         });
         return newField.id;
       },
+
+      moveDataField: (fieldId, direction) =>
+        set((state) => {
+          const fields = getActiveComposition(state.project, state.activeCompositionId).dataFields;
+          const index = fields.findIndex((field) => field.id === fieldId);
+          const target = index + direction;
+          if (index < 0 || target < 0 || target >= fields.length) return;
+          const [field] = fields.splice(index, 1);
+          fields.splice(target, 0, field!);
+        }),
 
       removeDataField: (fieldId) =>
         set((state) => {
