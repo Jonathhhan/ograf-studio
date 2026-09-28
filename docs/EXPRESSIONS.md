@@ -191,6 +191,46 @@ never alter live layers. The lightweight
 SVG overview lacks browser font metrics and uses the authored text box; Studio and exported
 browser graphics measure text. Use browser capture for accurate text-dependent output.
 
+## Evaluation order and state
+
+Each evaluation starts from the current animation and bound data, resolves property expressions,
+then runs the composition script, and finally renders the result. Composition-script writes take
+precedence over expression results for the same property. They do not change authored project values.
+
+| Read                                                    | State returned                                                                               |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Expression `value`, `thisProperty.value`, `thisLayer.x` | Current sampled value before expressions.                                                    |
+| Expression `layer('Title').x`                           | Referenced layer's expression result, resolved as a dependency.                              |
+| Composition-script `layer('Title').x`                   | Expression result plus earlier writes in this script.                                        |
+| `property('x').valueAtTime(t)`                          | Authored animation at `t`, before expressions and composition scripts.                       |
+| `sourceRectAtTime(t)`                                   | Authored source geometry at `t` with current bound content, before expression/script writes. |
+
+Time arguments are seconds. Time queries never run expressions, composition scripts, or module
+functions again. Repeated successful queries share samples within one evaluation; the next
+evaluation starts fresh, including when the timestamp is unchanged but data or fonts have changed.
+Changing text or its box in the composition script does not change `sourceRectAtTime()` in that
+script; its contract is explicitly the source before scripting.
+
+Module variables persist within a playback instance. Seeking, changing playback direction and
+repeating the same timestamp do not reset them. A failed composition script rolls back its layer
+writes, but does not roll back a module counter. There is no persistent-state or manual-reset API.
+Use functions of time and data for repeatable seeking; classes may group those functions without
+storing playback history:
+
+```js
+// motion.js
+export class Motion {
+  static x(seconds, speed, start = 0) {
+    return start + seconds * speed;
+  }
+}
+```
+
+```js
+// Composition script: identical time/data produce the same position.
+layer('Title').x = motion.Motion.x(time, data.speed, 25);
+```
+
 ## Execution and portability
 
 Expressions and scripts are trusted JavaScript executed synchronously by the host engine,

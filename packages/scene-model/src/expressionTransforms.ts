@@ -100,17 +100,40 @@ export function resolveExpressionTransforms(
     return target;
   };
   const metadata = (layer: ExpressionLayerState) => ({ id: layer.id, name: layer.name ?? '' });
-  const sampling = (layer: ExpressionLayerState): ExpressionLayerSampling => ({
-    valueAtTime: (property, seconds) => {
-      if (!layer.sampleTransform) throw new Error('Time sampling is unavailable for this layer.');
-      return layer.sampleTransform(seconds)[property as ExpressionProperty];
-    },
-    sourceRectAtTime: (seconds, includeExtents) => {
-      if (!layer.sourceRectAtTime)
-        throw new Error('Content bounds are unavailable for this layer.');
-      return layer.sourceRectAtTime(seconds, includeExtents);
-    },
-  });
+  // Share authored samples across expressions and the composition script, but never across
+  // evaluations: data, fonts and authored values may have changed even at the same time.
+  const samplers = new Map<ExpressionLayerState, ExpressionLayerSampling>();
+  const sampling = (layer: ExpressionLayerState): ExpressionLayerSampling => {
+    const existing = samplers.get(layer);
+    if (existing) return existing;
+    const transforms = new Map<number, LayerTransform>();
+    const bounds = new Map<number, Map<boolean, ExpressionRect>>();
+    const sampler: ExpressionLayerSampling = {
+      valueAtTime: (property, seconds) => {
+        if (!layer.sampleTransform) throw new Error('Time sampling is unavailable for this layer.');
+        let transform = transforms.get(seconds);
+        if (!transform) {
+          transform = { ...layer.sampleTransform(seconds) };
+          transforms.set(seconds, transform);
+        }
+        return transform[property as ExpressionProperty];
+      },
+      sourceRectAtTime: (seconds, includeExtents) => {
+        if (!layer.sourceRectAtTime)
+          throw new Error('Content bounds are unavailable for this layer.');
+        let atTime = bounds.get(seconds);
+        if (!atTime) bounds.set(seconds, (atTime = new Map()));
+        let rect = atTime.get(includeExtents);
+        if (!rect) {
+          rect = Object.freeze({ ...layer.sourceRectAtTime(seconds, includeExtents) });
+          atTime.set(includeExtents, rect);
+        }
+        return rect;
+      },
+    };
+    samplers.set(layer, sampler);
+    return sampler;
+  };
   const resolve = (id: string, property: ExpressionProperty): number => {
     const key = id + ':' + property;
     if (values.has(key)) return values.get(key)!;
