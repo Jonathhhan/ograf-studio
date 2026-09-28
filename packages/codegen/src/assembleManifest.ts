@@ -77,12 +77,12 @@ export function assembleManifest(
     actionDurations: compileActionDurations(descriptor),
     renderRequirements: [
       {
-        // Authored dimensions and timing are preferences, not host admission requirements.
-        // Exact constraints can make hosts reject the graphic before exposing its data controls.
-        resolution: { width: { ideal: descriptor.width }, height: { ideal: descriptor.height } },
-        frameRate: { ideal: descriptor.frameRate },
-        // Offline graphics do not require the renderer to forbid internet access.
-        ...(needsPublicInternet ? { accessToPublicInternet: { exact: true } } : {}),
+        // Per the EBU schema, these are constraint objects (modeled on MediaTrackConstraints'
+        // ConstrainDouble/ConstrainBoolean), not raw values — confirmed against the live schema
+        // during the Phase 5a ograf-devtool cross-check, which caught this exact divergence.
+        resolution: { width: { exact: descriptor.width }, height: { exact: descriptor.height } },
+        frameRate: { exact: descriptor.frameRate },
+        accessToPublicInternet: { exact: needsPublicInternet },
       },
     ],
   };
