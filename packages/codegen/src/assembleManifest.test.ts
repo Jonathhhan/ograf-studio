@@ -4,6 +4,8 @@ import Ajv2020 from 'ajv/dist/2020';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   createComposition,
+  createLayerOfKind,
+  createImageElement,
   createCustomActionDefinition,
   createFieldDefinition,
   createKeyframe,
@@ -101,15 +103,22 @@ describe('assembleManifest — conformance to the real EBU schema', () => {
 });
 
 describe('assembleManifest — content', () => {
-  it('emits renderRequirements as constraint objects carrying composition settings', () => {
+  it('emits preferred format without mandatory host constraints for offline graphics', () => {
     const manifest = build(realisticComposition());
     expect(manifest.renderRequirements).toEqual([
       {
-        resolution: { width: { exact: 1280 }, height: { exact: 720 } },
-        frameRate: { exact: 50 },
-        accessToPublicInternet: { exact: false },
+        resolution: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        frameRate: { ideal: 50 },
       },
     ]);
+  });
+
+  it('still requires internet access when the graphic uses a remote image', () => {
+    const layer = createLayerOfKind('image');
+    layer.element = createImageElement({ src: 'https://example.com/image.png' });
+    const manifest = build(createComposition({ layers: [layer] }));
+    expect(manifest.renderRequirements?.[0]?.accessToPublicInternet).toEqual({ exact: true });
+    expect(validateAgainstRealSchema(manifest).valid).toBe(true);
   });
 
   it('sets stepCount from the step count (outro excluded) and points main at main.js', () => {
