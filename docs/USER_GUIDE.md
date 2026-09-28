@@ -300,3 +300,20 @@ display while preserving its proportions, with black margins where needed.
   and test the exported package with your target player.
 - Large embedded assets can exhaust browser storage. Save editable source regularly.
 - Browser certification and visual captures require a responsive Studio window.
+
+## Linked JSON files in Studio
+
+An Object field can link to a local JSON file with **Link JSON file** in the Data panel.
+Studio reads the file when linking it. Use **Reload JSON** to load subsequent file changes;
+there is no background polling. Loading replaces the field's default and preview value.
+Nested objects and arrays are supported; the root must be an object and the file must not
+exceed 1 MB. Invalid or missing files show an error and keep the last valid value.
+**Unlink** removes the connection and retains the loaded data.
+
+Saving `.ogs` and exporting OGraf include the last successfully loaded content, even if the
+file has since changed. The exported player does not read the linked file. Connections are
+stored in this browser profile, associated with the project, composition and field IDs;
+they are not portable project paths. Browser reloads restore the connection without rereading
+the file. Use **Reload JSON** to read it, or **Re-link JSON file** if permission was revoked.
+Chrome/Edge file-system access is required. A second browser profile or another computer
+needs to link the file again. Manual data edits remain active until the next explicit reload.

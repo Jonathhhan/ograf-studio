@@ -1,3 +1,4 @@
+import { installLinkedJsonFiles } from './state/linkedJsonFiles';
 import { installScriptLogs } from './state/scriptLogsStore';
 import { installEditorShortcuts } from './state/editorShortcuts';
 import { useEffect, useLayoutEffect } from 'react';
@@ -7,6 +8,7 @@ import { useAgentBridge } from './state/agentBridge';
 
 function App() {
   useAutosave();
+  useEffect(() => installLinkedJsonFiles(), []);
   useLayoutEffect(() => installScriptLogs(window), []);
 
   useEffect(() => installEditorShortcuts(window), []);
