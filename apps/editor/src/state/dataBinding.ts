@@ -1,3 +1,4 @@
+import { resolvePreviewFormValue } from './previewData';
 import {
   resolveElementAssetReferences,
   resolvePatternElement,
@@ -71,11 +72,10 @@ export function resolveEffectiveElement(
   patterns: TilingPattern[] = [],
 ): Element {
   const element = layer.bindings.reduce<Element>((resolved, binding) => {
-    const hasTestValue = Object.prototype.hasOwnProperty.call(testValues, binding.fieldId);
-    const rootValue = hasTestValue
-      ? testValues[binding.fieldId]
-      : dataFields.find((field) => field.id === binding.fieldId)?.defaultValue;
     const field = dataFields.find((candidate) => candidate.id === binding.fieldId);
+    const rootValue = field
+      ? resolvePreviewFormValue(field, testValues[binding.fieldId])
+      : testValues[binding.fieldId];
     const itemValue =
       field?.type === 'array' && Array.isArray(rootValue) ? rootValue[0] : rootValue;
     const value = valueAtSourcePath(itemValue, binding.sourcePath);
@@ -123,9 +123,7 @@ export function previewBindingData(
   fields: FieldDefinition[],
   values: Record<string, TestValue>,
 ): Record<string, unknown> {
-  return Object.fromEntries(
-    fields.map((f) => [f.key, Object.hasOwn(values, f.id) ? values[f.id] : f.defaultValue]),
-  );
+  return Object.fromEntries(fields.map((f) => [f.key, resolvePreviewFormValue(f, values[f.id])]));
 }
 
 export function resolveEffectiveEffects(
@@ -142,9 +140,9 @@ export function resolveEffectiveEffects(
     )
       continue;
     const field = dataFields.find((f) => f.id === binding.fieldId);
-    const root = Object.hasOwn(testValues, binding.fieldId)
-      ? testValues[binding.fieldId]
-      : field?.defaultValue;
+    const root = field
+      ? resolvePreviewFormValue(field, testValues[binding.fieldId])
+      : testValues[binding.fieldId];
     const value = valueAtSourcePath(
       field?.type === 'array' && Array.isArray(root) ? root[0] : root,
       binding.sourcePath,

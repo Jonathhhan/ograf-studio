@@ -9,7 +9,7 @@ function hasOwn(record: Record<string, FieldValue>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-/** Keeps the Preview & Export form compatible with the current field definition after schema edits. */
+/** Shared effective value for forms, bindings and scripts after field schema edits. */
 export function resolvePreviewFormValue(
   field: FieldDefinition,
   testValue: FieldValue | undefined,
@@ -19,7 +19,24 @@ export function resolvePreviewFormValue(
     (typeof testValue !== 'string' || !field.options.some((option) => option.value === testValue))
   )
     return field.defaultValue;
-  return testValue ?? field.defaultValue;
+  const value = testValue ?? field.defaultValue;
+  if (field.type === 'select-multiple') {
+    if (!Array.isArray(value)) return field.defaultValue;
+    return value.filter(
+      (item) => typeof item === 'string' && field.options.some((option) => option.value === item),
+    );
+  }
+  if (field.type === 'object' && value && typeof value === 'object' && !Array.isArray(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, childValue]) => {
+        const child = field.properties.find((property) => property.key === key);
+        return [key, child ? resolvePreviewFormValue(child, childValue) : childValue];
+      }),
+    );
+  }
+  if (field.type === 'array' && field.items && Array.isArray(value))
+    return value.map((item) => resolvePreviewFormValue(field.items!, item));
+  return value;
 }
 
 function resolveFieldValue(
@@ -27,6 +44,7 @@ function resolveFieldValue(
   field: Composition['dataFields'][number],
   value: FieldValue,
 ): FieldValue {
+  value = resolvePreviewFormValue(field, value);
   if (
     ['number', 'integer', 'duration-ms', 'percentage'].includes(field.type) &&
     typeof value === 'string' &&
