@@ -358,17 +358,28 @@ export function evaluateExpression(
   );
 }
 
-const compiledScripts = new Map<string, (scope: object) => unknown>();
+type ScriptCompilation = { execute: (scope: object) => unknown } | { error: unknown };
+const compiledScripts = new Map<string, ScriptCompilation>();
 function compiledScript(source: string) {
-  const cached = compiledScripts.get(source);
-  if (cached) return cached;
-  const execute = new Function(
-    'scope',
-    'with (scope) { return (function () { "use strict";\n' + source + '\n}).call(undefined); }',
-  ) as (scope: object) => unknown;
-  if (compiledScripts.size >= 128) compiledScripts.delete(compiledScripts.keys().next().value!);
-  compiledScripts.set(source, execute);
-  return execute;
+  let compilation = compiledScripts.get(source);
+  if (!compilation) {
+    try {
+      compilation = {
+        execute: new Function(
+          'scope',
+          'with (scope) { return (function () { "use strict";\n' +
+            source +
+            '\n}).call(undefined); }',
+        ) as (scope: object) => unknown,
+      };
+    } catch (error) {
+      compilation = { error };
+    }
+    if (compiledScripts.size >= 128) compiledScripts.delete(compiledScripts.keys().next().value!);
+    compiledScripts.set(source, compilation);
+  }
+  if ('error' in compilation) throw compilation.error;
+  return compilation.execute;
 }
 
 export function compositionScriptSyntaxError(source: string): string | undefined {
