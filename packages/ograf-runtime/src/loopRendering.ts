@@ -22,11 +22,13 @@ import {
   type LayerAnimationTracks,
   type LayerEffects,
   type LayerTransform,
+  type ScriptLayerVisuals,
 } from '@ograf-editor/scene-model';
 import { applyAnimatedPaint, resolveBoundEffects, resolveBoundElement } from './renderElement';
 import { renderPatternAtElapsed } from './patternRendering';
 
 export interface CompiledLayerVisualState {
+  scriptVisuals?: ScriptLayerVisuals | undefined;
   transform: LayerTransform;
   effects: LayerEffects;
   paintTracks: LayerAnimationTracks;
@@ -322,7 +324,8 @@ export function applyCompiledClipPaths(
       if (child) child.style.clipPath = 'inset(50%)';
       continue;
     }
-    const radius = parentLayer.element.type === 'rectangle' ? parentLayer.element.borderRadius : 0;
+    const parentElement = parentState.scriptVisuals?.element ?? parentLayer.element;
+    const radius = parentElement.type === 'rectangle' ? parentElement.borderRadius : 0;
     child.style.clipPath = clipPathForParentBounds(
       childState.transform,
       parentState.transform,

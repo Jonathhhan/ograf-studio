@@ -258,3 +258,18 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     ).not.toBeNull();
   });
 });
+
+it('retains empty expression editors and removes stale enable flags atomically', () => {
+  useProjectStore.getState().newProject();
+  const store = useProjectStore.getState();
+  const id = store.addLayer('text');
+  const layer = () =>
+    useProjectStore.getState().project.compositions[0]!.layers.find((item) => item.id === id)!;
+  store.updateLayerExpressions(id, { x: '' });
+  store.setLayerExpressionEnabled(id, 'x', false);
+  expect(layer().expressions).toEqual({ x: '' });
+  store.updateLayerExpressions(id, undefined);
+  expect(layer().expressionsEnabled).toBeUndefined();
+  store.updateLayerExpressions(id, { x: '' });
+  expect(layer().expressionsEnabled?.x).not.toBe(false);
+});

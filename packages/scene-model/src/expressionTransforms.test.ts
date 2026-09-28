@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   resolveExpressionTransforms,
   type ExpressionLayerState,
@@ -27,6 +27,88 @@ function layer(
 }
 
 describe('resolveExpressionTransforms', () => {
+  it('shares authored samples across stages without re-running expressions or leaking between evaluations', () => {
+    const target = layer('Title', {
+      x: 'helpers.tick(); return valueAtTime(1) + 100;',
+      y: 'layer("Title").x + layer("Title").property("x").valueAtTime(1)',
+      width: 'sourceRectAtTime(1).width + 10',
+    });
+    const sample = vi.fn(() => ({ ...target.transform }));
+    const rect = vi.fn((_time: number, extents: boolean) => ({
+      left: 0,
+      top: 0,
+      width: target.transform.width + (extents ? 4 : 0),
+      height: 50,
+    }));
+    target.sampleTransform = sample;
+    target.sourceRectAtTime = rect;
+    const scripting = {
+      enabled: true,
+      modules: [
+        {
+          fileName: 'helpers.js',
+          source: 'let n=0; export function tick(){return ++n;} export function count(){return n;}',
+        },
+      ],
+      source: `const title = layer('Title');
+        title.x = title.x + 1000;
+        title.y = title.property('x').valueAtTime(1);
+        title.height = title.sourceRectAtTime(1).width;
+        title.width = title.sourceRectAtTime(1, true).width;
+        title.rotation = helpers.count();`,
+    };
+    const errors: ExpressionDiagnostic[] = [];
+    let result = resolveExpressionTransforms([target], { time: 1 }, errors, 1, scripting);
+    expect(errors).toEqual([]);
+    expect(result.get('Title')).toMatchObject({
+      x: 1110,
+      y: 10,
+      width: 104,
+      height: 100,
+      rotation: 1,
+    });
+    expect(sample).toHaveBeenCalledTimes(1);
+    expect(rect).toHaveBeenCalledTimes(2);
+    expect(target.transform.x).toBe(10);
+    // Same timestamp, new data/geometry: a new evaluation must not reuse the old samples.
+    target.transform.x = 20;
+    target.transform.width = 200;
+    result = resolveExpressionTransforms([target], { time: 1 }, errors, 1, scripting);
+    expect(result.get('Title')).toMatchObject({
+      x: 1120,
+      y: 20,
+      width: 204,
+      height: 200,
+      rotation: 2,
+    });
+    expect(sample).toHaveBeenCalledTimes(2);
+    expect(rect).toHaveBeenCalledTimes(4);
+    expect(errors).toEqual([]);
+  });
+
+  it.each([
+    'layer("Title").property("fontSize").value',
+    'layer("Title").property("x").valueAtTime(NaN)',
+    'layer("Title").sourceRectAtTime(Infinity).width',
+    'layer("Title").sourceRectAtTime(0, "yes").width',
+  ])('uses the same sampling validation in expressions and scripts: %s', (source) => {
+    const target = layer('Title', { x: source });
+    target.sampleTransform = () => ({ ...target.transform });
+    target.sourceRectAtTime = () => ({ left: 0, top: 0, width: 100, height: 50 });
+    const expressionErrors: ExpressionDiagnostic[] = [];
+    resolveExpressionTransforms([target], {}, expressionErrors);
+    target.expressions = {};
+    const scriptErrors: ExpressionDiagnostic[] = [];
+    resolveExpressionTransforms([target], {}, scriptErrors, 1, {
+      enabled: true,
+      source: `layer("Title").x = ${source};`,
+      modules: [],
+    });
+    expect(expressionErrors).toHaveLength(1);
+    expect(scriptErrors).toHaveLength(1);
+    expect(scriptErrors[0]!.message).toBe(expressionErrors[0]!.message);
+  });
+
   it('provides the sampled value and read-only metadata for each current property', () => {
     const target = layer('Title');
     target.expressions = Object.fromEntries(

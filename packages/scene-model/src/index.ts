@@ -45,7 +45,21 @@ export * from './projectThumbnail';
 export { createId } from './id';
 export * from './patternLighting';
 export * from './stylePackColorLinks';
-export * from './expressions';
+export {
+  EXPRESSION_API_VERSION,
+  EXPRESSION_PROPERTIES,
+  expressionTimelineScope,
+  expressionDataScope,
+  expressionSyntaxError,
+  evaluateExpression,
+  compositionScriptSyntaxError,
+  evaluateCompositionScript,
+  type ExpressionScope,
+  type ExpressionLayerResolver,
+  type ExpressionRect,
+  type ExpressionLayerSampling,
+  type ExpressionEvaluationOptions,
+} from './expressions';
 export * from './scriptModules';
 export * from './expressionTransforms';
 
@@ -54,3 +68,7 @@ export * from './expressionBounds';
 export { SCRIPT_LOG_EVENT, type ScriptLogEntry, type ScriptLogLevel } from './scriptConsole';
 
 export * from './scriptingValidation';
+
+export * from './scriptLayerProperties';
+
+export * from './scriptPropertyCatalog';

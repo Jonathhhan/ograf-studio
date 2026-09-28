@@ -1,10 +1,9 @@
+import { ScriptPropertyReference } from './ScriptPropertyReference';
 import { ScriptLogWindow } from './ScriptLogWindow';
 import { JavaScriptEditor } from '../components/JavaScriptEditor';
 import { useRef, useState } from 'react';
 import {
-  compositionScriptSyntaxError,
   scriptModuleName,
-  scriptModuleSyntaxError,
   type Composition,
   type CompositionScripting,
 } from '@ograf-editor/scene-model';
@@ -56,20 +55,6 @@ function ScriptEditor({ composition }: { composition: Composition }) {
     update({ scripting: change(active.scripting ?? EMPTY) });
   };
   const file = scripting.modules[selected];
-  let syntaxError = compositionScriptSyntaxError(scripting.source);
-  const names = new Set<string>();
-  for (const module of scripting.modules) {
-    try {
-      const name = scriptModuleName(module.fileName);
-      if (names.has(name)) throw new Error('Duplicate module name: ' + name);
-      names.add(name);
-      const error = scriptModuleSyntaxError(module.source);
-      if (error) throw new Error(error);
-    } catch (error) {
-      syntaxError ??=
-        module.fileName + ': ' + (error instanceof Error ? error.message : String(error));
-    }
-  }
   const runtimeErrors =
     diagnostics.compositionId === composition.id
       ? [
@@ -184,6 +169,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
         </label>
       )}
       <JavaScriptEditor
+        context={{ composition, mode: file ? 'module' : 'composition' }}
         key={selected}
         label={file ? 'Module source' : 'Composition script'}
         value={file?.source ?? scripting.source}
@@ -197,11 +183,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           {importError}
         </p>
       )}
-      {syntaxError && (
-        <p role="alert" className="inspector-error">
-          {syntaxError}
-        </p>
-      )}
+      <ScriptPropertyReference />
       {runtimeErrors.map((message) => (
         <p role="alert" className="inspector-error" key={message}>
           {message}

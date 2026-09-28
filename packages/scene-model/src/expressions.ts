@@ -18,6 +18,7 @@ export interface ExpressionLayerSampling {
 }
 export interface ExpressionEvaluationOptions {
   apiVersion?: number;
+  resolveScriptLayer?: (reference: string, byId: boolean) => object;
   currentLayer?: { id: string; name: string };
   currentProperty?: { name: string; value: number; layerId: string };
   resolveLayerMetadata?: (reference: string, byId: boolean) => { id: string; name: string };
@@ -110,7 +111,7 @@ function sampleTime(value: unknown): number {
     throw new Error('Sample time must be finite seconds.');
   return value;
 }
-function sampledProperty(
+export function sampledProperty(
   resolve: (property: string) => number,
   property: string,
   sampling?: () => ExpressionLayerSampling,
@@ -128,7 +129,7 @@ function sampledProperty(
     },
   });
 }
-function sourceRectMethod(sampling: () => ExpressionLayerSampling, time: number) {
+export function sourceRectMethod(sampling: () => ExpressionLayerSampling, time: number) {
   return (seconds = time, includeExtents = false) => {
     if (typeof includeExtents !== 'boolean') throw new Error('includeExtents must be a boolean.');
     return Object.freeze({ ...sampling().sourceRectAtTime(sampleTime(seconds), includeExtents) });
@@ -217,37 +218,30 @@ function evaluationScope(
       value: Object.freeze({ ...options.currentProperty, valueAtTime }),
     });
   }
+  const reference = (name: string, byId: boolean) => {
+    const scriptReference = options.resolveScriptLayer?.(name, byId);
+    if (scriptReference) return scriptReference;
+    const resolver = byId ? options.resolveLayerById : resolveLayer;
+    const writer = byId ? options.writeLayerById : options.writeLayer;
+    return layerReference(
+      (property) => {
+        if (resolver) return resolver(name, property);
+        if (byId) throw new Error('Layer ID lookup is unavailable.');
+        const key = name + '.' + property;
+        if (!Object.hasOwn(scope, key)) throw new Error('Unknown layer property "' + key + '".');
+        return numeric(scope[key]);
+      },
+      writer ? (property, value) => writer(name, property, value) : undefined,
+      options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(name, byId) : undefined,
+      options.resolveLayerSampling ? () => options.resolveLayerSampling!(name, byId) : undefined,
+      typeof scope.time === 'number' ? scope.time : 0,
+    );
+  };
   Object.assign(context, {
     thisLayer,
     console: scriptConsole,
-    layerById: (id: string) =>
-      layerReference(
-        (property) => {
-          if (!options.resolveLayerById) throw new Error('Layer ID lookup is unavailable.');
-          return options.resolveLayerById(id, property);
-        },
-        options.writeLayerById
-          ? (property, value) => options.writeLayerById!(id, property, value)
-          : undefined,
-        options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(id, true) : undefined,
-        options.resolveLayerSampling ? () => options.resolveLayerSampling!(id, true) : undefined,
-        typeof scope.time === 'number' ? scope.time : 0,
-      ),
-    layer: (name: string) =>
-      layerReference(
-        (property) => {
-          if (resolveLayer) return resolveLayer(name, property);
-          const key = name + '.' + property;
-          if (!Object.hasOwn(scope, key)) throw new Error('Unknown layer property "' + key + '".');
-          return numeric(scope[key]);
-        },
-        options.writeLayer
-          ? (property, value) => options.writeLayer!(name, property, value)
-          : undefined,
-        options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(name, false) : undefined,
-        options.resolveLayerSampling ? () => options.resolveLayerSampling!(name, false) : undefined,
-        typeof scope.time === 'number' ? scope.time : 0,
-      ),
+    layerById: (id: string) => reference(id, true),
+    layer: (name: string) => reference(name, false),
     lerp: (...args: unknown[]) => helper('lerp', ...args),
     clamp: (...args: unknown[]) => helper('clamp', ...args),
     ease: (...args: unknown[]) => helper('ease', ...args),
@@ -364,17 +358,28 @@ export function evaluateExpression(
   );
 }
 
-const compiledScripts = new Map<string, (scope: object) => unknown>();
+type ScriptCompilation = { execute: (scope: object) => unknown } | { error: unknown };
+const compiledScripts = new Map<string, ScriptCompilation>();
 function compiledScript(source: string) {
-  const cached = compiledScripts.get(source);
-  if (cached) return cached;
-  const execute = new Function(
-    'scope',
-    'with (scope) { return (function () { "use strict";\n' + source + '\n}).call(undefined); }',
-  ) as (scope: object) => unknown;
-  if (compiledScripts.size >= 128) compiledScripts.delete(compiledScripts.keys().next().value!);
-  compiledScripts.set(source, execute);
-  return execute;
+  let compilation = compiledScripts.get(source);
+  if (!compilation) {
+    try {
+      compilation = {
+        execute: new Function(
+          'scope',
+          'with (scope) { return (function () { "use strict";\n' +
+            source +
+            '\n}).call(undefined); }',
+        ) as (scope: object) => unknown,
+      };
+    } catch (error) {
+      compilation = { error };
+    }
+    if (compiledScripts.size >= 128) compiledScripts.delete(compiledScripts.keys().next().value!);
+    compiledScripts.set(source, compilation);
+  }
+  if ('error' in compilation) throw compilation.error;
+  return compilation.execute;
 }
 
 export function compositionScriptSyntaxError(source: string): string | undefined {

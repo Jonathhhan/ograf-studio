@@ -1,3 +1,4 @@
+import { evaluateCompositionScript } from './expressions';
 import { describe, expect, it, vi } from 'vitest';
 import { createDefaultTransform } from './factory';
 import {
@@ -57,6 +58,28 @@ describe('active expression compilation', () => {
       layer.expressions!.x = 'frame + 910002';
       expect(resolveExpressionTransforms([layer], { frame: 11 }).get(layer.id)!.x).toBe(910013);
       expect(compile).toHaveBeenCalledTimes(1);
+    } finally {
+      compile.mockRestore();
+    }
+  });
+});
+
+describe('composition compilation', () => {
+  it('caches syntax failures and compiles edited source without caching runtime failures', () => {
+    const compile = vi.spyOn(globalThis, 'Function');
+    try {
+      const invalid = 'const cachedCompositionSyntax = ;';
+      for (let i = 0; i < 10; i++)
+        expect(() => evaluateCompositionScript(invalid, {}, () => 0, {})).toThrow(SyntaxError);
+      expect(compile).toHaveBeenCalledTimes(1);
+      evaluateCompositionScript('const cachedCompositionSyntax = 1;', {}, () => 0, {});
+      expect(compile).toHaveBeenCalledTimes(2);
+      const source = 'if (frame === 0) throw Error("temporary runtime failure");';
+      expect(() => evaluateCompositionScript(source, { frame: 0 }, () => 0, {})).toThrow(
+        'temporary runtime failure',
+      );
+      expect(() => evaluateCompositionScript(source, { frame: 1 }, () => 0, {})).not.toThrow();
+      expect(compile).toHaveBeenCalledTimes(3);
     } finally {
       compile.mockRestore();
     }

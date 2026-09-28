@@ -3,14 +3,27 @@
 [Using Studio](USER_GUIDE.md)
 
 The Scripts tab provides JavaScript syntax highlighting, line numbers, indentation, and bracket
-matching. Edits save directly with Studio's Undo/Redo. Expression checkboxes toggle only when
+matching. Edits stay local until leaving the code field; the previously committed
+code stays active while typing. Undo/Redo edits the pending draft, then Studio's history after commit. Expression checkboxes toggle only when
 the checkbox itself is activated; clicking the property name does not toggle it.
+
+Press **Ctrl+Space** for completion. Expressions and composition scripts suggest layer names/IDs,
+data fields, API members and statically declared helper exports. Direct layer references and
+unambiguous top-level `const title = layer('Title')` aliases provide type-specific members.
+Suggestions also cover the six names inside `property("...")`, its `valueAtTime` member, and
+`left`, `top`, `width`, `height` after direct `sourceRectAtTime(...)` calls with simple arguments.
+Suggestions show types, read-only access and enum choices. Helper modules retain ordinary local
+JavaScript completion; scene objects must be passed as arguments. Completion never executes
+module code and is not a full JavaScript type checker (dynamic exports and arbitrary aliasing
+are not inferred). Errors from actual script evaluation appear below the editor. There is no separate syntax check while typing.
 
 ## Property expressions
 
 Open **Scripts > Layer expressions** for a selected layer. An expression controls `x`, `y`,
 `width`, `height`, `rotation`, or `opacity` (0 to 1). Return a finite number, either as a
-formula or from a JavaScript statement body:
+formula or from a JavaScript statement body. All six property fields are always shown;
+their editors can be collapsed or expanded. Empty fields appear greyed out and remain editable. Transform origins and non-transform
+properties are not expression targets:
 
 ```js
 layer('Background').x + 20;
@@ -35,7 +48,8 @@ value + data.layout.padding;
 `thisLayer.id/name` identify the expression's layer. `layer("Title").id/name` and
 `layerById(id).id/name` identify a referenced layer without evaluating its transforms.
 Metadata is read-only and non-enumerable on layer objects, so spreading a layer still copies
-only transform values. Collection references report the evaluated item's runtime ID.
+only transform values in property expressions. Composition-script references also expose visual
+properties. Collection references report the evaluated item's runtime ID.
 
 ## Composition script and shared files
 
@@ -52,7 +66,8 @@ title.x += 20;
 layer('Background').width = title.width + 40;
 ```
 
-The same six properties are writable. Reads observe earlier script assignments; property
+Composition scripts can write transforms and rendered visual properties, including text,
+paint, effects and media settings. See the [complete property reference](SCRIPT_PROPERTIES.md). Reads observe earlier script assignments; property
 expressions are not rerun after writes. Each evaluation starts from a fresh animation pose,
 so assignments do not edit keyframes or accumulate between frames. If the script throws or
 writes an invalid value, all of its layer writes are discarded. Errors appear in Scripts.
@@ -178,6 +193,46 @@ never alter live layers. The lightweight
 SVG overview lacks browser font metrics and uses the authored text box; Studio and exported
 browser graphics measure text. Use browser capture for accurate text-dependent output.
 
+## Evaluation order and state
+
+Each evaluation starts from the current animation and bound data, resolves property expressions,
+then runs the composition script, and finally renders the result. Composition-script writes take
+precedence over expression results for the same property. They do not change authored project values.
+
+| Read                                                    | State returned                                                                               |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Expression `value`, `thisProperty.value`, `thisLayer.x` | Current sampled value before expressions.                                                    |
+| Expression `layer('Title').x`                           | Referenced layer's expression result, resolved as a dependency.                              |
+| Composition-script `layer('Title').x`                   | Expression result plus earlier writes in this script.                                        |
+| `property('x').valueAtTime(t)`                          | Authored animation at `t`, before expressions and composition scripts.                       |
+| `sourceRectAtTime(t)`                                   | Authored source geometry at `t` with current bound content, before expression/script writes. |
+
+Time arguments are seconds. Time queries never run expressions, composition scripts, or module
+functions again. Repeated successful queries share samples within one evaluation; the next
+evaluation starts fresh, including when the timestamp is unchanged but data or fonts have changed.
+Changing text or its box in the composition script does not change `sourceRectAtTime()` in that
+script; its contract is explicitly the source before scripting.
+
+Module variables persist within a playback instance. Seeking, changing playback direction and
+repeating the same timestamp do not reset them. A failed composition script rolls back its layer
+writes, but does not roll back a module counter. There is no persistent-state or manual-reset API.
+Use functions of time and data for repeatable seeking; classes may group those functions without
+storing playback history:
+
+```js
+// motion.js
+export class Motion {
+  static x(seconds, speed, start = 0) {
+    return start + seconds * speed;
+  }
+}
+```
+
+```js
+// Composition script: identical time/data produce the same position.
+layer('Title').x = motion.Motion.x(time, data.speed, 25);
+```
+
 ## Execution and portability
 
 Expressions and scripts are trusted JavaScript executed synchronously by the host engine,
@@ -200,3 +255,10 @@ and retain sampled values. This is Studio's API version, not a JavaScript langua
 The shared evaluator is used by Studio, SVG snapshots, and exported graphics. References use
 the renderer's sampled layer boxes; scripting does not change text auto-sizing behavior.
 Tests cover dependencies, errors, module loading, seeking, lifecycle timing, and export/import.
+
+## Earlier extended expressions
+
+Projects from the experimental extended-expression build still open. Expressions for retired
+targets (including transform origins, text stroke, gradient stops, shaders and effects) are
+preserved in the saved project's `legacyExpressions` metadata, including their original code
+and enable state. They do not run or appear in the Scripts tab.

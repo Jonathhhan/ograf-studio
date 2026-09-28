@@ -1,3 +1,6 @@
+import { renderPatternAtElapsed } from './patternRendering';
+import { applyScriptElement, resolveBoundElement, applyAnimatedPaint } from './renderElement';
+import { applyScriptEffects } from './effectCompositing';
 import {
   layerMaskSvg,
   patternRows,
@@ -14,6 +17,7 @@ import { resolveFrameExpressions } from './expressionRendering';
 
 const mounted = new WeakMap<HTMLElement, { svg: SVGSVGElement; id: string; markup: string }>();
 let nextId = 0;
+const scripted = new WeakSet<HTMLElement>();
 const sourceCache = new WeakMap<HTMLElement, { serialized: string; element: Element }>();
 
 /** Shared by Studio, PNG capture and playout; called after every layer's pose and paint resolve. */
@@ -48,6 +52,30 @@ export function applyCompiledMasks(
     const state = states.get(layer.id);
     if ((layer.expressions || descriptor.scripting?.enabled) && target && state)
       applyCompiledLayerTransform(target, state.transform);
+    if (target && state && (state.scriptVisuals || scripted.has(target))) {
+      const host = target.firstElementChild?.classList.contains('layer-content-host')
+        ? (target.firstElementChild as HTMLElement)
+        : target;
+      const visuals = state.scriptVisuals;
+      const element = visuals?.element ?? resolveBoundElement(layer, data ?? {});
+      applyScriptElement(host, element, Boolean(visuals));
+      applyScriptEffects(target, visuals?.effects ?? state.effects, Boolean(visuals));
+      applyAnimatedPaint(target, state.paintTracks, state.paintFrame);
+      if (state.patternFrame !== undefined) renderPatternAtElapsed(target, state.patternFrame);
+      const active = !data || isRuntimeCollectionLayerActive(layer, data);
+      target.style.display = (visuals?.isVisible ?? layer.isVisible) && active ? '' : 'none';
+      target.style.mixBlendMode = visuals?.blendMode ?? layer.blendMode ?? 'normal';
+      if (element.type === 'text' && element.autoFit === 'auto-size') {
+        const width = Number.parseFloat(host.style.width),
+          height = Number.parseFloat(host.style.height);
+        if (width > 0 && height > 0) state.transform = { ...state.transform, width, height };
+      }
+      if (visuals) {
+        scripted.add(target);
+        state.effects = visuals.effects;
+        state.paintTracks = {};
+      } else scripted.delete(target);
+    }
   }
   applyCompiledClipPaths(descriptor, elements, states);
   const hasMasks = descriptor.layers.some((layer) => layer.mask);
@@ -72,7 +100,9 @@ export function applyCompiledMasks(
     sources.set(layer.id, {
       ...layer,
       element: resolvedElement,
-      isVisible: layer.isVisible && (!data || isRuntimeCollectionLayerActive(layer, data)),
+      isVisible:
+        (states.get(layer.id)?.scriptVisuals?.isVisible ?? layer.isVisible) &&
+        (!data || isRuntimeCollectionLayerActive(layer, data)),
     });
   }
   for (const layer of descriptor.layers) {
