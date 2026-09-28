@@ -1,7 +1,4 @@
-import {
-  SCRIPT_ELEMENT_PROPERTIES,
-  TRANSFORM_ANIMATION_PROPERTIES,
-} from '@ograf-editor/scene-model';
+import { scriptLayerPropertyCatalog, SCRIPT_EFFECT_CATALOG } from '@ograf-editor/scene-model';
 import { useActiveComposition } from '../state/projectStore';
 import { useSelectionStore } from '../state/selectionStore';
 
@@ -11,15 +8,12 @@ export function ScriptPropertyReference() {
   const layer = composition.layers.find((entry) => entry.id === selectedId);
   if (!layer) return null;
   const reference = `layerById(${JSON.stringify(layer.id)})`;
-  const properties = [
-    ...TRANSFORM_ANIMATION_PROPERTIES,
-    'isVisible',
-    'blendMode',
-    ...SCRIPT_ELEMENT_PROPERTIES[layer.element.type].map((key) =>
-      key === 'name' ? 'element.name' : key,
+  const properties = Object.entries({
+    ...scriptLayerPropertyCatalog(layer.element.type, 'composition'),
+    ...Object.fromEntries(
+      Object.entries(SCRIPT_EFFECT_CATALOG).map(([key, spec]) => [`effects.${key}`, spec]),
     ),
-    ...Object.keys(layer.effects).map((key) => `effects.${key}`),
-  ];
+  });
   return (
     <details className="scripts-property-reference">
       <summary>Script properties: {layer.name}</summary>
@@ -29,9 +23,14 @@ export function ScriptPropertyReference() {
       </p>
       <code>{reference}</code>
       <ul>
-        {properties.map((property) => (
+        {properties.map(([property, spec]) => (
           <li key={property}>
             <code>{property}</code>
+            <small title={spec.values?.join(', ') ?? spec.description}>
+              {' '}
+              {spec.type}
+              {spec.readOnly ? ' · read-only' : ''}
+            </small>
           </li>
         ))}
       </ul>

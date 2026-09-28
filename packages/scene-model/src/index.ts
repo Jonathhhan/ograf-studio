@@ -56,3 +56,5 @@ export { SCRIPT_LOG_EVENT, type ScriptLogEntry, type ScriptLogLevel } from './sc
 export * from './scriptingValidation';
 
 export * from './scriptLayerProperties';
+
+export * from './scriptPropertyCatalog';

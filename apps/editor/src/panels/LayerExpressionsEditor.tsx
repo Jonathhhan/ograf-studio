@@ -61,6 +61,7 @@ export function LayerExpressionsEditor() {
             <div id={bodyId} className="scripts-expression-value" hidden={!open}>
               {open && (
                 <JavaScriptEditor
+                  context={{ composition, mode: 'expression', layer }}
                   invalid={Boolean(error)}
                   describedBy={error ? errorId : undefined}
                   label={`${label} expression`}

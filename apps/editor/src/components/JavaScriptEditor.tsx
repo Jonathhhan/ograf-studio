@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import {
   EditorView,
@@ -9,7 +9,16 @@ import {
 } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, indentOnInput, indentUnit } from '@codemirror/language';
-import { javascript } from '@codemirror/lang-javascript';
+import { javascript, localCompletionSource } from '@codemirror/lang-javascript';
+import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
+import { linter } from '@codemirror/lint';
+import { syntaxTree } from '@codemirror/language';
+import {
+  expressionSyntaxError,
+  compositionScriptSyntaxError,
+  scriptModuleSyntaxError,
+} from '@ograf-editor/scene-model';
+import { createScriptCompletionSource, type ScriptEditorContext } from './scriptCompletions';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { undo, redo } from '../state/historyStore';
 
@@ -23,6 +32,7 @@ export function JavaScriptEditor({
   invalid = false,
   describedBy,
   placeholder: hint = '',
+  context,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -31,11 +41,17 @@ export function JavaScriptEditor({
   invalid?: boolean;
   describedBy?: string | undefined;
   placeholder?: string;
+  context?: ScriptEditorContext;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
   const callback = useRef(onChange);
   const configuration = useRef(new Compartment());
+  const assistance = useRef(new Compartment());
+  const completion = useMemo(
+    () => (context ? createScriptCompletionSource(context) : null),
+    [context?.composition, context?.mode, context?.layer],
+  );
   useLayoutEffect(() => {
     callback.current = onChange;
   });
@@ -53,7 +69,9 @@ export function JavaScriptEditor({
           indentOnInput(),
           indentUnit.of('  '),
           configuration.current.of([]),
+          assistance.current.of([]),
           keymap.of([
+            ...completionKeymap,
             {
               key: 'Mod-z',
               run: () => {
@@ -94,6 +112,44 @@ export function JavaScriptEditor({
       view.destroy();
     };
   }, []);
+
+  useLayoutEffect(() => {
+    editor.current!.dispatch({
+      effects: assistance.current.reconfigure([
+        autocompletion({
+          override: completion ? [completion, localCompletionSource] : [localCompletionSource],
+        }),
+        ...(context
+          ? [
+              linter((view) => {
+                const source = view.state.doc.toString();
+                const validate =
+                  context.mode === 'module'
+                    ? scriptModuleSyntaxError
+                    : context.mode === 'expression'
+                      ? expressionSyntaxError
+                      : compositionScriptSyntaxError;
+                const message = validate(source);
+                if (!message) return [];
+                let from = 0,
+                  to = Math.min(1, source.length);
+                // Use parser positions when available; host-engine validation remains authoritative.
+                syntaxTree(view.state).iterate({
+                  enter(node) {
+                    if (node.type.isError) {
+                      from = node.from;
+                      to = Math.min(source.length, Math.max(node.to, node.from + 1));
+                      return false;
+                    }
+                  },
+                });
+                return [{ from, to, severity: 'error' as const, message }];
+              }),
+            ]
+          : []),
+      ]),
+    });
+  }, [completion, context?.mode]);
 
   useLayoutEffect(() => {
     const view = editor.current!;

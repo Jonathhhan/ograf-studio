@@ -3,6 +3,10 @@
 Property expressions keep their six numeric transform fields. Composition scripts can read
 and assign the rendered properties below using `layer('Name')` or `layerById('id')`.
 The Scripts tab's **Composition & modules → Script properties** list follows the selected layer.
+The shared property catalog drives this list, editor completion, writable element members and
+their type/enum validation. The reference shows read-only members explicitly; a read-only
+`element` reference still permits writes to its supported properties. Nested paint and effect
+structures retain their specialized validation.
 
 ```js
 const title = layer('Title');
