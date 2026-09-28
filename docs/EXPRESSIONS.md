@@ -10,6 +10,8 @@ the checkbox itself is activated; clicking the property name does not toggle it.
 Press **Ctrl+Space** for completion. Expressions and composition scripts suggest layer names/IDs,
 data fields, API members and statically declared helper exports. Direct layer references and
 unambiguous top-level `const title = layer('Title')` aliases provide type-specific members.
+Suggestions also cover the six names inside `property("...")`, its `valueAtTime` member, and
+`left`, `top`, `width`, `height` after direct `sourceRectAtTime(...)` calls with simple arguments.
 Suggestions show types, read-only access and enum choices. Helper modules retain ordinary local
 JavaScript completion; scene objects must be passed as arguments. Completion never executes
 module code and is not a full JavaScript type checker (dynamic exports and arbitrary aliasing

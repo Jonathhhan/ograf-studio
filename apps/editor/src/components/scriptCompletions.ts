@@ -2,6 +2,7 @@ import type { Completion, CompletionContext, CompletionResult } from '@codemirro
 import { syntaxTree } from '@codemirror/language';
 import { javascriptLanguage } from '@codemirror/lang-javascript';
 import {
+  EXPRESSION_PROPERTIES,
   SCRIPT_ELEMENT_CATALOG,
   SCRIPT_EFFECT_CATALOG,
   scriptLayerPropertyCatalog,
@@ -86,14 +87,20 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
       /* Incomplete filenames remain editable, but are not executable namespaces. */
     }
   }
+  // Resolve names once per composition snapshot instead of scanning all layers per keystroke.
+  const named = new Map<string, Layer | undefined>();
+  const identified = new Map<string, Layer>();
+  for (const layer of config.composition.layers) {
+    for (const quote of ['"', "'"]) {
+      const name = quoted(layer.name, quote);
+      named.set(name, named.has(name) ? undefined : layer);
+      identified.set(quoted(layer.id, quote), layer);
+    }
+  }
   const resolveLayer = (source: string): Layer | undefined => {
     const call = /^(layer|layerById)\(\s*([\s\S]*?)\s*\)$/.exec(source);
     if (!call) return;
-    const candidates = config.composition.layers.filter((layer) => {
-      const value = call[1] === 'layer' ? layer.name : layer.id;
-      return call[2] === quoted(value, '"') || call[2] === quoted(value, "'");
-    });
-    return candidates.length === 1 ? candidates[0] : undefined;
+    return (call[1] === 'layer' ? named : identified).get(call[2]!);
   };
   return (context: CompletionContext): CompletionResult | null => {
     if (config.mode === 'module') return null; // Helpers receive values explicitly; no injected scene globals.
@@ -108,38 +115,7 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
         }
       },
     });
-    const node = tree.resolveInner(context.pos, -1);
-    if (/Comment/.test(node.name)) return null;
-    const nameMatch = /\b(layer|layerById)\(\s*(["'])([^"']*)$/.exec(prefix);
-    if (nameMatch) {
-      if (bindings.has(nameMatch[1]!)) return null;
-      const quote = nameMatch[2]!;
-      const byId = nameMatch[1] === 'layerById';
-      const next = context.state.sliceDoc(context.pos, context.pos + 1);
-      return {
-        from: context.pos - nameMatch[3]!.length,
-        options: config.composition.layers
-          .filter(
-            (layer, _, layers) =>
-              byId || layers.filter((other) => other.name === layer.name).length === 1,
-          )
-          .map((layer) => ({
-            label: byId ? layer.id : layer.name,
-            detail: layer.element.type,
-            apply:
-              quoted(byId ? layer.id : layer.name, quote).slice(1, -1) +
-              (next === quote ? '' : quote),
-          })),
-      };
-    }
-    if (/String|Template/.test(node.name)) return null;
-    const member = new RegExp(
-      `(${callPattern}|[A-Za-z_$][\\w$]*)((?:\\.[A-Za-z_$][\\w$]*)*)\\.([\\w$]*)$`,
-    ).exec(prefix);
-    if (member) {
-      const base = member[1]!,
-        path = member[2]!.split('.').filter(Boolean);
-      const from = context.pos - member[3]!.length;
+    const referenceLayer = (base: string): Layer | undefined => {
       let layer =
         base === 'thisLayer' && config.mode === 'expression' ? config.layer : resolveLayer(base);
       if (bindings.has(base.split('(')[0]!)) layer = undefined;
@@ -160,6 +136,105 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
           if (!bindings.has(call.split('(')[0]!.trim())) layer = resolveLayer(call);
         }
       }
+      return layer;
+    };
+    const node = tree.resolveInner(context.pos, -1);
+    if (/Comment/.test(node.name)) return null;
+    const nameMatch = /\b(layer|layerById)\(\s*(["'])([^"']*)$/.exec(prefix);
+    if (nameMatch) {
+      if (bindings.has(nameMatch[1]!)) return null;
+      const quote = nameMatch[2]!;
+      const byId = nameMatch[1] === 'layerById';
+      const next = context.state.sliceDoc(context.pos, context.pos + 1);
+      return {
+        from: context.pos - nameMatch[3]!.length,
+        options: config.composition.layers
+          .filter((layer) => byId || named.get(quoted(layer.name, '"')) === layer)
+          .map((layer) => ({
+            label: byId ? layer.id : layer.name,
+            detail: layer.element.type,
+            apply:
+              quoted(byId ? layer.id : layer.name, quote).slice(1, -1) +
+              (next === quote ? '' : quote),
+          })),
+      };
+    }
+    const referencePattern = `(${callPattern}|[A-Za-z_$][\\w$]*)`;
+    const propertyName = new RegExp(`${referencePattern}\\.property\\(\\s*(["'])([^"']*)$`).exec(
+      prefix,
+    );
+    if (propertyName) {
+      if (!referenceLayer(propertyName[1]!)) return null;
+      const quote = propertyName[2]!;
+      const next = context.state.sliceDoc(context.pos, context.pos + 1);
+      return {
+        from: context.pos - propertyName[3]!.length,
+        options: EXPRESSION_PROPERTIES.map((label) => ({
+          label,
+          type: 'property',
+          detail: 'number - authored time sampling',
+          apply: label + (next === quote ? '' : quote),
+        })),
+      };
+    }
+    if (/String|Template/.test(node.name)) return null;
+    const sampledProperty = new RegExp(
+      `${referencePattern}\\.property\\(\\s*(${stringPattern})\\s*\\)\\.([\\w$]*)$`,
+    ).exec(prefix);
+    if (sampledProperty) {
+      if (
+        !referenceLayer(sampledProperty[1]!) ||
+        !EXPRESSION_PROPERTIES.some(
+          (name) =>
+            sampledProperty[2] === quoted(name, '"') || sampledProperty[2] === quoted(name, "'"),
+        )
+      )
+        return null;
+      return {
+        from: context.pos - sampledProperty[3]!.length,
+        validFor: /^[\w$]*$/,
+        options: properties({
+          name: { type: 'string', readOnly: true },
+          value: { type: 'number', readOnly: true },
+          valueAtTime: {
+            type: 'function',
+            readOnly: true,
+            description:
+              'valueAtTime(seconds): authored animation before expressions and composition scripts. Does not evaluate scripts.',
+          },
+        }),
+      };
+    }
+    const sampledBounds = new RegExp(
+      `${referencePattern}\\.sourceRectAtTime\\([^()]*\\)\\.([\\w$]*)$`,
+    ).exec(prefix);
+    if (sampledBounds) {
+      if (!referenceLayer(sampledBounds[1]!)) return null;
+      return {
+        from: context.pos - sampledBounds[2]!.length,
+        validFor: /^[\w$]*$/,
+        options: properties(
+          Object.fromEntries(
+            ['left', 'top', 'width', 'height'].map((name) => [
+              name,
+              {
+                type: 'number' as const,
+                readOnly: true,
+                description: 'Local source pixels before expressions and composition scripts.',
+              },
+            ]),
+          ),
+        ),
+      };
+    }
+    const member = new RegExp(
+      `(${callPattern}|[A-Za-z_$][\\w$]*)((?:\\.[A-Za-z_$][\\w$]*)*)\\.([\\w$]*)$`,
+    ).exec(prefix);
+    if (member) {
+      const base = member[1]!,
+        path = member[2]!.split('.').filter(Boolean);
+      const from = context.pos - member[3]!.length;
+      const layer = referenceLayer(base);
       if (!layer && bindings.has(base.split('(')[0]!)) return null;
       let options: Completion[] | undefined;
       if (layer) {
