@@ -53,6 +53,46 @@ describe('project JavaScript completion', () => {
     expect(labels('layer("Title").element.')).toContain('fontSize');
     expect(labels('layer("Title").effects.')).toContain('dropShadowEnabled');
   });
+  it('completes time-sampled property names and reference members', () => {
+    expect(labels('layer("Title").property("')).toEqual([
+      'x',
+      'y',
+      'width',
+      'height',
+      'rotation',
+      'opacity',
+    ]);
+    expect(labels('layer("Title").property("x").')).toEqual(['name', 'value', 'valueAtTime']);
+    expect(labels('const title = layer("Title"); title.property("x").')).toContain('valueAtTime');
+    const config = { ...fixture(), mode: 'expression' as const };
+    expect(labels('thisLayer.property("x").', config)).toContain('valueAtTime');
+    expect(
+      labels(`layerById(${JSON.stringify(config.layer.id)}).property("x").`, config),
+    ).toContain('valueAtTime');
+    expect(complete('layer("Title").property("x").val')?.from).toBe(
+      'layer("Title").property("x").'.length,
+    );
+  });
+  it('completes source bounds without evaluating content', () => {
+    expect(labels('layer("Title").sourceRectAtTime(time - 0.2, true).')).toEqual([
+      'left',
+      'top',
+      'width',
+      'height',
+    ]);
+    expect(labels('const title = layer("Title"); title.sourceRectAtTime().')).toContain('width');
+    const result = complete('layer("Title").sourceRectAtTime().');
+    expect(result?.options.every((entry) => entry.detail?.includes('read-only'))).toBe(true);
+  });
+  it('does not complete unsupported sampling properties or shadowed references', () => {
+    expect(labels('layer("Title").property("fontSize").')).not.toContain('valueAtTime');
+    expect(labels('layer("Missing").sourceRectAtTime().')).not.toContain('left');
+    expect(labels('function test(layer) { layer("Title").property("')).toEqual([]);
+    expect(
+      labels('const title = layer("Title"); function test(title) { title.sourceRectAtTime().'),
+    ).not.toContain('left');
+    expect(labels('// layer("Title").property("')).toEqual([]);
+  });
   it('keeps expressions read-only and limited to transform access', () => {
     const config = { ...fixture(), mode: 'expression' as const };
     expect(labels('thisLayer.', config)).toContain('sourceRectAtTime');
