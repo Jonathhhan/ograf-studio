@@ -31,6 +31,7 @@ import type {
   Project,
   PatternLightingLink,
   TilingPatternPatch,
+  MediaCue,
 } from '@ograf-editor/scene-model';
 import type { ProjectValidationResult } from '@ograf-editor/validation';
 
@@ -44,7 +45,8 @@ export type AuthoringOperation =
   | {
       type: 'add_effect';
       compositionId?: string;
-      layerId: string;
+      layerId?: string;
+      groupId?: string;
       effectType: import('@ograf-editor/scene-model').EffectType;
       patch?: import('@ograf-editor/scene-model').EffectPatch;
       index?: number;
@@ -53,21 +55,35 @@ export type AuthoringOperation =
   | {
       type: 'update_effect';
       compositionId?: string;
-      layerId: string;
+      layerId?: string;
+      groupId?: string;
       effectId: string;
       patch: import('@ograf-editor/scene-model').EffectPatch;
       scope?: 'authored' | 'frame';
       frame?: number;
     }
-  | { type: 'remove_effect'; compositionId?: string; layerId: string; effectId: string }
+  | {
+      type: 'remove_effect';
+      compositionId?: string;
+      layerId?: string;
+      groupId?: string;
+      effectId: string;
+    }
   | {
       type: 'duplicate_effect';
       compositionId?: string;
-      layerId: string;
+      layerId?: string;
+      groupId?: string;
       effectId: string;
       id?: string;
     }
-  | { type: 'reorder_effects'; compositionId?: string; layerId: string; effectIds: string[] }
+  | {
+      type: 'reorder_effects';
+      compositionId?: string;
+      layerId?: string;
+      groupId?: string;
+      effectIds: string[];
+    }
   | {
       type: 'set_tiling_pattern';
       compositionId?: string;
@@ -97,6 +113,7 @@ export type AuthoringOperation =
       height?: number;
       frameRate?: number;
       updateTransitionFrames?: number;
+      updateInterruption?: 'queue' | 'replace';
       backgroundColor?: string;
     }
   | {
@@ -158,6 +175,12 @@ export type AuthoringOperation =
       frame: number;
     }
   | { type: 'remove_lifecycle_step'; compositionId?: string; keyframeId: string }
+  | {
+      type: 'retime_animation_phase';
+      compositionId?: string;
+      phase: 'in' | 'on-air' | 'out' | 'entire';
+      targetFrames: number;
+    }
   | {
       type: 'add_canvas_guide';
       compositionId?: string;
@@ -273,6 +296,22 @@ export type AuthoringOperation =
       force?: boolean;
     }
   | {
+      type: 'add_media_cue';
+      compositionId?: string;
+      cue: Omit<MediaCue, 'id'> & { id?: string };
+    }
+  | {
+      type: 'update_media_cue';
+      compositionId?: string;
+      cueId: string;
+      patch: Partial<Omit<MediaCue, 'id'>>;
+    }
+  | {
+      type: 'remove_media_cue';
+      compositionId?: string;
+      cueId: string;
+    }
+  | {
       type: 'add_layer';
       compositionId?: string;
       /** Internally preallocated so later operations in the same atomic batch can resolve it. */
@@ -367,6 +406,15 @@ export type AuthoringOperation =
       groupId?: string | null;
       parentId?: string | null;
       constraints?: Partial<LayerConstraints>;
+      autoLayout?: Partial<import('@ograf-editor/scene-model').LayerAutoLayout>;
+      updateTransition?: Partial<import('@ograf-editor/scene-model').LayerUpdateTransition>;
+      motionPath?: import('@ograf-editor/scene-model').LayerMotionPath | null;
+    }
+  | {
+      type: 'set_layer_visual_rules';
+      compositionId?: string;
+      layerId: string;
+      rules: import('@ograf-editor/scene-model').LayerVisualRule[];
     }
   | {
       type: 'update_element';
@@ -552,6 +600,11 @@ export type AuthoringOperation =
       offsetPerItem: { x: number; y: number };
       capacity?: number;
       overflow?: 'truncate';
+      itemKeyPath?: string[];
+      sortPath?: string[];
+      sortDirection?: 'none' | 'ascending' | 'descending';
+      pageSize?: number;
+      page?: number;
     }
   | {
       type: 'update_runtime_collection';
@@ -563,6 +616,11 @@ export type AuthoringOperation =
       offsetPerItem?: { x: number; y: number };
       capacity?: number;
       overflow?: 'truncate';
+      itemKeyPath?: string[];
+      sortPath?: string[];
+      sortDirection?: 'none' | 'ascending' | 'descending';
+      pageSize?: number;
+      page?: number;
     }
   | {
       type: 'remove_runtime_collection';
@@ -617,7 +675,8 @@ export interface AuthoringChangeSummary {
       | 'component'
       | 'loop'
       | 'design-token'
-      | 'runtime-collection';
+      | 'runtime-collection'
+      | 'media-cue';
     id: string;
   }>;
   clearedBindings: Array<{ layerId: string; layerName: string; fieldId: string }>;

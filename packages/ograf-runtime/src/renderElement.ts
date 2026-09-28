@@ -3,6 +3,7 @@ import {
   getPaintAtFrame,
   applyElementDataValue,
   parseEffectProperty,
+  pathStretchSlices,
   withEffectParameter,
   getTrackValueAtFrame,
   cornerRadiiToCss,
@@ -18,6 +19,8 @@ import {
 } from '@ograf-editor/scene-model';
 import { valueAtSourcePath } from '@ograf-editor/scene-model';
 import type { CompiledLayer } from '@ograf-editor/ograf-types';
+import { resolveVisualRuleElement } from './runtimeVisualRules';
+import { runtimeCollectionItemSelection } from './runtimeCollections';
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light_canvas.js';
 import { mountPattern, applyPatternPaint } from './patternRendering';
 import { disposeLayerEffects, waitForLayerEffectsReady } from './effectCompositing';
@@ -49,6 +52,7 @@ import {
   waitForMediaPaintContentReady,
 } from './mediaPaintRendering';
 import { hasElementMediaPaint } from '@ograf-editor/scene-model';
+import { resolveMediaTimelinePosition } from './mediaTimeline';
 
 interface MountedTextFit {
   observer?: ResizeObserver;
@@ -417,6 +421,9 @@ export function findFittedFontSize(options: {
 
 /** Disconnects text-fitting observation before a renderer discards a content host. */
 export function disposeElementContent(container: HTMLElement): void {
+  if (typeof container.querySelectorAll === 'function') {
+    for (const audio of container.querySelectorAll('audio')) audio.pause();
+  }
   disposeLayerEffects(container);
   forgetShaderAnimationBase(container);
   disposeShaderPaintContent(container);
@@ -610,6 +617,8 @@ export function renderElementContent(
         content.style.textAlign = element.textAlign;
         content.style.letterSpacing = `${element.letterSpacing}px`;
         content.style.textTransform = element.textTransform;
+        content.dir = element.direction;
+        if (element.language.trim()) content.lang = element.language.trim();
         const squeeze = element.autoFit === 'squeeze';
         content.style.display = squeeze ? 'block' : 'flex';
         content.style.flexDirection = squeeze ? '' : 'column';
@@ -659,7 +668,17 @@ export function renderElementContent(
             overflow: 'visible',
           });
         }
-        content.textContent = element.content;
+        if (element.runs.length > 0) {
+          for (const run of element.runs) {
+            const span = document.createElement('span');
+            span.textContent = run.text;
+            if (run.color) span.style.color = run.color;
+            if (run.fontWeight !== undefined) span.style.fontWeight = String(run.fontWeight);
+            if (run.fontStyle) span.style.fontStyle = run.fontStyle;
+            if (run.fontFamily) span.style.fontFamily = run.fontFamily;
+            content.appendChild(span);
+          }
+        } else content.textContent = element.content;
         container.appendChild(content);
         if (
           element.autoFit === 'shrink-to-fit' ||
@@ -788,7 +807,55 @@ export function renderElementContent(
         }
         break;
       }
+      case 'audio': {
+        if (element.src) {
+          const audio = document.createElement('audio');
+          audio.src = element.src;
+          audio.preload = 'auto';
+          audio.volume = element.volume;
+          audio.loop = false;
+          audio.dataset.ografAudio = 'true';
+          audio.style.display = 'none';
+          container.appendChild(audio);
+        }
+        break;
+      }
       case 'path': {
+        if (element.stretchInsets && typeof element.fill === 'string') {
+          const slices = pathStretchSlices(element);
+          const root = document.createElement('div');
+          applyContentBaseStyle(root);
+          Object.assign(root.style, {
+            display: 'grid',
+            gridTemplateColumns: `${element.stretchInsets.left}px minmax(0, 1fr) ${element.stretchInsets.right}px`,
+            gridTemplateRows: `${element.stretchInsets.top}px minmax(0, 1fr) ${element.stretchInsets.bottom}px`,
+            overflow: element.overflow === 'visible' ? 'visible' : 'hidden',
+          });
+          const SVG_NS = 'http://www.w3.org/2000/svg';
+          for (const slice of slices) {
+            const svg = document.createElementNS(SVG_NS, 'svg');
+            svg.setAttribute('viewBox', `${slice.x} ${slice.y} ${slice.width} ${slice.height}`);
+            svg.setAttribute('preserveAspectRatio', 'none');
+            Object.assign(svg.style, {
+              width: '100%',
+              height: '100%',
+              gridColumn: String(slice.column),
+              gridRow: String(slice.row),
+              overflow: 'hidden',
+            });
+            const path = document.createElementNS(SVG_NS, 'path');
+            path.setAttribute('d', element.d);
+            path.setAttribute('fill', element.fill);
+            path.setAttribute('fill-rule', element.fillRule ?? 'nonzero');
+            path.setAttribute('stroke', element.strokeWidth > 0 ? element.strokeColor : 'none');
+            path.setAttribute('stroke-width', String(element.strokeWidth));
+            path.setAttribute('vector-effect', 'non-scaling-stroke');
+            svg.appendChild(path);
+            root.appendChild(svg);
+          }
+          container.appendChild(root);
+          break;
+        }
         // Expand only opted-in, point-edited paths. The layer's authored transform stays unchanged.
         let bounds = { x: 0, y: 0, width: element.viewBoxWidth, height: element.viewBoxHeight };
         if (element.overflow === 'visible') {
@@ -1053,6 +1120,27 @@ export function renderAnimatedElementAtTime(
       });
     return;
   }
+  if (element.type === 'audio') {
+    const audio = container.querySelector<HTMLAudioElement>('audio[data-ograf-audio="true"]');
+    if (!audio) return;
+    audio.volume = element.volume;
+    const position = resolveMediaTimelinePosition(elapsedMs, {
+      timelineStartMs: element.timelineStartMs,
+      trimStartMs: element.trimStartMs,
+      trimEndMs: element.trimEndMs,
+      loop: element.loop,
+      durationMs: Number.isFinite(audio.duration) ? audio.duration * 1000 : null,
+    });
+    if (!position.active) {
+      audio.pause();
+      return;
+    }
+    const seconds = position.positionMs / 1000;
+    if (audio.readyState >= 1 && Math.abs(audio.currentTime - seconds) > 0.08)
+      audio.currentTime = seconds;
+    void audio.play().catch(() => undefined);
+    return;
+  }
   if (element.type === 'lottie' && element.animationData) {
     let mounted = lottieAnimations.get(container);
     if (!mounted) return;
@@ -1088,19 +1176,20 @@ export function renderAnimatedElementAtTime(
  */
 export function resolveBoundElement(layer: CompiledLayer, data: Record<string, unknown>): Element {
   const bindings = layer.bindings ?? (layer.binding ? [layer.binding] : []);
-  return bindings.reduce<Element>((element, binding) => {
+  const collectionIndex = layer.collectionItem
+    ? runtimeCollectionItemSelection(layer, data)?.index
+    : undefined;
+  const bound = bindings.reduce<Element>((element, binding) => {
     const root = data[binding.dataKey];
+    const itemIndex = layer.collectionItem ? collectionIndex : binding.itemIndex;
     const itemValue =
-      binding.itemIndex === undefined
-        ? root
-        : Array.isArray(root)
-          ? root[binding.itemIndex]
-          : undefined;
+      itemIndex === undefined ? root : Array.isArray(root) ? root[itemIndex] : undefined;
     const value = valueAtSourcePath(itemValue, binding.sourcePath);
     if (value === undefined) return element;
     const mappedValue = binding.valueMap?.[String(value)] ?? value;
     return applyElementDataValue(element, binding.targetProperty, mappedValue);
   }, layer.element);
+  return resolveVisualRuleElement(layer, data, bound);
 }
 
 export function resolveBoundEffects(

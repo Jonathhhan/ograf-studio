@@ -1,7 +1,15 @@
 .preview-export-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
+  margin: 0 -6px -4px;
+}
+
+.preview-section-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
 }
 
 .preview-export-heading {

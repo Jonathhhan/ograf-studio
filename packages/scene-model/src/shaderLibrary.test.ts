@@ -40,7 +40,7 @@ describe('project shader library', () => {
     project.shaders = [shader];
     const snapshot = JSON.stringify(project);
     const migrated = migrateProject(JSON.parse(snapshot));
-    expect(migrated.documentVersion).toBe(34);
+    expect(migrated.documentVersion).toBe(36);
     expect(migrated.shaders).toEqual(project.shaders);
     expect(JSON.stringify(project)).toBe(snapshot);
     migrated.shaders[0]!.paint.parameters.waveFrequency = 9;

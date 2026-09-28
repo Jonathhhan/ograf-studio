@@ -35,7 +35,15 @@ function compileActionDurations(descriptor: CompiledGraphicDescriptor): Manifest
       duration: 0,
       ...(steps.length > 0 ? { steps } : {}),
     },
-    { type: 'updateAction', duration: msFor(descriptor.updateTransitionFrames ?? 0) },
+    {
+      type: 'updateAction',
+      duration: msFor(
+        Math.max(
+          descriptor.updateTransitionFrames ?? 0,
+          ...descriptor.layers.map((layer) => layer.updateTransition?.durationFrames ?? 0),
+        ),
+      ),
+    },
     {
       type: 'stopAction',
       duration: msFor(transitionInto(endKeyframeId)?.durationFrames ?? 0),
@@ -43,8 +51,11 @@ function compileActionDurations(descriptor: CompiledGraphicDescriptor): Manifest
   ];
 
   for (const action of descriptor.customActions) {
-    // Custom actions are declarative acknowledgements today, with no animation of their own.
-    durations.push({ type: 'customAction', customActionId: action.id, duration: 0 });
+    durations.push({
+      type: 'customAction',
+      customActionId: action.id,
+      duration: msFor(action.durationFrames),
+    });
   }
 
   return durations;
@@ -66,19 +77,29 @@ export function assembleManifest(
     const fill = 'fill' in layer.element ? layer.element.fill : undefined;
     return isMediaPaint(fill) ? [fill] : [];
   });
-  const needsLiveMedia = mediaPaints.some((paint) => paint.source.kind === 'live');
-  const needsPublicInternet = compiledLayers.some((layer) => {
-    const element = layer.element;
-    if (element.type === 'image') return /^https?:\/\//i.test(element.src ?? '');
-    if (element.type === 'image-sequence')
-      return element.frames.some((frame) => /^https?:\/\//i.test(frame));
-    const fill = 'fill' in element ? element.fill : undefined;
-    if (isMediaPaint(fill)) {
-      const source = fill.source.kind === 'clip' ? fill.source.src : fill.source.fallback;
-      return /^https?:\/\//i.test(source ?? '');
-    }
-    return false;
-  });
+  const cueSources = (descriptor.mediaCues ?? []).flatMap((cue) => cue.sources);
+  const needsLiveMedia =
+    mediaPaints.some((paint) => paint.source.kind === 'live') ||
+    cueSources.some((source) => source.kind === 'live');
+  const needsPublicInternet =
+    cueSources.some((source) =>
+      source.kind === 'clip'
+        ? /^https?:\/\//i.test(source.src)
+        : /^https?:\/\//i.test(source.fallback ?? ''),
+    ) ||
+    compiledLayers.some((layer) => {
+      const element = layer.element;
+      if (element.type === 'image') return /^https?:\/\//i.test(element.src ?? '');
+      if (element.type === 'audio') return /^https?:\/\//i.test(element.src ?? '');
+      if (element.type === 'image-sequence')
+        return element.frames.some((frame) => /^https?:\/\//i.test(frame));
+      const fill = 'fill' in element ? element.fill : undefined;
+      if (isMediaPaint(fill)) {
+        const source = fill.source.kind === 'clip' ? fill.source.src : fill.source.fallback;
+        return /^https?:\/\//i.test(source ?? '');
+      }
+      return false;
+    });
 
   const manifest: OGrafManifest = {
     $schema: OGRAF_MANIFEST_SCHEMA_URL,

@@ -12,6 +12,19 @@
   grid-template-columns: minmax(0, 1fr) clamp(260px, 22vw, 330px);
 }
 
+.timeline-panel.has-animation-graph {
+  grid-template-rows: 26px minmax(64px, 1fr) minmax(120px, 45%);
+}
+
+.timeline-panel.has-animation-graph .animation-graph-editor {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.timeline-panel.has-animation-graph .timeline-key-editor {
+  grid-row: 1 / 4;
+}
+
 .timeline-panel:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
@@ -32,11 +45,45 @@
   grid-row: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   min-height: 26px;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.timeline-toolbar-section {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  box-sizing: border-box;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--bg-panel-raised) 82%, var(--bg-canvas));
+}
+
+.timeline-toolbar-section-label {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  line-height: 1;
+  text-transform: uppercase;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.timeline-keying-section,
+.timeline-retime-section {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+}
+
+.timeline-playback-options {
+  gap: 7px;
 }
 
 .timeline-toolbar button,
@@ -173,8 +220,32 @@
 .timeline-edit-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
   flex: none;
+}
+
+.timeline-retime-controls {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.timeline-retime-controls select,
+.timeline-retime-controls input,
+.timeline-retime-controls button {
+  height: var(--ui-control-height);
+  min-width: 0;
+  padding: 1px 5px;
+}
+
+.timeline-retime-controls input {
+  width: 54px;
+}
+
+.timeline-retime-unit {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
 }
 
 .timeline-zoom-controls {
@@ -193,7 +264,7 @@
 }
 
 .timeline-zoom-controls input[type='range'] {
-  width: 88px;
+  width: 72px;
   accent-color: var(--accent);
 }
 
@@ -296,24 +367,28 @@
 .timeline-key-editor {
   grid-column: 2;
   grid-row: 1 / 3;
+  position: relative;
+  display: block;
   min-width: 0;
   min-height: 0;
-  padding: 10px;
-  overflow: auto;
+  max-height: 100%;
+  padding: 0;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--bg-panel-raised) 78%, var(--bg-canvas));
 }
 
-.timeline-key-editor h3 {
-  margin: 0 0 7px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-heading);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+.timeline-key-editor[open] > .collapsible-section-content {
+  position: absolute;
+  inset: var(--ui-header-height) 0 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  padding: 10px 10px 14px;
 }
 
 .timeline-key-editor .timeline-layer-key-controls {
@@ -783,6 +858,43 @@
 
 .timeline-keyframe-marker.start {
   cursor: default;
+}
+
+.timeline-sound-event-marker {
+  position: absolute;
+  z-index: 8;
+  left: 0;
+  bottom: calc(2px + var(--sound-event-stack, 0) * 3px);
+  width: 18px;
+  height: 16px;
+  padding: 0;
+  transform: translateX(-9px);
+  border: 1px solid color-mix(in srgb, #c69cff 70%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #6f42a6 78%, var(--bg-canvas));
+  color: white;
+  font-size: 9px;
+  line-height: 1;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.timeline-sound-event-marker:hover,
+.timeline-sound-event-marker.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+
+.timeline-sound-event-marker small {
+  position: absolute;
+  right: -5px;
+  top: -5px;
+  min-width: 10px;
+  padding: 1px 2px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #111;
+  font-size: 7px;
 }
 
 .timeline-keyframe-marker-flag {

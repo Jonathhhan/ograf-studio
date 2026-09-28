@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { current } from 'immer';
 import { immer } from 'zustand/middleware/immer';
 import {
   applyPathEdit,
@@ -45,6 +46,8 @@ import {
   createLayerPropertyKeyframe,
   createLayerLoopClip,
   createLayerOfKind,
+  createMediaCue,
+  createLayerVisualRule,
   createProject,
   createShaderPaint,
   createShaderResource as createStoredShaderResource,
@@ -96,6 +99,7 @@ import {
   EFFECT_ANIMATION_PROPERTIES,
   type AnimatableLayerProperty,
   type Asset,
+  type AudioElement,
   type BlendMode,
   type DesignToken,
   type DesignTokenTargetProperty,
@@ -112,6 +116,7 @@ import {
   type ImageElement,
   type ImageSequenceElement,
   type LottieElement,
+  type MediaCue,
   type ShaderElement,
   type ShaderPaint,
   type ShaderPaintSlot,
@@ -125,6 +130,13 @@ import {
   type LayerSemantics,
   type LayerTransform,
   type LayerConstraints,
+  type LayerAutoLayout,
+  type LayerVisualRule,
+  type DataConnectionDefinition,
+  DEFAULT_LAYER_AUTO_LAYOUT,
+  retimeAnimationPhase as retimeAnimationPhaseModel,
+  type AnimationRetimePhase,
+  type AnimationRetimeResult,
   type NewLayerKind,
   type MaterializedLowerThird,
   type MaterializedBroadcastRecipe,
@@ -167,6 +179,7 @@ export type ElementFields = { fill: Paint } & Omit<RectangleElement, 'type' | 'f
   } & Omit<EllipseElement, 'type' | 'fill'> &
   Omit<TextElement, 'type' | 'fill'> &
   Omit<ImageElement, 'type' | 'fill'> &
+  Omit<AudioElement, 'type'> &
   Omit<PathElement, 'type' | 'fill'> &
   Omit<ImageSequenceElement, 'type' | 'fill'> &
   Omit<LottieElement, 'type' | 'fill'> &
@@ -204,7 +217,13 @@ interface ProjectActions {
     patch: Partial<
       Pick<
         Composition,
-        'name' | 'width' | 'height' | 'frameRate' | 'updateTransitionFrames' | 'backgroundColor'
+        | 'name'
+        | 'width'
+        | 'height'
+        | 'frameRate'
+        | 'updateTransitionFrames'
+        | 'updateInterruption'
+        | 'backgroundColor'
       >
     >,
   ) => void;
@@ -212,6 +231,12 @@ interface ProjectActions {
   addCanvasGuide: (axis: 'vertical' | 'horizontal', position?: number) => string;
   updateCanvasGuide: (guideId: string, position: number) => void;
   removeCanvasGuide: (guideId: string) => void;
+
+  addMediaCueFromAsset: (assetId: string) => string;
+  addSoundEventFromAsset: (assetId: string, frame?: number) => string;
+  addLiveMediaCue: () => string;
+  updateMediaCue: (cueId: string, patch: Partial<MediaCue>) => void;
+  removeMediaCue: (cueId: string) => void;
 
   addLayer: (kind: NewLayerKind) => string;
   setTilingPattern: (patch: TilingPatternPatch, patternId?: string) => string;
@@ -337,6 +362,16 @@ interface ProjectActions {
   removeLayerEffect: (layerId: string, effectId: string) => void;
   duplicateLayerEffect: (layerId: string, effectId: string) => void;
   reorderLayerEffects: (layerId: string, effectIds: string[]) => void;
+  addGroupEffect: (layerIds: string[], type: EffectType, patch?: EffectPatch) => void;
+  updateGroupEffect: (
+    layerIds: string[],
+    effectId: string,
+    patch: EffectPatch,
+    frame: number,
+  ) => void;
+  removeGroupEffect: (layerIds: string[], effectId: string) => void;
+  duplicateGroupEffect: (layerIds: string[], effectId: string) => void;
+  reorderGroupEffects: (layerIds: string[], effectIds: string[]) => void;
   renameLayer: (layerId: string, name: string) => void;
   toggleLayerVisibility: (layerId: string) => void;
   toggleLayerGuide: (layerId: string) => void;
@@ -349,6 +384,24 @@ interface ProjectActions {
   setLayerMask: (layerId: string, mask: Layer['mask'], hideSource?: boolean) => void;
   setLayerMaskOnly: (layerId: string, value: boolean) => void;
   setLayerConstraints: (layerId: string, constraints: Partial<LayerConstraints>) => void;
+  setLayerAutoLayout: (layerId: string, layout: Partial<LayerAutoLayout>) => void;
+  setLayerUpdateTransition: (layerId: string, patch: Partial<Layer['updateTransition']>) => void;
+  setLayerMotionPath: (layerId: string, link: Layer['motionPath']) => void;
+  addLayerVisualRule: (layerId: string) => string | null;
+  updateLayerVisualRule: (
+    layerId: string,
+    ruleId: string,
+    patch: Partial<Omit<LayerVisualRule, 'id'>>,
+  ) => void;
+  moveLayerVisualRule: (layerId: string, ruleId: string, direction: -1 | 1) => void;
+  duplicateLayerVisualRule: (layerId: string, ruleId: string) => string | null;
+  removeLayerVisualRule: (layerId: string, ruleId: string) => void;
+  addDataConnection: () => string;
+  updateDataConnection: (
+    connectionId: string,
+    patch: Partial<Omit<DataConnectionDefinition, 'id'>>,
+  ) => void;
+  removeDataConnection: (connectionId: string) => void;
   setLayerSemantics: (layerId: string, patch: Partial<LayerSemantics>) => void;
   setDesignSystemName: (name: string) => void;
   applyStylePack: (stylePack: StylePackId) => AppliedStylePack;
@@ -379,6 +432,10 @@ interface ProjectActions {
     patch: Partial<{ durationFrames: number; easing: EasingPreset }>,
   ) => void;
   moveLifecycleKeyframe: (keyframeId: string, targetFrame: number) => LifecycleRetimePlan | null;
+  retimeAnimationPhase: (
+    phase: AnimationRetimePhase,
+    targetFrames: number,
+  ) => AnimationRetimeResult;
 
   addDataField: (type: FieldType) => string;
   removeDataField: (fieldId: string) => void;
@@ -414,7 +471,16 @@ interface ProjectActions {
     patch: Partial<
       Pick<
         RuntimeCollectionDefinition,
-        'name' | 'fieldId' | 'prototypeLayerIds' | 'offsetPerItem' | 'capacity'
+        | 'name'
+        | 'fieldId'
+        | 'prototypeLayerIds'
+        | 'offsetPerItem'
+        | 'capacity'
+        | 'itemKeyPath'
+        | 'sortPath'
+        | 'sortDirection'
+        | 'pageSize'
+        | 'page'
       >
     >,
   ) => void;
@@ -474,6 +540,45 @@ export function getActiveComposition(project: Project, activeCompositionId: stri
     throw new Error(`Active composition not found: ${activeCompositionId}`);
   }
   return composition;
+}
+
+function updateEffectAtFrame(
+  composition: Composition,
+  layer: Layer,
+  effectId: string,
+  patch: EffectPatch,
+  frame: number,
+): void {
+  if (!useTimelineStore.getState().autoKeyframe) {
+    const existingEffect = getEffectStack(layer.effects).find((effect) => effect.id === effectId);
+    if (!existingEffect) throw new Error(`Effect not found: ${effectId}`);
+    const before = Object.fromEntries(
+      Object.entries(patch.params ?? {}).flatMap(([param, value]) => {
+        if (typeof value !== 'number') return [];
+        const property = effectProperty(existingEffect, param) as AnimatableLayerProperty;
+        return [[param, getLayerPropertyValueAtFrame(layer, property, frame)]];
+      }),
+    );
+    const effect = updateEffect(layer, effectId, patch);
+    for (const [param, value] of Object.entries(effectParams(effect, layer.effects)))
+      if (typeof value === 'number' && before[param] !== undefined)
+        offsetExistingPropertyKeys(
+          layer,
+          effectProperty(effect, param) as AnimatableLayerProperty,
+          value - before[param]!,
+        );
+    return;
+  }
+  const effect = updateEffect(layer, effectId, patch),
+    boundedFrame = Math.max(0, Math.min(getTotalFrames(composition), Math.round(frame)));
+  for (const [param, value] of Object.entries(patch.params ?? {}))
+    if (typeof value === 'number')
+      upsertPropertyKeyframe(
+        layer,
+        effectProperty(effect, param) as AnimatableLayerProperty,
+        boundedFrame,
+        value,
+      );
 }
 
 function getDefaultAuthoringKeyframeId(composition: Composition): string {
@@ -806,7 +911,10 @@ function appendLayerCopies(
       ...new Set(
         sources
           .filter((layer) => linkedInstanceKey(layer) === instanceKey)
-          .flatMap((layer) => layer.bindings.map((binding) => binding.fieldId)),
+          .flatMap((layer) => [
+            ...layer.bindings.map((binding) => binding.fieldId),
+            ...(layer.visualRules ?? []).map((rule) => rule.fieldId),
+          ]),
       ),
     ];
     for (const sourceFieldId of boundFieldIds) {
@@ -836,6 +944,13 @@ function appendLayerCopies(
       name,
       groupId: source.groupId ? (groupMap.get(source.groupId) ?? null) : null,
       parentId: source.parentId ? (idMap.get(source.parentId) ?? null) : null,
+      motionPath: source.motionPath
+        ? {
+            ...source.motionPath,
+            sourceLayerId:
+              idMap.get(source.motionPath.sourceLayerId) ?? source.motionPath.sourceLayerId,
+          }
+        : null,
       mask: source.mask
         ? idMap.has(source.mask.sourceLayerId) ||
           composition.layers.some((layer) => layer.id === source.mask!.sourceLayerId)
@@ -856,6 +971,14 @@ function appendLayerCopies(
             ? binding.fieldId
             : undefined);
         return fieldId ? [{ ...structuredClone(binding), fieldId }] : [];
+      }),
+      visualRules: (source.visualRules ?? []).flatMap((rule) => {
+        const fieldId =
+          fieldIds?.get(rule.fieldId) ??
+          (composition.dataFields.some((field) => field.id === rule.fieldId)
+            ? rule.fieldId
+            : undefined);
+        return fieldId ? [{ ...structuredClone(rule), id: createId('visual-rule'), fieldId }] : [];
       }),
       keyframes: source.keyframes.map((keyframe) =>
         createLayerKeyframe(
@@ -945,11 +1068,13 @@ function duplicateObjectLayers(composition: Composition, layerIds: string[]): La
 let projectLoadGeneration = 0;
 
 function projectUsesMediaPaint(project: Project): boolean {
-  return project.compositions.some((composition) =>
-    [
-      ...composition.layers,
-      ...composition.components.flatMap((component) => component.layers),
-    ].some((layer) => hasElementMediaPaint(layer.element)),
+  return project.compositions.some(
+    (composition) =>
+      (composition.mediaCues?.length ?? 0) > 0 ||
+      [
+        ...composition.layers,
+        ...composition.components.flatMap((component) => component.layers),
+      ].some((layer) => hasElementMediaPaint(layer.element) || layer.element.type === 'audio'),
   );
 }
 
@@ -957,6 +1082,31 @@ function enforceMediaRuntimeProfile(project: Project): void {
   if (!projectUsesMediaPaint(project)) return;
   project.supportsRealTime = true;
   project.supportsNonRealTime = false;
+}
+
+async function readPlayableDurationMs(
+  file: File,
+  kind: 'audio' | 'media',
+): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const media = document.createElement(kind === 'audio' ? 'audio' : 'video');
+    const finish = (value?: number) => {
+      window.clearTimeout(timeout);
+      media.removeAttribute('src');
+      media.load();
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    const timeout = window.setTimeout(() => finish(), 8_000);
+    media.preload = 'metadata';
+    media.onloadedmetadata = () =>
+      finish(
+        Number.isFinite(media.duration) && media.duration > 0 ? media.duration * 1000 : undefined,
+      );
+    media.onerror = () => finish();
+    media.src = url;
+  });
 }
 
 export const useProjectStore = create<ProjectStore>()(
@@ -1064,6 +1214,117 @@ export const useProjectStore = create<ProjectStore>()(
           );
         }),
 
+      addMediaCueFromAsset: (assetId) => {
+        let cueId = '';
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const asset = composition.assets.find((candidate) => candidate.id === assetId);
+          if (!asset || (asset.kind !== 'media' && asset.kind !== 'audio')) {
+            throw new Error('Media cues require an imported audio or video asset.');
+          }
+          const sourceId = createId('media-source');
+          const cue = createMediaCue({
+            name: asset.name.replace(/\.[^.]+$/, '') || 'Media Cue',
+            sources: [
+              {
+                id: sourceId,
+                name: asset.name,
+                kind: 'clip',
+                mediaType: asset.kind === 'audio' ? 'audio' : 'video',
+                src: `asset:${asset.id}`,
+              },
+            ],
+            activeSourceId: sourceId,
+            trigger:
+              asset.kind === 'audio'
+                ? { type: 'manual' }
+                : { type: 'lifecycle', keyframeId: state.activeKeyframeId },
+            durationFrames: null,
+          });
+          (composition.mediaCues ??= []).push(cue);
+          cueId = cue.id;
+          enforceMediaRuntimeProfile(state.project);
+        });
+        return cueId;
+      },
+
+      addSoundEventFromAsset: (assetId, frame) => {
+        let cueId = '';
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const asset = composition.assets.find((candidate) => candidate.id === assetId);
+          if (!asset || asset.kind !== 'audio') {
+            throw new Error('Sound Events require an imported audio asset.');
+          }
+          const sourceId = createId('media-source');
+          const startFrame = Math.max(
+            0,
+            Math.min(
+              getTotalFrames(composition),
+              Math.round(frame ?? useTimelineStore.getState().currentFrame),
+            ),
+          );
+          const cue = createMediaCue({
+            name: asset.name.replace(/\.[^.]+$/, '') || 'Sound Event',
+            sources: [
+              {
+                id: sourceId,
+                name: asset.name,
+                kind: 'clip',
+                mediaType: 'audio',
+                src: `asset:${asset.id}`,
+              },
+            ],
+            activeSourceId: sourceId,
+            trigger: { type: 'timeline', startFrame },
+            durationFrames: null,
+            loop: false,
+            muted: false,
+            retrigger: 'restart',
+          });
+          (composition.mediaCues ??= []).push(cue);
+          cueId = cue.id;
+          enforceMediaRuntimeProfile(state.project);
+        });
+        return cueId;
+      },
+
+      addLiveMediaCue: () => {
+        let cueId = '';
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const sourceId = createId('media-source');
+          const cue = createMediaCue({
+            name: 'Live Media',
+            sources: [{ id: sourceId, name: 'Live input', kind: 'live', tag: 'live.input' }],
+            activeSourceId: sourceId,
+            trigger: { type: 'lifecycle', keyframeId: state.activeKeyframeId },
+          });
+          (composition.mediaCues ??= []).push(cue);
+          cueId = cue.id;
+          enforceMediaRuntimeProfile(state.project);
+        });
+        return cueId;
+      },
+
+      updateMediaCue: (cueId, patch) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const cue = (composition.mediaCues ?? []).find((candidate) => candidate.id === cueId);
+          if (!cue) return;
+          Object.assign(cue, structuredClone(patch));
+          if (!cue.sources.some((source) => source.id === cue.activeSourceId)) {
+            cue.activeSourceId = cue.sources[0]?.id ?? null;
+          }
+          enforceMediaRuntimeProfile(state.project);
+        }),
+
+      removeMediaCue: (cueId) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          composition.mediaCues = (composition.mediaCues ?? []).filter((cue) => cue.id !== cueId);
+        }),
+
       addLayer: (kind) => {
         if (kind === 'pattern') {
           let id = '';
@@ -1097,6 +1358,10 @@ export const useProjectStore = create<ProjectStore>()(
           }
           materializeAnimationTracks(layer);
           composition.layers.push(layer);
+          if (kind === 'audio') {
+            state.project.supportsRealTime = true;
+            state.project.supportsNonRealTime = false;
+          }
           syncShaderParameterFields(composition, layer);
         });
         return layer.id;
@@ -1301,6 +1566,7 @@ export const useProjectStore = create<ProjectStore>()(
           syncCompositionShaderParameterFields(composition);
           for (const layer of composition.layers) {
             if (layer.parentId === layerId) layer.parentId = null;
+            if (layer.motionPath?.sourceLayerId === layerId) layer.motionPath = null;
           }
           for (const folder of composition.layout.timelineFolders) {
             folder.layerIds = folder.layerIds.filter((candidate) => candidate !== layerId);
@@ -1854,6 +2120,9 @@ export const useProjectStore = create<ProjectStore>()(
           if (patch.name !== undefined) layer.loop.name = patch.name.trim() || 'Loop';
           if (patch.activation !== undefined)
             layer.loop.activation = structuredClone(patch.activation);
+          if (patch.activation?.type === 'customAction' && patch.repeatCount === undefined) {
+            layer.loop.repeatCount = 1;
+          }
           layer.loop.durationFrames = nextDuration;
           if (patch.phaseOffsetFrames !== undefined) {
             layer.loop.phaseOffsetFrames = Math.round(patch.phaseOffsetFrames);
@@ -1994,8 +2263,10 @@ export const useProjectStore = create<ProjectStore>()(
             layer.element.strokePaint = next;
           } else if (layer.element.type === 'shader') {
             layer.element = next;
-          } else {
+          } else if ('fill' in layer.element) {
             layer.element.fill = next;
+          } else {
+            throw new Error('The selected object cannot use a shader paint.');
           }
           if (component) {
             const scope: Composition = {
@@ -2037,8 +2308,10 @@ export const useProjectStore = create<ProjectStore>()(
             layer.element.type === 'lottie'
           ) {
             delete layer.element.fill;
-          } else {
+          } else if ('fill' in layer.element) {
             layer.element.fill = '#3b3f4a';
+          } else {
+            throw new Error('The selected object cannot use a shader paint.');
           }
           const prefix = shaderParameterTarget('', target.slot);
           for (const tracks of [layer.animationTracks, layer.loop?.tracks]) {
@@ -2230,38 +2503,7 @@ export const useProjectStore = create<ProjectStore>()(
           const composition = getActiveComposition(state.project, state.activeCompositionId),
             layer = composition.layers.find((l) => l.id === layerId);
           if (!layer || layer.isLocked) return;
-          if (!useTimelineStore.getState().autoKeyframe) {
-            const existingEffect = getEffectStack(layer.effects).find(
-              (effect) => effect.id === effectId,
-            );
-            if (!existingEffect) throw new Error(`Effect not found: ${effectId}`);
-            const before = Object.fromEntries(
-              Object.entries(patch.params ?? {}).flatMap(([param, value]) => {
-                if (typeof value !== 'number') return [];
-                const property = effectProperty(existingEffect, param) as AnimatableLayerProperty;
-                return [[param, getLayerPropertyValueAtFrame(layer, property, frame)]];
-              }),
-            );
-            const effect = updateEffect(layer, effectId, patch);
-            for (const [param, value] of Object.entries(effectParams(effect, layer.effects)))
-              if (typeof value === 'number' && before[param] !== undefined)
-                offsetExistingPropertyKeys(
-                  layer,
-                  effectProperty(effect, param) as AnimatableLayerProperty,
-                  value - before[param]!,
-                );
-            return;
-          }
-          const effect = updateEffect(layer, effectId, patch),
-            boundedFrame = Math.max(0, Math.min(getTotalFrames(composition), Math.round(frame)));
-          for (const [param, value] of Object.entries(patch.params ?? {}))
-            if (typeof value === 'number')
-              upsertPropertyKeyframe(
-                layer,
-                effectProperty(effect, param) as AnimatableLayerProperty,
-                boundedFrame,
-                value,
-              );
+          updateEffectAtFrame(composition, layer, effectId, patch, frame);
         }),
       removeLayerEffect: (layerId, effectId) =>
         set((state) => {
@@ -2283,6 +2525,95 @@ export const useProjectStore = create<ProjectStore>()(
             (l) => l.id === layerId,
           );
           if (layer && !layer.isLocked) reorderEffects(layer, effectIds);
+        }),
+      addGroupEffect: (layerIds, type, patch) => {
+        const effectId = createId('fx');
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId),
+            wanted = new Set(layerIds),
+            layers = composition.layers.filter((layer) => wanted.has(layer.id));
+          if (layers.length !== wanted.size || layers.some((layer) => layer.isLocked)) return;
+          for (const layer of layers) addEffect(layer, type, patch, undefined, effectId);
+        });
+      },
+      updateGroupEffect: (layerIds, effectId, patch, frame) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId),
+            wanted = new Set(layerIds),
+            layers = composition.layers.filter((layer) => wanted.has(layer.id));
+          if (
+            layers.length !== wanted.size ||
+            layers.some(
+              (layer) =>
+                layer.isLocked ||
+                !getEffectStack(layer.effects).some((effect) => effect.id === effectId),
+            )
+          )
+            return;
+          for (const layer of layers)
+            updateEffectAtFrame(composition, layer, effectId, patch, frame);
+        }),
+      removeGroupEffect: (layerIds, effectId) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId),
+            wanted = new Set(layerIds),
+            layers = composition.layers.filter((layer) => wanted.has(layer.id));
+          if (
+            layers.length !== wanted.size ||
+            layers.some(
+              (layer) =>
+                layer.isLocked ||
+                !getEffectStack(layer.effects).some((effect) => effect.id === effectId),
+            )
+          )
+            return;
+          for (const layer of layers) removeEffect(layer, effectId);
+        }),
+      duplicateGroupEffect: (layerIds, effectId) => {
+        const duplicateId = createId('fx');
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId),
+            wanted = new Set(layerIds),
+            layers = composition.layers.filter((layer) => wanted.has(layer.id));
+          if (
+            layers.length !== wanted.size ||
+            layers.some(
+              (layer) =>
+                layer.isLocked ||
+                !getEffectStack(layer.effects).some((effect) => effect.id === effectId),
+            )
+          )
+            return;
+          for (const layer of layers) duplicateEffect(layer, effectId, duplicateId);
+        });
+      },
+      reorderGroupEffects: (layerIds, effectIds) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId),
+            wanted = new Set(layerIds),
+            shared = new Set(effectIds),
+            layers = composition.layers.filter((layer) => wanted.has(layer.id));
+          if (
+            layers.length !== wanted.size ||
+            layers.some(
+              (layer) =>
+                layer.isLocked ||
+                effectIds.some(
+                  (effectId) =>
+                    !getEffectStack(layer.effects).some((effect) => effect.id === effectId),
+                ),
+            )
+          )
+            return;
+          for (const layer of layers) {
+            const stack = getEffectStack(layer.effects),
+              queue = effectIds.map((id) => stack.find((effect) => effect.id === id)!),
+              reordered = stack.map((effect) => (shared.has(effect.id) ? queue.shift()! : effect));
+            reorderEffects(
+              layer,
+              reordered.map((effect) => effect.id),
+            );
+          }
         }),
       updateLayerEffects: (layerId, frame, patch) =>
         set((state) => {
@@ -2595,6 +2926,162 @@ export const useProjectStore = create<ProjectStore>()(
           if (layer) Object.assign(layer.constraints, constraints);
         }),
 
+      setLayerAutoLayout: (layerId, layout) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          if (!layer || layer.isLocked) return;
+          layer.autoLayout ??= structuredClone(DEFAULT_LAYER_AUTO_LAYOUT);
+          Object.assign(layer.autoLayout, layout);
+          layer.autoLayout.gap = Math.max(0, Math.round(layer.autoLayout.gap));
+          for (const key of [
+            'paddingTop',
+            'paddingRight',
+            'paddingBottom',
+            'paddingLeft',
+          ] as const) {
+            layer.autoLayout[key] = Math.max(0, Math.round(layer.autoLayout[key]));
+          }
+          layer.autoLayout.minWidth = Math.max(0, Math.round(layer.autoLayout.minWidth));
+          layer.autoLayout.maxWidth = Math.max(0, Math.round(layer.autoLayout.maxWidth));
+        }),
+
+      setLayerUpdateTransition: (layerId, patch) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          if (!layer || layer.isLocked) return;
+          layer.updateTransition ??= { style: 'inherit', durationFrames: 0, distance: 24 };
+          Object.assign(layer.updateTransition, patch);
+          layer.updateTransition.durationFrames = Math.max(
+            0,
+            Math.round(layer.updateTransition.durationFrames),
+          );
+          layer.updateTransition.distance = Math.max(0, layer.updateTransition.distance);
+        }),
+
+      setLayerMotionPath: (layerId, link) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          if (!layer || layer.isLocked || link?.sourceLayerId === layerId) return;
+          if (
+            link &&
+            !composition.layers.some(
+              (candidate) =>
+                candidate.id === link.sourceLayerId && candidate.element.type === 'path',
+            )
+          )
+            return;
+          layer.motionPath = link ? structuredClone(link) : null;
+        }),
+
+      addLayerVisualRule: (layerId) => {
+        let id: string | null = null;
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          const field = composition.dataFields[0];
+          if (!layer || layer.isLocked || !field) return;
+          const rule = createLayerVisualRule({ fieldId: field.id });
+          layer.visualRules ??= [];
+          layer.visualRules.push(rule);
+          id = rule.id;
+        });
+        return id;
+      },
+
+      updateLayerVisualRule: (layerId, ruleId, patch) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          const rule = layer?.visualRules?.find((candidate) => candidate.id === ruleId);
+          if (!layer || layer.isLocked || !rule) return;
+          Object.assign(rule, structuredClone(patch));
+        }),
+
+      moveLayerVisualRule: (layerId, ruleId, direction) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          if (!layer || layer.isLocked) return;
+          const index = (layer.visualRules ?? []).findIndex((rule) => rule.id === ruleId);
+          const target = index + direction;
+          if (index < 0 || target < 0 || target >= layer.visualRules.length) return;
+          const [rule] = layer.visualRules.splice(index, 1);
+          layer.visualRules.splice(target, 0, rule!);
+        }),
+
+      duplicateLayerVisualRule: (layerId, ruleId) => {
+        let duplicatedId: string | null = null;
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          if (!layer || layer.isLocked) return;
+          const index = (layer.visualRules ?? []).findIndex((rule) => rule.id === ruleId);
+          const source = layer.visualRules[index];
+          if (!source) return;
+          duplicatedId = createId('visual-rule');
+          layer.visualRules.splice(index + 1, 0, {
+            ...structuredClone(current(source)),
+            id: duplicatedId,
+            name: `${source.name} copy`,
+          });
+        });
+        return duplicatedId;
+      },
+
+      removeLayerVisualRule: (layerId, ruleId) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          if (!layer || layer.isLocked) return;
+          layer.visualRules = (layer.visualRules ?? []).filter((rule) => rule.id !== ruleId);
+        }),
+
+      addDataConnection: () => {
+        const id = createId('data-connection');
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          composition.dataConnections ??= [];
+          composition.dataConnections.push({
+            id,
+            name: `Data connection ${composition.dataConnections.length + 1}`,
+            format: 'json',
+            source: 'url',
+            url: '',
+            embeddedText: '',
+            refreshMs: 0,
+            missing: 'default',
+            enabled: true,
+            mappings: composition.dataFields.map((field) => ({
+              fieldId: field.id,
+              sourcePath: field.key,
+            })),
+          });
+        });
+        return id;
+      },
+
+      updateDataConnection: (connectionId, patch) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const connection = (composition.dataConnections ?? []).find(
+            (candidate) => candidate.id === connectionId,
+          );
+          if (!connection) return;
+          Object.assign(connection, structuredClone(patch));
+          connection.refreshMs = Math.max(0, Math.round(connection.refreshMs));
+        }),
+
+      removeDataConnection: (connectionId) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          composition.dataConnections = (composition.dataConnections ?? []).filter(
+            (connection) => connection.id !== connectionId,
+          );
+        }),
+
       setLayerSemantics: (layerId, patch) =>
         set((state) => {
           const composition = getActiveComposition(state.project, state.activeCompositionId);
@@ -2880,6 +3367,15 @@ export const useProjectStore = create<ProjectStore>()(
         return result;
       },
 
+      retimeAnimationPhase: (phase, targetFrames) => {
+        let result!: AnimationRetimeResult;
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          result = retimeAnimationPhaseModel(composition, phase, targetFrames);
+        });
+        return result;
+      },
+
       addDataField: (type) => {
         let newField!: ReturnType<typeof createFieldDefinition>;
         set((state) => {
@@ -2907,6 +3403,9 @@ export const useProjectStore = create<ProjectStore>()(
           );
           for (const layer of composition.layers) {
             layer.bindings = layer.bindings.filter((binding) => binding.fieldId !== fieldId);
+            layer.visualRules = (layer.visualRules ?? []).filter(
+              (rule) => rule.fieldId !== fieldId,
+            );
           }
         }),
 
@@ -2980,6 +3479,11 @@ export const useProjectStore = create<ProjectStore>()(
             offsetPerItem: { ...offsetPerItem },
             capacity: normalizedCapacity,
             overflow: 'truncate',
+            itemKeyPath: [],
+            sortPath: [],
+            sortDirection: 'none',
+            pageSize: 0,
+            page: 0,
           });
         });
         return id;
@@ -2995,6 +3499,11 @@ export const useProjectStore = create<ProjectStore>()(
           Object.assign(collection, patch);
           collection.capacity = Math.max(1, Math.min(100, Math.round(collection.capacity)));
           collection.prototypeLayerIds = [...new Set(collection.prototypeLayerIds)];
+          collection.pageSize = Math.max(
+            0,
+            Math.min(collection.capacity, Math.round(collection.pageSize ?? 0)),
+          );
+          collection.page = Math.max(0, Math.round(collection.page ?? 0));
           const field = composition.dataFields.find(
             (candidate) => candidate.id === collection.fieldId,
           );
@@ -3026,7 +3535,18 @@ export const useProjectStore = create<ProjectStore>()(
       removeCustomAction: (actionDefId) =>
         set((state) => {
           const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const removed = composition.customActions.find((action) => action.id === actionDefId);
           composition.customActions = composition.customActions.filter((a) => a.id !== actionDefId);
+          if (removed) {
+            for (const layer of composition.layers) {
+              if (
+                layer.loop?.activation.type === 'customAction' &&
+                layer.loop.activation.customActionId === removed.actionId
+              ) {
+                layer.loop = null;
+              }
+            }
+          }
         }),
 
       updateCustomAction: (actionDefId, patch) =>
@@ -3036,12 +3556,23 @@ export const useProjectStore = create<ProjectStore>()(
           if (!action) return;
           const nextPatch = { ...patch };
           if (nextPatch.actionId !== undefined) {
+            const previousActionId = action.actionId;
             const trimmed = nextPatch.actionId.trim();
             const isDuplicate =
               trimmed.length === 0 ||
               composition.customActions.some((a) => a.id !== actionDefId && a.actionId === trimmed);
             if (isDuplicate) delete nextPatch.actionId;
-            else nextPatch.actionId = trimmed;
+            else {
+              nextPatch.actionId = trimmed;
+              for (const layer of composition.layers) {
+                if (
+                  layer.loop?.activation.type === 'customAction' &&
+                  layer.loop.activation.customActionId === previousActionId
+                ) {
+                  layer.loop.activation.customActionId = trimmed;
+                }
+              }
+            }
           }
           Object.assign(action, nextPatch);
         }),
@@ -3133,14 +3664,28 @@ export const useProjectStore = create<ProjectStore>()(
                 : extension === 'ttf'
                   ? 'font/ttf'
                   : undefined;
-        const mimeType = (fontMime ?? file.type) || 'application/octet-stream';
+        const audioMime =
+          extension === 'mp3'
+            ? 'audio/mpeg'
+            : extension === 'wav'
+              ? 'audio/wav'
+              : extension === 'ogg'
+                ? 'audio/ogg'
+                : undefined;
+        const mimeType = (fontMime ?? audioMime ?? file.type) || 'application/octet-stream';
         const kind = fontMime
           ? 'font'
           : mimeType.startsWith('image/')
             ? 'image'
             : mimeType.startsWith('video/')
               ? 'media'
-              : 'source';
+              : mimeType.startsWith('audio/')
+                ? 'audio'
+                : 'source';
+        const durationMs =
+          kind === 'audio' || kind === 'media'
+            ? await readPlayableDurationMs(file, kind)
+            : undefined;
         const asset = createAsset({
           name: file.name,
           kind,
@@ -3148,6 +3693,7 @@ export const useProjectStore = create<ProjectStore>()(
           mimeType,
           originalFileName: file.name,
           byteSize: file.size || dataUriByteSize(dataUri),
+          ...(durationMs ? { durationMs } : {}),
           ...(fontMime ? { fontFamily: file.name.replace(/\.[^.]+$/, '') } : {}),
           ...(fontMime ? { fontWeight: '100 900', fontStyle: 'normal' as const } : {}),
         });
@@ -3189,7 +3735,8 @@ export const useProjectStore = create<ProjectStore>()(
           if (
             consumers.layerIds.length > 0 ||
             consumers.fieldIds.length > 0 ||
-            consumers.fontLayerIds.length > 0
+            consumers.fontLayerIds.length > 0 ||
+            consumers.mediaCueIds.length > 0
           ) {
             return;
           }

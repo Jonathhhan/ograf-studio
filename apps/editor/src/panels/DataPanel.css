@@ -215,7 +215,7 @@
 /* RealityHub-style pane sections and tabular field rows. */
 .data-panel {
   gap: 0;
-  margin: -8px -10px;
+  margin: 0 -6px -4px;
 }
 
 .data-panel-section + .data-panel-section {

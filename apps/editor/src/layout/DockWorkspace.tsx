@@ -15,6 +15,7 @@ import { ResourcesPanel } from '../panels/ResourcesPanel';
 import { BrandKitPanel } from '../panels/BrandKitPanel';
 import { InspectorPanel } from '../panels/InspectorPanel';
 import { DataPanel } from '../panels/DataPanel';
+import { RulesPanel } from '../panels/RulesPanel';
 import { PreviewExportPanel } from '../panels/PreviewExportPanel';
 import { TimelinePanel } from '../panels/TimelinePanel';
 import { ResizeHandle } from './ResizeHandle';
@@ -96,6 +97,8 @@ function PaneBody({ pane }: { pane: DockPaneId }) {
       return <InspectorPanel />;
     case 'data':
       return <DataPanel />;
+    case 'rules':
+      return <RulesPanel />;
     case 'export':
       return <PreviewExportPanel />;
     case 'timeline':

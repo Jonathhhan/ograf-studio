@@ -8,7 +8,12 @@ import {
   createProject,
   defaultTransformForRole,
 } from '@ograf-editor/scene-model';
-import { expandRuntimeCollections, isRuntimeCollectionLayerActive } from './runtimeCollections';
+import {
+  expandRuntimeCollections,
+  isRuntimeCollectionLayerActive,
+  runtimeCollectionItemSelection,
+} from './runtimeCollections';
+import { resolveBoundElement } from './renderElement';
 
 describe('runtime collection expansion', () => {
   it('creates bounded item-major layers with remapped clipping, paths, and offsets', () => {
@@ -51,6 +56,11 @@ describe('runtime collection expansion', () => {
         offsetPerItem: { x: 20, y: 70 },
         capacity: 3,
         overflow: 'truncate',
+        itemKeyPath: [],
+        sortPath: [],
+        sortDirection: 'none',
+        pageSize: 0,
+        page: 0,
       },
     ];
 
@@ -75,10 +85,10 @@ describe('runtime collection expansion', () => {
       sourcePath: ['name'],
       itemIndex: 1,
     });
-    expect(secondLabel.collectionItem).toEqual({
+    expect(secondLabel.collectionItem).toMatchObject({
       collectionId: 'collection',
       dataKey: 'leaderboard',
-      index: 1,
+      slot: 1,
     });
     expect(secondLabel.keyframes[0]!.transform.x - firstLabel.keyframes[0]!.transform.x).toBe(20);
     expect(secondLabel.keyframes[0]!.transform.y - firstLabel.keyframes[0]!.transform.y).toBe(70);
@@ -89,5 +99,52 @@ describe('runtime collection expansion', () => {
     expect(isRuntimeCollectionLayerActive(secondLabel, { leaderboard: [{ name: 'Ada' }] })).toBe(
       false,
     );
+  });
+
+  it('sorts, paginates, and retains stable item keys while resolving bindings', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const field = createFieldDefinition('array', {
+      key: 'leaderboard',
+      items: createFieldDefinition('object', {
+        key: 'item',
+        properties: [
+          createFieldDefinition('text', { key: 'id' }),
+          createFieldDefinition('text', { key: 'name' }),
+          createFieldDefinition('integer', { key: 'score' }),
+        ],
+      }),
+    });
+    const label = createLayerOfKind('text');
+    label.groupId = 'item';
+    label.bindings = [{ fieldId: field.id, targetProperty: 'content', sourcePath: ['name'] }];
+    composition.layers = [label];
+    composition.dataFields = [field];
+    composition.runtimeCollections = [
+      {
+        id: 'ranking',
+        name: 'Ranking',
+        fieldId: field.id,
+        prototypeLayerIds: [label.id],
+        offsetPerItem: { x: 0, y: 40 },
+        capacity: 2,
+        overflow: 'truncate',
+        itemKeyPath: ['id'],
+        sortPath: ['score'],
+        sortDirection: 'descending',
+        pageSize: 1,
+        page: 1,
+      },
+    ];
+    const [slot] = expandRuntimeCollections(compileDescriptor(composition)).layers;
+    const data = {
+      leaderboard: [
+        { id: 'a', name: 'Ada', score: 5 },
+        { id: 'b', name: 'Bea', score: 9 },
+        { id: 'c', name: 'Cy', score: 7 },
+      ],
+    };
+    expect(runtimeCollectionItemSelection(slot!, data)).toEqual({ index: 2, key: 'c' });
+    expect(resolveBoundElement(slot!, data)).toMatchObject({ content: 'Cy' });
   });
 });

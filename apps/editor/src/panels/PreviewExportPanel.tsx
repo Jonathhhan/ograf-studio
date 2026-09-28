@@ -1,5 +1,6 @@
 import { useEditorWindow } from '../layout/EditorWindow';
 import { PropertyRow } from '../components/PropertyRow';
+import { CollapsibleSection } from '../components/CollapsibleSection';
 import { OgrafLogo } from '../components/OgrafLogo';
 import { TemplateSaveDialog } from '../components/TemplateSaveDialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -16,6 +17,7 @@ import { validateManifest } from '@ograf-editor/validation';
 import {
   computeKeyframeFrames,
   getPlayoutCompatibilityWarnings,
+  hasElementMediaPaint,
   runBroadcastQa,
   type BroadcastQaIssue,
   type Project,
@@ -36,6 +38,7 @@ import { enterPreviewFullscreen, installPreviewShortcuts } from '../state/previe
 import { measureAgentText } from '../state/agentCapture';
 import { Panel } from './Panel';
 import { resolveSourceOverlayGeometry } from './sourceOverlay';
+import { mediaCompatibleExportProfile, mediaCompatibleRenderType } from './mediaExportProfile';
 import './PreviewExportPanel.css';
 
 interface LogEntry {
@@ -107,6 +110,14 @@ export function PreviewExportPanel() {
   const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>([]);
   const [scrubTimestamp, setScrubTimestamp] = useState(0);
   const [exportProfileId, setExportProfileId] = useState<ExportProfileMode>('dual');
+  const usesMediaPaint = useMemo(
+    () =>
+      composition.mediaCues.length > 0 ||
+      composition.layers.some(
+        (layer) => hasElementMediaPaint(layer.element) || layer.element.type === 'audio',
+      ),
+    [composition.layers, composition.mediaCues.length],
+  );
   const exportProfile = getExportProfile(exportProfileId);
   const playoutWarnings = useMemo(
     () =>
@@ -126,6 +137,13 @@ export function PreviewExportPanel() {
     width: number;
     height: number;
   } | null>(null);
+
+  useEffect(() => {
+    const nextRenderType = mediaCompatibleRenderType(usesMediaPaint, renderType);
+    const nextExportProfile = mediaCompatibleExportProfile(usesMediaPaint, exportProfileId);
+    if (nextRenderType !== renderType) setRenderType(nextRenderType);
+    if (nextExportProfile !== exportProfileId) setExportProfileId(nextExportProfile);
+  }, [exportProfileId, renderType, usesMediaPaint]);
   const comparisonAsset = composition.assets.find(
     (asset) => asset.id === comparisonAssetId && asset.kind === 'image',
   );
@@ -544,230 +562,244 @@ export function PreviewExportPanel() {
   return (
     <Panel title="Preview & Export">
       <div className="preview-export-panel" ref={panelRef}>
-        <div
-          className="preview-stage-wrap"
-          ref={viewportRef}
-          tabIndex={0}
-          aria-label="Graphic preview. Space or Right: next step. Left: previous step. Escape: exit fullscreen."
-          onMouseDown={(event) => {
-            if (event.button === 0) event.currentTarget.focus({ preventScroll: true });
-          }}
+        <CollapsibleSection
+          sectionId="preview.playback"
+          title="Playback & actions"
+          contentClassName="preview-section-content"
         >
           <div
-            className="preview-stage-measure"
-            style={{ width: composition.width * zoom, height: composition.height * zoom }}
+            className="preview-stage-wrap"
+            ref={viewportRef}
+            tabIndex={0}
+            aria-label="Graphic preview. Space or Right: next step. Left: previous step. Escape: exit fullscreen."
+            onMouseDown={(event) => {
+              if (event.button === 0) event.currentTarget.focus({ preventScroll: true });
+            }}
           >
             <div
-              className="preview-stage"
-              ref={containerRef}
-              style={{
-                width: composition.width,
-                height: composition.height,
-                transform: `scale(${zoom})`,
-                ...(composition.backgroundColor === 'transparent'
-                  ? transparencyCheckerboardStyle(zoom)
-                  : undefined),
-              }}
-            />
-            {comparisonAsset && (
-              <img
-                className="preview-source-overlay"
-                src={comparisonAsset.dataUri}
-                alt="Source design comparison overlay"
-                onLoad={(event) => {
-                  const image = event.currentTarget;
-                  if (image.naturalWidth > 0 && image.naturalHeight > 0) {
-                    setComparisonNaturalSize({
-                      assetId: comparisonAsset.id,
-                      width: image.naturalWidth,
-                      height: image.naturalHeight,
-                    });
-                  }
-                }}
+              className="preview-stage-measure"
+              style={{ width: composition.width * zoom, height: composition.height * zoom }}
+            >
+              <div
+                className="preview-stage"
+                ref={containerRef}
                 style={{
-                  left: (comparisonGeometry?.x ?? 0) * zoom,
-                  top: (comparisonGeometry?.y ?? 0) * zoom,
-                  width: (comparisonGeometry?.width ?? 0) * zoom,
-                  height: (comparisonGeometry?.height ?? 0) * zoom,
-                  opacity: comparisonOpacity,
-                  visibility: comparisonGeometry ? 'visible' : 'hidden',
-                  transform: `rotate(${comparisonGeometry?.rotation ?? 0}deg)`,
-                  transformOrigin: `${(comparisonGeometry?.transformOriginX ?? 0) * 100}% ${(comparisonGeometry?.transformOriginY ?? 0) * 100}%`,
+                  width: composition.width,
+                  height: composition.height,
+                  transform: `scale(${zoom})`,
+                  ...(composition.backgroundColor === 'transparent'
+                    ? transparencyCheckerboardStyle(zoom)
+                    : undefined),
                 }}
               />
-            )}
-          </div>
-        </div>
-
-        {fullscreenError && (
-          <p role="alert" className="preview-fullscreen-error">
-            {fullscreenError}
-          </p>
-        )}
-
-        <div className="preview-controls">
-          <div className="preview-controls-row">
-            <button
-              type="button"
-              ref={fullscreenButtonRef}
-              data-preview-fullscreen
-              onClick={handleFullscreen}
-              disabled={!isPreviewLoaded}
-              title="Fill this window's display with the graphic. Space/Right: next step; Left: previous step; Escape: exit."
-            >
-              Fullscreen
-            </button>
-            <select
-              value={renderType}
-              onChange={(e) => setRenderType(e.target.value as RenderType)}
-            >
-              <option value="realtime">realtime</option>
-              <option value="non-realtime">non-realtime</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => handlePlayAction({ delta: -1 })}
-              disabled={!isPreviewLoaded}
-            >
-              {'⏮ Prev step'}
-            </button>
-            <span className="preview-step-indicator">
-              {currentStep === undefined
-                ? 'off-step'
-                : `step ${currentStep + 1} / ${descriptor.stepCount}`}
-            </span>
-            <button
-              type="button"
-              onClick={() => handlePlayAction({ delta: 1 })}
-              disabled={!isPreviewLoaded}
-            >
-              {'Next step ⏭'}
-            </button>
-            <button type="button" onClick={handleStop} disabled={!isPreviewLoaded}>
-              Take Out
-            </button>
-          </div>
-
-          {renderType === 'non-realtime' && (
-            <div className="preview-schedule">
-              <div className="preview-controls-row">
-                <span className="preview-step-indicator">goToTime</span>
-                <input
-                  type="number"
-                  className="preview-schedule-timestamp"
-                  value={scrubTimestamp}
-                  onChange={(e) => setScrubTimestamp(Number(e.target.value))}
+              {comparisonAsset && (
+                <img
+                  className="preview-source-overlay"
+                  src={comparisonAsset.dataUri}
+                  alt="Source design comparison overlay"
+                  onLoad={(event) => {
+                    const image = event.currentTarget;
+                    if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                      setComparisonNaturalSize({
+                        assetId: comparisonAsset.id,
+                        width: image.naturalWidth,
+                        height: image.naturalHeight,
+                      });
+                    }
+                  }}
+                  style={{
+                    left: (comparisonGeometry?.x ?? 0) * zoom,
+                    top: (comparisonGeometry?.y ?? 0) * zoom,
+                    width: (comparisonGeometry?.width ?? 0) * zoom,
+                    height: (comparisonGeometry?.height ?? 0) * zoom,
+                    opacity: comparisonOpacity,
+                    visibility: comparisonGeometry ? 'visible' : 'hidden',
+                    transform: `rotate(${comparisonGeometry?.rotation ?? 0}deg)`,
+                    transformOrigin: `${(comparisonGeometry?.transformOriginX ?? 0) * 100}% ${(comparisonGeometry?.transformOriginY ?? 0) * 100}%`,
+                  }}
                 />
-                <span className="preview-step-indicator">ms</span>
-                <button type="button" onClick={handleGoToTime}>
-                  Go to time
-                </button>
-              </div>
+              )}
+            </div>
+          </div>
 
-              {scheduleRows.map((row) => (
-                <div key={row.id} className="preview-schedule-row">
+          {fullscreenError && (
+            <p role="alert" className="preview-fullscreen-error">
+              {fullscreenError}
+            </p>
+          )}
+
+          <div className="preview-controls">
+            <div className="preview-controls-row">
+              <button
+                type="button"
+                ref={fullscreenButtonRef}
+                data-preview-fullscreen
+                onClick={handleFullscreen}
+                disabled={!isPreviewLoaded}
+                title="Fill this window's display with the graphic. Space/Right: next step; Left: previous step; Escape: exit."
+              >
+                Fullscreen
+              </button>
+              <select
+                value={renderType}
+                onChange={(e) => setRenderType(e.target.value as RenderType)}
+              >
+                <option value="realtime">realtime</option>
+                <option value="non-realtime" disabled={usesMediaPaint}>
+                  non-realtime
+                </option>
+              </select>
+              <button
+                type="button"
+                onClick={() => handlePlayAction({ delta: -1 })}
+                disabled={!isPreviewLoaded}
+              >
+                {'⏮ Prev step'}
+              </button>
+              <span className="preview-step-indicator">
+                {currentStep === undefined
+                  ? 'off-step'
+                  : `step ${currentStep + 1} / ${descriptor.stepCount}`}
+              </span>
+              <button
+                type="button"
+                onClick={() => handlePlayAction({ delta: 1 })}
+                disabled={!isPreviewLoaded}
+              >
+                {'Next step ⏭'}
+              </button>
+              <button type="button" onClick={handleStop} disabled={!isPreviewLoaded}>
+                Take Out
+              </button>
+            </div>
+
+            {renderType === 'non-realtime' && (
+              <div className="preview-schedule">
+                <div className="preview-controls-row">
+                  <span className="preview-step-indicator">goToTime</span>
                   <input
                     type="number"
                     className="preview-schedule-timestamp"
-                    value={row.timestamp}
-                    onChange={(e) =>
-                      updateScheduleRow(row.id, { timestamp: Number(e.target.value) })
-                    }
+                    value={scrubTimestamp}
+                    onChange={(e) => setScrubTimestamp(Number(e.target.value))}
                   />
                   <span className="preview-step-indicator">ms</span>
-                  <select
-                    value={row.actionType}
-                    onChange={(e) => {
-                      const actionType = e.target.value as ScheduledAction['action']['type'];
-                      updateScheduleRow(row.id, {
-                        actionType,
-                        paramsJson: DEFAULT_SCHEDULE_PARAMS_JSON[actionType],
-                      });
-                    }}
-                  >
-                    <option value="updateAction">updateAction</option>
-                    <option value="playAction">playAction</option>
-                    <option value="stopAction">stopAction</option>
-                    <option value="customAction">customAction</option>
-                  </select>
-                  <input
-                    type="text"
-                    className="preview-schedule-params"
-                    value={row.paramsJson}
-                    onChange={(e) => updateScheduleRow(row.id, { paramsJson: e.target.value })}
-                  />
-                  <button type="button" onClick={() => removeScheduleRow(row.id)}>
-                    ✕
+                  <button type="button" onClick={handleGoToTime}>
+                    Go to time
                   </button>
                 </div>
-              ))}
 
-              <div className="preview-controls-row">
-                <button type="button" onClick={addScheduleRow}>
-                  + Schedule row
-                </button>
-                <button type="button" onClick={handleSendSchedule}>
-                  Send setActionsSchedule
-                </button>
-              </div>
-            </div>
-          )}
+                {scheduleRows.map((row) => (
+                  <div key={row.id} className="preview-schedule-row">
+                    <input
+                      type="number"
+                      className="preview-schedule-timestamp"
+                      value={row.timestamp}
+                      onChange={(e) =>
+                        updateScheduleRow(row.id, { timestamp: Number(e.target.value) })
+                      }
+                    />
+                    <span className="preview-step-indicator">ms</span>
+                    <select
+                      value={row.actionType}
+                      onChange={(e) => {
+                        const actionType = e.target.value as ScheduledAction['action']['type'];
+                        updateScheduleRow(row.id, {
+                          actionType,
+                          paramsJson: DEFAULT_SCHEDULE_PARAMS_JSON[actionType],
+                        });
+                      }}
+                    >
+                      <option value="updateAction">updateAction</option>
+                      <option value="playAction">playAction</option>
+                      <option value="stopAction">stopAction</option>
+                      <option value="customAction">customAction</option>
+                    </select>
+                    <input
+                      type="text"
+                      className="preview-schedule-params"
+                      value={row.paramsJson}
+                      onChange={(e) => updateScheduleRow(row.id, { paramsJson: e.target.value })}
+                    />
+                    <button type="button" onClick={() => removeScheduleRow(row.id)}>
+                      ✕
+                    </button>
+                  </div>
+                ))}
 
-          {composition.dataFields.length > 0 && (
-            <div className="preview-data-form">
-              {composition.dataFields.map((field) => (
-                <PropertyRow
-                  help={`${field.description ? field.description + ' ' : ''}Value sent as ${field.key} by preview lifecycle actions. Use Load, Play or Update to test runtime data; this does not change the saved field default.`}
-                  key={field.id}
-                  className="preview-data-row"
-                >
-                  <span>{field.label || field.key}</span>
-                  <input
-                    type="text"
-                    value={String(dataForm[field.key] ?? '')}
-                    onChange={(e) =>
-                      setDataForm((prev) => ({ ...prev, [field.key]: e.target.value }))
-                    }
-                  />
-                </PropertyRow>
-              ))}
-            </div>
-          )}
-
-          {descriptor.customActions.length > 0 && (
-            <div className="preview-controls-row">
-              {descriptor.customActions.map((action) => (
-                <button
-                  key={action.id}
-                  type="button"
-                  disabled={!isPreviewLoaded}
-                  onClick={() => handleCustomAction(action.id)}
-                >
-                  {action.name || action.id}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="preview-log">
-            {log.length === 0 ? (
-              <p className="panel-placeholder">
-                Call a lifecycle method above to see results here.
-              </p>
-            ) : (
-              log.map((entry) => (
-                <div key={entry.id} className={`preview-log-entry${entry.isError ? ' error' : ''}`}>
-                  <span className="preview-log-method">{entry.method}</span>
-                  <span className="preview-log-params">{entry.paramsSummary}</span>
-                  <span className="preview-log-result">{entry.resultSummary}</span>
+                <div className="preview-controls-row">
+                  <button type="button" onClick={addScheduleRow}>
+                    + Schedule row
+                  </button>
+                  <button type="button" onClick={handleSendSchedule}>
+                    Send setActionsSchedule
+                  </button>
                 </div>
-              ))
+              </div>
             )}
-          </div>
-        </div>
 
-        <section className="data-panel-section">
-          <h3>Typography & broadcast QA</h3>
+            {composition.dataFields.length > 0 && (
+              <div className="preview-data-form">
+                {composition.dataFields.map((field) => (
+                  <PropertyRow
+                    help={`${field.description ? field.description + ' ' : ''}Value sent as ${field.key} by preview lifecycle actions. Use Load, Play or Update to test runtime data; this does not change the saved field default.`}
+                    key={field.id}
+                    className="preview-data-row"
+                  >
+                    <span>{field.label || field.key}</span>
+                    <input
+                      type="text"
+                      value={String(dataForm[field.key] ?? '')}
+                      onChange={(e) =>
+                        setDataForm((prev) => ({ ...prev, [field.key]: e.target.value }))
+                      }
+                    />
+                  </PropertyRow>
+                ))}
+              </div>
+            )}
+
+            {descriptor.customActions.length > 0 && (
+              <div className="preview-controls-row">
+                {descriptor.customActions.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    disabled={!isPreviewLoaded}
+                    onClick={() => handleCustomAction(action.id)}
+                  >
+                    {action.name || action.id}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="preview-log">
+              {log.length === 0 ? (
+                <p className="panel-placeholder">
+                  Call a lifecycle method above to see results here.
+                </p>
+              ) : (
+                log.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={`preview-log-entry${entry.isError ? ' error' : ''}`}
+                  >
+                    <span className="preview-log-method">{entry.method}</span>
+                    <span className="preview-log-params">{entry.paramsSummary}</span>
+                    <span className="preview-log-result">{entry.resultSummary}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          sectionId="preview.broadcast-qa"
+          title="Typography & broadcast QA"
+          className="data-panel-section"
+        >
           <div className="preview-controls-row">
             <PropertyRow
               help={
@@ -849,13 +881,19 @@ export function PreviewExportPanel() {
               )}
             </ul>
           )}
-        </section>
+        </CollapsibleSection>
 
-        <section className="data-panel-section">
-          <h3 className="preview-export-heading">
-            <OgrafLogo section />
-            Export
-          </h3>
+        <CollapsibleSection
+          sectionId="preview.export"
+          title={
+            <span className="preview-export-heading">
+              <OgrafLogo section />
+              Export
+            </span>
+          }
+          ariaLabel="Export"
+          className="data-panel-section"
+        >
           <PropertyRow
             help={
               "Choose the playback modes advertised by the exported package: real-time, non-real-time or both. This output-only choice does not change the editable project's flags."
@@ -868,7 +906,11 @@ export function PreviewExportPanel() {
               onChange={(event) => setExportProfileId(event.target.value as ExportProfileMode)}
             >
               {BUILT_IN_EXPORT_PROFILES.map((profile) => (
-                <option key={profile.id} value={profile.id}>
+                <option
+                  key={profile.id}
+                  value={profile.id}
+                  disabled={usesMediaPaint && profile.mode !== 'realtime'}
+                >
                   {profile.name}
                 </option>
               ))}
@@ -877,6 +919,7 @@ export function PreviewExportPanel() {
           <p className="panel-placeholder">
             Output-only profile: {exportProfile.mode}. The editable project render-mode flags and ID
             are not changed.
+            {usesMediaPaint ? ' Media paint requires the Real-time profile.' : ''}
           </p>
           {playoutWarnings.length > 0 ? (
             <aside
@@ -949,7 +992,7 @@ export function PreviewExportPanel() {
             select that folder in ograf-devtool.
           </p>
           {exportStatus && <p className="preview-export-status">{exportStatus}</p>}
-        </section>
+        </CollapsibleSection>
       </div>
       {exportDialogProject && (
         <TemplateSaveDialog

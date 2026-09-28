@@ -40,6 +40,17 @@ export {
   sampleCompiledLayerVisualState,
   type CompiledLayerVisualState,
 } from './loopRendering';
+export { applyCompiledAutoLayout } from './autoLayoutRendering';
+export { applyCompiledMotionPaths } from './motionPathRendering';
+export { resolveMediaTimelinePosition } from './mediaTimeline';
+export { MediaCueRuntime, mediaCueAutomaticStartMs } from './mediaCueRuntime';
+export {
+  layerHasRuntimeVisualInputs,
+  matchingVisualRules,
+  resolveVisualRuleElement,
+  triggeredVisualRuleActions,
+  visualRuleLayerVisible,
+} from './runtimeVisualRules';
 export { expandRuntimeCollections, isRuntimeCollectionLayerActive } from './runtimeCollections';
 export { resolvePlayTarget, type LifecycleTarget } from './lifecycle';
 

@@ -1,0 +1,45 @@
+import { readFileSync } from 'node:fs';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { createFieldDefinition, createLayerOfKind, createProject } from '@ograf-editor/scene-model';
+import { useProjectStore } from '../state/projectStore';
+
+const source = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+
+describe('dockable Rules pane', () => {
+  beforeEach(() => useProjectStore.getState().newProject());
+
+  it('creates a rule for an explicit target without requiring canvas selection', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const layer = createLayerOfKind('rectangle');
+    const field = createFieldDefinition('integer', { key: 'score', defaultValue: 0 });
+    composition.layers.push(layer);
+    composition.dataFields.push(field);
+    useProjectStore.getState().loadProject(project);
+
+    const ruleId = useProjectStore.getState().addLayerVisualRule(layer.id);
+    expect(ruleId).toBeTruthy();
+    const duplicatedId = useProjectStore.getState().duplicateLayerVisualRule(layer.id, ruleId!);
+    const rules = useProjectStore.getState().project.compositions[0]!.layers[0]!.visualRules;
+    expect(rules).toHaveLength(2);
+    expect(duplicatedId).not.toBe(ruleId);
+    expect(rules[1]).toMatchObject({ id: duplicatedId, name: 'Visual rule copy' });
+    expect(rules[1]!.actions).not.toBe(rules[0]!.actions);
+  });
+
+  it('keeps one rule editor to two compact rows', () => {
+    const panel = source('./RulesPanel.tsx');
+    const css = source('./RulesPanel.css');
+    expect(panel).toContain('aria-label="New rule target object"');
+    expect(panel).toContain('addRule(targetLayerId)');
+    expect(panel).toContain('className="rules-editor-row"');
+    expect(panel).toContain('type="color"');
+    expect(panel).toContain('aria-label="Duplicate action"');
+    expect(panel).toContain('title="Duplicate rule"');
+    expect(panel).toContain('actions.splice(actionIndex + 1, 0, structuredClone(action))');
+    expect(css).toMatch(/\.rules-editor-row,[\s\S]*display:\s*flex;/);
+    expect(css).toMatch(/\.rules-actions\s*\{[^}]*display:\s*grid;/s);
+    expect(css).toMatch(/\.rules-action\s*\{[^}]*width:\s*100%;/s);
+    expect(css).toMatch(/\.rules-owner\s*\{[^}]*max-width:\s*none;[^}]*white-space:\s*nowrap;/s);
+  });
+});

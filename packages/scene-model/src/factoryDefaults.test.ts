@@ -30,6 +30,7 @@ describe('authoring factory defaults', () => {
       'path',
       'image-sequence',
       'lottie',
+      'audio',
     ] as const) {
       for (const role of ['start', 'step', 'end'] as const) {
         expect(defaultTransformForRole(kind, role).opacity).toBe(1);
@@ -41,6 +42,7 @@ describe('authoring factory defaults', () => {
     expect(defaultTransformFor('rectangle')).toMatchObject({ width: 200, height: 200 });
     expect(defaultTransformFor('ellipse')).toMatchObject({ width: 200, height: 200 });
     expect(defaultTransformFor('image')).toMatchObject({ width: 400, height: 120 });
+    expect(defaultTransformFor('audio')).toMatchObject({ width: 400, height: 120 });
   });
 
   it('starts new compositions on black with the 20% gray outside-canvas fill enabled', () => {

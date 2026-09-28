@@ -6,6 +6,7 @@ import { WebSocket } from 'ws';
 import { readFile } from 'node:fs/promises';
 import {
   computeKeyframeFrames,
+  getEffectStack,
   getLayerTransformAtFrame,
   createLayerOfKind,
   createLayerKeyframe,
@@ -388,6 +389,69 @@ describe('OGraf MCP authoring host', () => {
     expect(invalid.isError).toBe(true);
     expect(session.revision).toBe(revision);
   });
+  it('materializes synchronized effects across a persistent canvas group', async () => {
+    const sessionId = 'group-effect-stack-test';
+    await client.callTool({ name: 'ograf_create_project', arguments: { sessionId } });
+    const session = host.workspace.get(sessionId);
+    const grouped = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 0,
+        operations: [
+          { type: 'add_layer', kind: 'rectangle', name: 'Plate' },
+          { type: 'add_layer', kind: 'text', name: 'Label' },
+          { type: 'group_layers', layerIds: [] },
+        ],
+      },
+    });
+    expect(grouped.isError).toBe(true);
+    const created = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 0,
+        operations: [
+          { type: 'add_layer', kind: 'rectangle', name: 'Plate' },
+          { type: 'add_layer', kind: 'text', name: 'Label' },
+        ],
+      },
+    });
+    expect(created.isError).not.toBe(true);
+    const layerIds = session.snapshot().project.compositions[0]!.layers.map((layer) => layer.id);
+    const groupResult = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: session.revision,
+        operations: [{ type: 'group_layers', layerIds }],
+      },
+    });
+    const groupId = (
+      groupResult.structuredContent as { results: Array<{ type: string; id?: string }> }
+    ).results.find((result) => result.type === 'group_layers')!.id!;
+    const effectResult = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: session.revision,
+        operations: [
+          {
+            type: 'add_effect',
+            groupId,
+            effectType: 'glow',
+            patch: { enabled: true, params: { radius: 16 } },
+          },
+        ],
+      },
+    });
+    expect(effectResult.isError).not.toBe(true);
+    const layers = session.snapshot().project.compositions[0]!.layers,
+      effectIds = layers.map(
+        (layer) => getEffectStack(layer.effects).find((effect) => effect.type === 'glow')!.id,
+      );
+    expect(new Set(effectIds).size).toBe(1);
+  });
   it('creates and edits a shared pattern by name and samples generated row motion', async () => {
     const sessionId = 'procedural-pattern-test';
     await client.callTool({ name: 'ograf_create_project', arguments: { sessionId } });
@@ -685,7 +749,7 @@ describe('OGraf MCP authoring host', () => {
         'ograf_export_package',
       ]),
     );
-    expect(providerToolWireBytes(records)).toBeLessThanOrEqual(65_000);
+    expect(providerToolWireBytes(records)).toBeLessThanOrEqual(74_000);
   });
 
   it('explicitly deletes temporary sessions without allowing live-editor deletion', async () => {

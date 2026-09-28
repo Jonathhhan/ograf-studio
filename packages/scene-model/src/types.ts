@@ -47,6 +47,14 @@ export interface EllipseElement {
   strokeWidth: number;
 }
 
+export interface TextRun {
+  text: string;
+  color?: string;
+  fontWeight?: number;
+  fontStyle?: 'normal' | 'italic';
+  fontFamily?: string;
+}
+
 export interface TextElement {
   type: 'text';
   content: string;
@@ -76,6 +84,9 @@ export interface TextElement {
   overflowPolicy: 'visible' | 'clip' | 'ellipsis';
   /** Squeeze deliberately scales glyph width and height independently to fill the authored box. */
   autoFit: 'auto-size' | 'shrink-to-fit' | 'fit-to-width' | 'squeeze' | 'fixed';
+  runs: TextRun[];
+  direction: 'auto' | 'ltr' | 'rtl';
+  language: string;
 }
 
 export interface ImageElement {
@@ -101,6 +112,8 @@ export interface PathElement {
   strokeWidth: number;
   viewBoxWidth: number;
   viewBoxHeight: number;
+  /** Optional nine-slice source insets; destination edge bands retain these pixel sizes. */
+  stretchInsets?: { left: number; right: number; top: number; bottom: number };
 }
 
 /** Editable vector sources shared by every instance of a procedural pattern. */
@@ -268,7 +281,19 @@ export interface MediaPaint {
   loop: boolean;
   speed: number;
   offsetMs: number;
+  trimEndMs: number | null;
+  timelineStartMs: number;
   muted: true;
+}
+
+export interface AudioElement {
+  type: 'audio';
+  src: string | null;
+  volume: number;
+  loop: boolean;
+  trimStartMs: number;
+  trimEndMs: number | null;
+  timelineStartMs: number;
 }
 
 /** @deprecated Import compatibility only; current scenes use a rectangle with ShaderPaint. */
@@ -289,6 +314,7 @@ export type Element =
   | PatternElement
   | ImageSequenceElement
   | LottieElement
+  | AudioElement
   | ShaderElement;
 export type ElementType = Element['type'];
 
@@ -302,12 +328,80 @@ export interface LayerBinding {
   valueMap?: Record<string, string | number | boolean | GradientPaint>;
 }
 
+export type VisualRuleOperator =
+  | 'equals'
+  | 'not-equals'
+  | 'empty'
+  | 'not-empty'
+  | 'greater-than'
+  | 'less-than'
+  | 'changed'
+  | 'increased'
+  | 'decreased';
+
+export type VisualRuleAction =
+  | { type: 'visibility'; visible: boolean }
+  | { type: 'property'; targetProperty: string; value: unknown }
+  | { type: 'custom-action'; actionId: string }
+  | { type: 'play-sound'; cueId: string }
+  | { type: 'take-media'; cueId: string; sourceId?: string }
+  | { type: 'shader-animation'; actionId: string };
+
+export interface LayerVisualRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  fieldId: string;
+  sourcePath: string[];
+  operator: VisualRuleOperator;
+  value?: unknown;
+  actions: VisualRuleAction[];
+}
+
 export type HorizontalConstraint = 'left' | 'right' | 'left-right' | 'center' | 'scale';
 export type VerticalConstraint = 'top' | 'bottom' | 'top-bottom' | 'center' | 'scale';
 
 export interface LayerConstraints {
   horizontal: HorizontalConstraint;
   vertical: VerticalConstraint;
+}
+
+export type AutoLayoutDirection = 'none' | 'horizontal' | 'vertical';
+export type AutoLayoutAlignment = 'start' | 'center' | 'end' | 'stretch';
+
+/** Flow layout applied to this layer's direct children in paint order. */
+export interface LayerAutoLayout {
+  direction: AutoLayoutDirection;
+  gap: number;
+  paddingTop: number;
+  paddingRight: number;
+  paddingBottom: number;
+  paddingLeft: number;
+  align: AutoLayoutAlignment;
+  hugWidth: boolean;
+  hugHeight: boolean;
+  /** Zero disables the corresponding authored clamp. */
+  minWidth: number;
+  maxWidth: number;
+  collapseHidden: boolean;
+}
+
+export type LayerUpdateTransitionStyle =
+  'inherit' | 'none' | 'crossfade' | 'slide-left' | 'slide-right' | 'slide-up' | 'slide-down';
+
+export interface LayerUpdateTransition {
+  style: LayerUpdateTransitionStyle;
+  /** Zero inherits the composition update duration. */
+  durationFrames: number;
+  distance: number;
+}
+
+export interface LayerMotionPath {
+  sourceLayerId: string;
+  progress: number;
+  orientToPath: boolean;
+  offsetX: number;
+  offsetY: number;
 }
 
 export interface LayerEffects {
@@ -486,6 +580,7 @@ export type AnimatableLayerProperty =
   | 'dropShadowOffsetX'
   | 'dropShadowOffsetY'
   | 'dropShadowBlur'
+  | 'motionPathProgress'
   | GradientStopOffsetProperty
   | ShaderAnimationProperty;
 
@@ -555,8 +650,11 @@ export type LayerAnimationTracks = Partial<
   Record<AnimatableLayerProperty, LayerPropertyKeyframe[]>
 >;
 
-/** When a local loop is active relative to the OGraf lifecycle. */
-export type LayerLoopActivation = { type: 'step'; stepKeyframeId: string } | { type: 'lifecycle' };
+/** When a local property clip is active relative to the OGraf lifecycle or a custom action. */
+export type LayerLoopActivation =
+  | { type: 'step'; stepKeyframeId: string }
+  | { type: 'lifecycle' }
+  | { type: 'customAction'; customActionId: string };
 
 /**
  * A layer-local animation clip. Its keys use a local 0..durationFrames ruler and never become
@@ -601,6 +699,10 @@ export interface Layer {
   mask: LayerMask | null;
   /** Rules applied when the composition dimensions change; results are baked into layer tracks. */
   constraints: LayerConstraints;
+  /** Optional runtime flow for direct children; ordinary parent constraints remain independent. */
+  autoLayout: LayerAutoLayout;
+  updateTransition: LayerUpdateTransition;
+  motionPath: LayerMotionPath | null;
   /** Independent animation keys on the composition frame ruler, sorted by frame. */
   keyframes: LayerKeyframe[];
   /** Canonical per-property animation tracks. Legacy full-pose keys remain as an aggregate view. */
@@ -620,6 +722,8 @@ export interface Layer {
   componentLink: ComponentLink | null;
   /** Ordered data bindings applied to independent element properties at runtime. */
   bindings: LayerBinding[];
+  /** Ordered no-code conditions evaluated after ordinary bindings. */
+  visualRules: LayerVisualRule[];
 }
 
 export type KeyframeRole = 'start' | 'step' | 'end';
@@ -742,6 +846,91 @@ export interface RuntimeCollectionDefinition {
   /** Hard authored/rendered item limit; W12b.1 supports 1..100. */
   capacity: number;
   overflow: 'truncate';
+  /** Stable object key used to identify items across reordered snapshots. */
+  itemKeyPath?: string[];
+  sortPath?: string[];
+  sortDirection?: 'none' | 'ascending' | 'descending';
+  /** Zero uses capacity. */
+  pageSize?: number;
+  page?: number;
+}
+
+export interface DataConnectionMapping {
+  fieldId: string;
+  /** Dot-separated JSON path or CSV column name. */
+  sourcePath: string;
+}
+
+/** Editor-side preview connector; exported OGraf still receives ordinary GDD data. */
+export interface DataConnectionDefinition {
+  id: string;
+  name: string;
+  format: 'json' | 'csv';
+  source: 'url' | 'embedded';
+  url: string;
+  embeddedText: string;
+  refreshMs: number;
+  missing: 'default' | 'empty' | 'keep-last';
+  enabled: boolean;
+  mappings: DataConnectionMapping[];
+}
+
+export type MediaCueClipType = 'audio' | 'video';
+
+export type MediaCueSource =
+  | {
+      id: string;
+      name: string;
+      kind: 'clip';
+      mediaType: MediaCueClipType;
+      /** URL, data URI, or asset:<id> reference. */
+      src: string;
+    }
+  | {
+      id: string;
+      name: string;
+      kind: 'live';
+      tag: string;
+      /** Optional image or video fallback URL/data URI/asset reference. */
+      fallback?: string;
+    };
+
+export type MediaCueTrigger =
+  | { type: 'timeline'; startFrame: number }
+  | { type: 'lifecycle'; keyframeId: string }
+  | { type: 'customAction'; actionId: string }
+  | { type: 'manual' };
+
+export interface MediaCueTransition {
+  type: 'cut' | 'crossfade';
+  durationFrames: number;
+  audio: 'follow-picture' | 'cut' | 'crossfade';
+  onFailure: 'keep-current' | 'fallback' | 'transparent';
+}
+
+/** Shared nonvisual transport for playable audio/video and renderer-provided live sources. */
+export interface MediaCue {
+  id: string;
+  name: string;
+  sources: MediaCueSource[];
+  activeSourceId: string | null;
+  trigger: MediaCueTrigger;
+  trimStartMs: number;
+  trimEndMs: number | null;
+  /** Authored Timeline block length; null derives it from trim/source duration. */
+  durationFrames: number | null;
+  loop: boolean;
+  speed: number;
+  volume: number;
+  muted: boolean;
+  retrigger: 'restart' | 'resume' | 'ignore';
+  transition: MediaCueTransition;
+  visual: {
+    targetLayerId: string | null;
+    fit: MediaPaintFit;
+    positionX: number;
+    positionY: number;
+  };
 }
 
 /** An author-defined `customAction` the Composition responds to — compiles into `manifest.customActions[]`. */
@@ -761,13 +950,15 @@ export interface CustomActionDefinition {
 export interface Asset {
   id: string;
   name: string;
-  kind: 'image' | 'media' | 'font' | 'source';
+  kind: 'image' | 'media' | 'audio' | 'font' | 'source';
   dataUri: string;
   mimeType: string;
   /** Original local filename retained for traceability after package-path normalization. */
   originalFileName?: string;
   /** Imported byte count, used for resource reporting without decoding the data URI. */
   byteSize?: number;
+  /** Decoded duration for playable audio/video, captured at import time. */
+  durationMs?: number;
   /** Optional validated relative package path. Defaults to assets/<asset-id>.<extension>. */
   packagePath?: string;
   /** CSS family name registered by the exported runtime when kind is font. */
@@ -841,6 +1032,7 @@ export interface Composition {
   frameRate: number;
   /** Crossfade duration for updateAction, authored in composition frames. */
   updateTransitionFrames: number;
+  updateInterruption: 'queue' | 'replace';
   /** Persistent authoring layout controls; excluded from compiled OGraf output. */
   layout: CompositionLayout;
   layers: Layer[];
@@ -849,6 +1041,9 @@ export interface Composition {
   dataFields: FieldDefinition[];
   /** Runtime-expanded GDD array prototypes. */
   runtimeCollections: RuntimeCollectionDefinition[];
+  dataConnections: DataConnectionDefinition[];
+  /** Composition-level audio/video/live transports. They are timeline tracks, not canvas layers. */
+  mediaCues: MediaCue[];
   patterns: TilingPattern[];
   customActions: CustomActionDefinition[];
   assets: Asset[];

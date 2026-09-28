@@ -288,6 +288,69 @@ const effectPatchSchema = z
   })
   .strict();
 
+const mediaCueSourceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      kind: z.literal('clip'),
+      mediaType: z.enum(['audio', 'video']),
+      src: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      kind: z.literal('live'),
+      tag: z.string().min(1),
+      fallback: z.string().min(1).optional(),
+    })
+    .strict(),
+]);
+const mediaCueTriggerSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('timeline'), startFrame: frame }).strict(),
+  z.object({ type: z.literal('lifecycle'), keyframeId: z.string().min(1) }).strict(),
+  z.object({ type: z.literal('customAction'), actionId: z.string().min(1) }).strict(),
+  z.object({ type: z.literal('manual') }).strict(),
+]);
+const mediaCueTransitionSchema = z
+  .object({
+    type: z.enum(['cut', 'crossfade']),
+    durationFrames: z.number().int().nonnegative(),
+    audio: z.enum(['follow-picture', 'cut', 'crossfade']),
+    onFailure: z.enum(['keep-current', 'fallback', 'transparent']),
+  })
+  .strict();
+const mediaCueVisualSchema = z
+  .object({
+    targetLayerId: z.string().nullable(),
+    fit: z.enum(['cover', 'contain', 'fill']),
+    positionX: z.number().min(0).max(1),
+    positionY: z.number().min(0).max(1),
+  })
+  .strict();
+const mediaCueSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    name: z.string().min(1),
+    sources: z.array(mediaCueSourceSchema).min(1),
+    activeSourceId: z.string().nullable(),
+    trigger: mediaCueTriggerSchema,
+    trimStartMs: z.number().nonnegative(),
+    trimEndMs: z.number().positive().nullable(),
+    durationFrames: z.number().int().positive().nullable(),
+    loop: z.boolean(),
+    speed: z.number().min(0.1).max(16),
+    volume: z.number().min(0).max(1),
+    muted: z.boolean(),
+    retrigger: z.enum(['restart', 'resume', 'ignore']),
+    transition: mediaCueTransitionSchema,
+    visual: mediaCueVisualSchema,
+  })
+  .strict();
+const mediaCuePatchSchema = mediaCueSchema.omit({ id: true }).partial().strict();
+
 export const authoringOperationSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('set_layer_lighting'),
@@ -301,6 +364,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     layerId,
     layerName,
+    groupId: z.string().min(1).optional(),
     effectType: z.enum(EFFECT_TYPES),
     patch: effectPatchSchema.optional(),
     index: z.number().int().nonnegative().optional(),
@@ -310,6 +374,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     layerId,
     layerName,
+    groupId: z.string().min(1).optional(),
     effectId: z.string(),
     patch: effectPatchSchema,
     scope: z.enum(['authored', 'frame']).default('authored'),
@@ -320,6 +385,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     layerId,
     layerName,
+    groupId: z.string().min(1).optional(),
     effectId: z.string(),
   }),
   z.object({
@@ -327,6 +393,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     layerId,
     layerName,
+    groupId: z.string().min(1).optional(),
     effectId: z.string(),
   }),
   z.object({
@@ -334,6 +401,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     layerId,
     layerName,
+    groupId: z.string().min(1).optional(),
     effectIds: z.array(z.string()).max(16),
   }),
 
@@ -367,6 +435,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     height: z.number().positive().optional(),
     frameRate: z.number().positive().optional(),
     updateTransitionFrames: z.number().int().nonnegative().optional(),
+    updateInterruption: z.enum(['queue', 'replace']).optional(),
     backgroundColor: z.string().optional(),
   }),
   z.object({
@@ -451,6 +520,12 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     type: z.literal('remove_lifecycle_step'),
     compositionId,
     keyframeId: z.string(),
+  }),
+  z.object({
+    type: z.literal('retime_animation_phase'),
+    compositionId,
+    phase: z.enum(['in', 'on-air', 'out', 'entire']),
+    targetFrames: z.number().int().min(1),
   }),
   z.object({
     type: z.literal('add_canvas_guide'),
@@ -549,6 +624,11 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
       'image/gif',
       'image/webp',
       'image/svg+xml',
+      'video/mp4',
+      'video/webm',
+      'audio/mpeg',
+      'audio/wav',
+      'audio/ogg',
       'font/ttf',
       'font/otf',
       'font/woff',
@@ -583,6 +663,22 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     assetId: z.string(),
     force: z.boolean().default(false),
+  }),
+  z.object({
+    type: z.literal('add_media_cue'),
+    compositionId,
+    cue: mediaCueSchema,
+  }),
+  z.object({
+    type: z.literal('update_media_cue'),
+    compositionId,
+    cueId: z.string().min(1),
+    patch: mediaCuePatchSchema,
+  }),
+  z.object({
+    type: z.literal('remove_media_cue'),
+    compositionId,
+    cueId: z.string().min(1),
   }),
   z.object({
     type: z.literal('add_layer'),
@@ -768,6 +864,105 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
       })
       .strict()
       .optional(),
+    autoLayout: z
+      .object({
+        direction: z.enum(['none', 'horizontal', 'vertical']).optional(),
+        gap: z.number().min(0).optional(),
+        paddingTop: z.number().min(0).optional(),
+        paddingRight: z.number().min(0).optional(),
+        paddingBottom: z.number().min(0).optional(),
+        paddingLeft: z.number().min(0).optional(),
+        align: z.enum(['start', 'center', 'end', 'stretch']).optional(),
+        hugWidth: z.boolean().optional(),
+        hugHeight: z.boolean().optional(),
+        minWidth: z.number().min(0).optional(),
+        maxWidth: z.number().min(0).optional(),
+        collapseHidden: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    updateTransition: z
+      .object({
+        style: z
+          .enum([
+            'inherit',
+            'none',
+            'crossfade',
+            'slide-left',
+            'slide-right',
+            'slide-up',
+            'slide-down',
+          ])
+          .optional(),
+        durationFrames: z.number().int().min(0).optional(),
+        distance: z.number().min(0).optional(),
+      })
+      .strict()
+      .optional(),
+    motionPath: z
+      .object({
+        sourceLayerId: z.string().min(1),
+        progress: z.number().min(0).max(1),
+        orientToPath: z.boolean(),
+        offsetX: z.number(),
+        offsetY: z.number(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+  }),
+  z.object({
+    type: z.literal('set_layer_visual_rules'),
+    compositionId,
+    layerId,
+    layerName,
+    rules: z.array(
+      z
+        .object({
+          id: z.string().min(1),
+          name: z.string().min(1),
+          enabled: z.boolean(),
+          fieldId: z.string().min(1),
+          sourcePath: z.array(z.string()),
+          operator: z.enum([
+            'equals',
+            'not-equals',
+            'empty',
+            'not-empty',
+            'greater-than',
+            'less-than',
+            'changed',
+            'increased',
+            'decreased',
+          ]),
+          value: z.unknown().optional(),
+          actions: z.array(
+            z.discriminatedUnion('type', [
+              z.object({ type: z.literal('visibility'), visible: z.boolean() }).strict(),
+              z
+                .object({
+                  type: z.literal('property'),
+                  targetProperty: z.string().min(1),
+                  value: z.unknown(),
+                })
+                .strict(),
+              z.object({ type: z.literal('custom-action'), actionId: z.string().min(1) }).strict(),
+              z.object({ type: z.literal('play-sound'), cueId: z.string().min(1) }).strict(),
+              z
+                .object({
+                  type: z.literal('take-media'),
+                  cueId: z.string().min(1),
+                  sourceId: z.string().min(1).optional(),
+                })
+                .strict(),
+              z
+                .object({ type: z.literal('shader-animation'), actionId: z.string().min(1) })
+                .strict(),
+            ]),
+          ),
+        })
+        .strict(),
+    ),
   }),
   z.object({
     type: z.literal('update_element'),
@@ -846,6 +1041,12 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
       .union([
         z.object({ type: z.literal('lifecycle') }).strict(),
         z.object({ type: z.literal('step'), stepKeyframeId: z.string().min(1) }).strict(),
+        z
+          .object({
+            type: z.literal('customAction'),
+            customActionId: z.string().min(1),
+          })
+          .strict(),
       ])
       .optional(),
     durationFrames: z.number().int().positive().optional(),
@@ -988,6 +1189,11 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     offsetPerItem: z.object({ x: z.number(), y: z.number() }).strict(),
     capacity: z.number().int().min(1).max(100).default(12),
     overflow: z.literal('truncate').default('truncate'),
+    itemKeyPath: z.array(z.string()).default([]),
+    sortPath: z.array(z.string()).default([]),
+    sortDirection: z.enum(['none', 'ascending', 'descending']).default('none'),
+    pageSize: z.number().int().min(0).max(100).default(0),
+    page: z.number().int().min(0).default(0),
   }),
   z.object({
     type: z.literal('update_runtime_collection'),
@@ -1002,6 +1208,11 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     offsetPerItem: z.object({ x: z.number(), y: z.number() }).strict().optional(),
     capacity: z.number().int().min(1).max(100).optional(),
     overflow: z.literal('truncate').optional(),
+    itemKeyPath: z.array(z.string()).optional(),
+    sortPath: z.array(z.string()).optional(),
+    sortDirection: z.enum(['none', 'ascending', 'descending']).optional(),
+    pageSize: z.number().int().min(0).max(100).optional(),
+    page: z.number().int().min(0).optional(),
   }),
   z.object({
     type: z.literal('remove_runtime_collection'),

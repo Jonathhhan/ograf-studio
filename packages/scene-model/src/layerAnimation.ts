@@ -53,6 +53,7 @@ export const ANIMATABLE_LAYER_PROPERTIES: readonly AnimatableLayerProperty[] = [
   ...TRANSFORM_ANIMATION_PROPERTIES,
   'strokeWidth',
   ...EFFECT_ANIMATION_PROPERTIES,
+  'motionPathProgress',
 ];
 
 export const ANIMATABLE_PROPERTY_LABELS: Record<string, string> = {
@@ -70,6 +71,7 @@ export const ANIMATABLE_PROPERTY_LABELS: Record<string, string> = {
   dropShadowOffsetX: 'Shadow X',
   dropShadowOffsetY: 'Shadow Y',
   dropShadowBlur: 'Shadow Softness',
+  motionPathProgress: 'Motion Path Progress',
 };
 
 const GRADIENT_STOP_OFFSET_PROPERTY = /^fill\.stops\[(0|[1-9]\d*)\]\.offset$/;
@@ -105,6 +107,7 @@ export function isAnimatableLayerPropertyApplicable(
   layer: Layer,
   property: AnimatableLayerProperty,
 ): boolean {
+  if (property === 'motionPathProgress') return layer.motionPath !== null;
   if (parseShaderAnimationProperty(property))
     return shaderAnimationPropertySpec(layer.element, property) !== undefined;
   if (parseEffectProperty(property))

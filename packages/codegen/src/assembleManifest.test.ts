@@ -7,8 +7,10 @@ import {
   createCustomActionDefinition,
   createFieldDefinition,
   createKeyframe,
+  createLayerLoopClip,
   createLayerOfKind,
   createMediaPaint,
+  createMediaCue,
   createProject,
   createTransition,
   type Composition,
@@ -160,6 +162,49 @@ describe('assembleManifest — content', () => {
     expect(byType.playAction!.type).toBe('playAction');
   });
 
+  it('publishes the longest per-layer designed update transition', () => {
+    const layer = createLayerOfKind('text');
+    layer.updateTransition = { style: 'slide-left', durationFrames: 30, distance: 48 };
+    const composition = createComposition({
+      frameRate: 25,
+      updateTransitionFrames: 10,
+      updateInterruption: 'replace',
+      layers: [layer],
+    });
+    const manifest = build(composition);
+    expect(manifest.actionDurations?.find((duration) => duration.type === 'updateAction')).toEqual({
+      type: 'updateAction',
+      duration: 1200,
+    });
+    const compiled = compileDescriptor(composition);
+    expect(compiled.updateInterruption).toBe('replace');
+    expect(compiled.layers[0]!.updateTransition).toEqual({
+      style: 'slide-left',
+      durationFrames: 30,
+      distance: 48,
+    });
+  });
+
+  it('publishes the longest custom-action clip duration', () => {
+    const layer = createLayerOfKind('rectangle');
+    layer.loop = createLayerLoopClip({
+      activation: { type: 'customAction', customActionId: 'pulse' },
+      durationFrames: 30,
+      repeatCount: 2,
+    });
+    const composition = createComposition({
+      frameRate: 50,
+      layers: [layer],
+      customActions: [createCustomActionDefinition({ actionId: 'pulse', name: 'Pulse' })],
+    });
+    const manifest = build(composition);
+    expect(
+      manifest.actionDurations?.find(
+        (duration) => duration.type === 'customAction' && duration.customActionId === 'pulse',
+      ),
+    ).toEqual({ type: 'customAction', customActionId: 'pulse', duration: 1200 });
+  });
+
   it('gives each playAction step its own duration from the inbound transition', () => {
     const start = createKeyframe({ name: 'Start', role: 'start' });
     const a = createKeyframe({ name: 'A', role: 'step' });
@@ -193,6 +238,31 @@ describe('assembleManifest — content', () => {
       required: ['headline'],
     });
     expect(manifest.customActions).toEqual([{ id: 'pulse', name: 'Pulse' }]);
+  });
+
+  it('declares live Media Cue renderer requirements and public clip access', () => {
+    const composition = createComposition({
+      mediaCues: [
+        createMediaCue({
+          sources: [
+            {
+              id: 'remote',
+              name: 'Remote',
+              kind: 'clip',
+              mediaType: 'video',
+              src: 'https://cdn.example/intro.mp4',
+            },
+            { id: 'live', name: 'Live', kind: 'live', tag: 'program.live' },
+          ],
+          activeSourceId: 'live',
+        }),
+      ],
+    });
+    const requirement = build(composition).renderRequirements?.[0];
+    expect(requirement).toMatchObject({
+      accessToPublicInternet: { exact: true },
+      engine: [{ type: 'ZeroDensityHTML', version: { min: '1.0' } }],
+    });
   });
 
   it('omits optional fields rather than emitting empty ones', () => {

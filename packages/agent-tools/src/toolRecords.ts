@@ -209,14 +209,13 @@ const SHADER_PAINT_CAPABILITIES = {
 
 const MEDIA_PAINT_CAPABILITIES = {
   type: 'media',
-  shape:
-    '{type:"media",source:{kind:"clip",src}|{kind:"live",tag,fallback?},fit:"cover"|"contain"|"fill",positionX:0..1,positionY:0..1,loop,speed:0.1..16,offsetMs>=0,muted:true}',
+  authoring: 'Use add_media_cue/update_media_cue and cue.visual.targetLayerId.',
   semantics:
-    'Moving image clipped by native object geometry/alpha. Audio is never emitted. Clip sources may use asset:<id>, packaged/remote URLs or data URIs. Live sources emit the zd-ograf-media v1 hook and require the ZeroDensityHTML renderer; fallback is portable.',
+    'Runtime materialization of a Media Cue video/live source clipped by its target layer geometry. Audio stays on the nonvisual cue track. Do not author a standalone media paint.',
   assetImport:
-    'Import MP4/WebM through Resources > Media or ograf_import_asset, then use asset:<id> in source.src. Current editable sources embed asset bytes and retain the existing 32 MiB MCP import limit.',
+    'Import MP4/WebM or MP3/WAV/OGG through Resources > Media or ograf_import_asset, then use asset:<id> in a cue clip source.',
   timing:
-    'Clip playback is realtime, muted and optionally looped. Live media is realtime-only; disable non-real-time support before certification/export.',
+    'Media Cue owns trigger, trim, loop, speed, volume, mute, retrigger and source transition. Initial runtime is real-time-only.',
   liveTag: {
     element: 'zd-ograf-media',
     version: 1,
@@ -252,6 +251,7 @@ const CAPABILITY_SECTION_KEYS: Record<CapabilitySection, readonly string[]> = {
     'masking',
     'tiling',
     'composableEffects',
+    'mediaCues',
   ],
   easing: ['easingPresets'],
   semantics: ['semantics', 'semanticAuthoring'],
@@ -499,6 +499,9 @@ const IMPORT_MIME_BY_EXTENSION: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
   '.ttf': 'font/ttf',
   '.otf': 'font/otf',
   '.woff': 'font/woff',
@@ -646,6 +649,7 @@ function inspectComposition(composition: Composition) {
         pixelsPerSecond: (row.period * row.cycles * composition.frameRate) / pattern.cycleFrames,
       })),
     })),
+    mediaCues: structuredClone(composition.mediaCues ?? []),
     layers: composition.layers.map((layer, index) => ({
       index,
       id: layer.id,
@@ -716,6 +720,10 @@ function inspectComposition(composition: Composition) {
       mask: layer.mask,
       lighting: layer.lighting ?? null,
       constraints: layer.constraints,
+      autoLayout: layer.autoLayout,
+      visualRules: layer.visualRules,
+      updateTransition: layer.updateTransition,
+      motionPath: layer.motionPath,
       semantics: layer.semantics,
       designTokenBindings: layer.designTokenBindings,
       componentLink: layer.componentLink,
@@ -840,6 +848,7 @@ function projectSnapshotProjection(
             projectedLayer.isMaskOnly = layer.isMaskOnly;
             projectedLayer.mask = layer.mask;
             projectedLayer.constraints = layer.constraints;
+            projectedLayer.autoLayout = layer.autoLayout;
             projectedLayer.semantics = layer.semantics;
             projectedLayer.designTokenBindings = layer.designTokenBindings;
             projectedLayer.componentLink = layer.componentLink;
@@ -951,6 +960,7 @@ function generatedOperationResults(
         'runtime-collection',
         'pattern',
         'effect',
+        'media-cue',
       ].includes(generated.kind)
     ) {
       return [];
@@ -1000,6 +1010,12 @@ function generatedOperationResults(
         .flatMap((composition) => composition.assets)
         .find((candidate) => candidate.id === generated.id);
       return [{ ...base, ...(asset ? { name: asset.name, mimeType: asset.mimeType } : {}) }];
+    }
+    if (generated.kind === 'media-cue') {
+      const cue = project.compositions
+        .flatMap((composition) => composition.mediaCues)
+        .find((candidate) => candidate.id === generated.id);
+      return [{ ...base, ...(cue ? { name: cue.name } : {}) }];
     }
     if (generated.kind === 'timeline-group') {
       const group = project.compositions
@@ -1155,6 +1171,10 @@ function normalizeOperationSelectors(
     if (operation.type === 'add_effect' || operation.type === 'duplicate_effect')
       operation.id = createId('fx');
     if (operation.type === 'add_layer') operation.id = createId('layer');
+    if (operation.type === 'add_media_cue') {
+      const cue = operation.cue as Record<string, unknown>;
+      if (!cue.id) cue.id = createId('media-cue');
+    }
     if (operation.type === 'add_data_field') operation.id = createId('field');
     if (operation.type === 'create_timeline_group') operation.id = createId('timeline-group');
     if (operation.type === 'group_layers') operation.id = createId('group');
@@ -1928,7 +1948,7 @@ export function createOGrafToolRecords(
           runtimeCollections:
             'A runtime collection expands one contiguous grouped prototype from an object-item GDD array. Capacity is bounded to 1..100, overflow truncates, index offsets are explicit, updates replace snapshots atomically, and realtime/non-realtime sampling never depends on arrival order or item count.',
           localLoops:
-            'A layer may own one local loop clip with independent numeric property tracks on a 0..durationFrames ruler. set_layer_loop configures lifecycle or Step activation; set_loop_property_track authors incoming-eased keys without creating composition keys or OGraf Steps. Null repeatCount means infinite. All loop phase is sampled from the shared OGraf timestamp/action schedule; loops never invoke lifecycle actions.',
+            'One layer-local property clip may use lifecycle, Step, or customAction activation. Custom-action clips require finite repeats, apply the payload as a partial data update, and settle afterward. Other clips may repeat infinitely. Phase follows the OGraf timestamp/action schedule; clips never invoke lifecycle actions.',
           semanticAuthoring:
             'Layer roles, tags, and descriptions are authoring-only intent used by recipes, queries, QA, and review. They never enter the compiled OGraf runtime.',
           textStroke:
@@ -2134,6 +2154,7 @@ export function createOGrafToolRecords(
           ],
           customActions: ['add_custom_action', 'update_custom_action', 'remove_custom_action'],
           assets: ['add_asset', 'remove_asset', 'ograf_import_asset', 'ograf_import_svg_bundle'],
+          mediaCues: ['add_media_cue', 'update_media_cue', 'remove_media_cue'],
           detail:
             'Lifecycle retiming shares the browser editor planner and therefore returns the same duration bounds and warnings. Structural canvas groups, reusable-component snapshots, custom actions, and asset removal use the same canonical project mutations as OGraf Studio.',
         },
@@ -2152,6 +2173,8 @@ export function createOGrafToolRecords(
             'Top to bottom. Repeated types are allowed; each effect has a stable ID. Reorder supplies every ID exactly once. Maximum 16 effects including compatibility slots.',
           editing:
             'New effects start bypassed; blendMode enables them. update_effect accepts name, enabled, blendMode, blendOpacity, params and a complete paint for shader. Numeric catalog params use authored or frame scope. Rename/bypass/reorder preserve keys. Duplicate copies owned tracks, bindings and shader; remove clears owned links.',
+          groups:
+            'The same effect operations accept groupId instead of layerId/layerName. They materialize one synchronized effect ID on every unlocked member layer. Member-only effects remain independent; group reorder changes only shared entries. Export uses ordinary per-layer OGraf effects.',
           compatibility:
             'Old blur and shadow remain reorderable base-blur/base-shadow slots backed by existing numeric tracks and dropShadowColor bindings. inspect_scene resolves virtual slots on old documents. Existing appearance and data keys are preserved.',
           animation:
@@ -2334,6 +2357,21 @@ export function createOGrafToolRecords(
           referenceSyntax: 'asset:<id>',
           semantics:
             'Assets persist once in composition.assets; editor/capture resolve references and certified package export writes each registry entry once. remove_asset refuses referenced image sources unless force=true, which clears those references; removing an in-use font reports a fallback warning.',
+        },
+        mediaCues: {
+          operations: ['add_media_cue', 'update_media_cue', 'remove_media_cue'],
+          sources: ['audio clip', 'video clip', 'renderer live input'],
+          triggers: ['timeline frame', 'lifecycle state', 'customAction', 'manual preview'],
+          retrigger: ['restart', 'resume', 'ignore'],
+          transitions: ['cut', 'crossfade'],
+          customActionPayload:
+            '{source: SOURCE_ID_OR_NAME} selects a named cue source before triggering playback.',
+          semantics:
+            'Media Cues are composition-level Timeline tracks, not canvas objects. Audio is nonvisual. Video/live cues optionally paint one target layer while sharing trim, speed, loop, volume, mute, trigger and source-transition controls.',
+          audioCustomAction:
+            'For action-triggered sound, add_media_cue with an audio clip source and trigger:{type:"customAction",actionId}. In Studio, Audio -> Create Playback Cue creates a Manual advanced cue; Add at Playhead creates a timeline Sound Event.',
+          runtime:
+            'Initial profile is real-time-only. Crossfade double-buffers audio/video sources; live inputs require the zd-ograf-media renderer hook and target readiness verification.',
         },
         reusableComponents: {
           operations: [
@@ -3598,7 +3636,7 @@ export function createOGrafToolRecords(
     'ograf_import_asset',
     {
       title: 'Import a workspace asset into OGraf',
-      description: 'Embed workspace image/video/font/text (32 MiB max); returns asset:<id>.',
+      description: 'Embed workspace image/video/audio/font/text (32 MiB max); returns asset:<id>.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         expectedRevision: z.number().int().nonnegative(),
@@ -3614,6 +3652,9 @@ export function createOGrafToolRecords(
             'image/svg+xml',
             'video/mp4',
             'video/webm',
+            'audio/mpeg',
+            'audio/wav',
+            'audio/ogg',
             'font/ttf',
             'font/otf',
             'font/woff',

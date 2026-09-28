@@ -15,13 +15,15 @@ import {
   type LayerEffects,
   type TilingPattern,
   valueAtSourcePath,
+  visualRuleMatches,
+  visualRuleValue,
   type Asset,
   type Element,
   type ElementType,
   type FieldDefinition,
   type Layer,
 } from '@ograf-editor/scene-model';
-import type { TestValue } from './testDataStore';
+import type { TestValue, VisualRuleStateOverride } from './testDataStore';
 
 interface BindableProperty {
   value: string;
@@ -42,6 +44,7 @@ export const BINDABLE_PROPERTIES: Record<ElementType, BindableProperty[]> = {
   // An image sequence's frame list isn't a sensible single-value data-binding target (v1 scope).
   'image-sequence': [],
   lottie: [],
+  audio: [],
   shader: [],
 };
 
@@ -56,8 +59,9 @@ export function resolveEffectiveElement(
   assets: Asset[] = [],
   dataFields: FieldDefinition[] = [],
   patterns: TilingPattern[] = [],
+  visualRuleStateOverride?: VisualRuleStateOverride,
 ): Element {
-  const element = layer.bindings.reduce<Element>((resolved, binding) => {
+  let element = layer.bindings.reduce<Element>((resolved, binding) => {
     const hasTestValue = Object.prototype.hasOwnProperty.call(testValues, binding.fieldId);
     const rootValue = hasTestValue
       ? testValues[binding.fieldId]
@@ -70,7 +74,48 @@ export function resolveEffectiveElement(
     const mapped = binding.valueMap?.[String(value)] ?? value;
     return applyElementDataValue(resolved, binding.targetProperty, mapped);
   }, layer.element);
+  for (const rule of layer.visualRules ?? []) {
+    const field = dataFields.find((candidate) => candidate.id === rule.fieldId);
+    const root = Object.prototype.hasOwnProperty.call(testValues, rule.fieldId)
+      ? testValues[rule.fieldId]
+      : field?.defaultValue;
+    if (
+      !rule.enabled ||
+      !visualRuleMatches(rule.operator, visualRuleValue(root, rule.sourcePath), rule.value)
+    )
+      continue;
+    for (const action of rule.actions) {
+      if (action.type === 'property')
+        element = applyElementDataValue(element, action.targetProperty, action.value);
+    }
+  }
+  for (const [property, value] of Object.entries(visualRuleStateOverride?.properties ?? {}))
+    element = applyElementDataValue(element, property, value);
   return resolvePatternElement(resolveElementAssetReferences(element, assets), patterns);
+}
+
+export function resolveEffectiveVisibility(
+  layer: Layer,
+  testValues: Record<string, TestValue>,
+  dataFields: FieldDefinition[],
+  visualRuleStateOverride?: VisualRuleStateOverride,
+): boolean {
+  let visible = layer.isVisible;
+  for (const rule of layer.visualRules ?? []) {
+    const field = dataFields.find((candidate) => candidate.id === rule.fieldId);
+    const root = Object.prototype.hasOwnProperty.call(testValues, rule.fieldId)
+      ? testValues[rule.fieldId]
+      : field?.defaultValue;
+    if (
+      !rule.enabled ||
+      !visualRuleMatches(rule.operator, visualRuleValue(root, rule.sourcePath), rule.value)
+    )
+      continue;
+    for (const action of rule.actions) {
+      if (action.type === 'visibility') visible = action.visible;
+    }
+  }
+  return visualRuleStateOverride?.visibility ?? visible;
 }
 
 export function bindableProperties(element: Element, effects?: LayerEffects): BindableProperty[] {

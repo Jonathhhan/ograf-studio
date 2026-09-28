@@ -6,12 +6,14 @@ describe('Resources tree model', () => {
   it('partitions each asset into one compact tree branch', () => {
     const image = createAsset({ id: 'image', kind: 'image' });
     const media = createAsset({ id: 'media', kind: 'media' });
+    const audio = createAsset({ id: 'audio', kind: 'audio' });
     const font = createAsset({ id: 'font', kind: 'font' });
     const source = createAsset({ id: 'source', kind: 'source' });
 
-    expect(partitionResourceAssets([source, media, image, font])).toEqual({
+    expect(partitionResourceAssets([source, audio, media, image, font])).toEqual({
       images: [image],
       media: [media],
+      audio: [audio],
       fonts: [font],
       sources: [source],
     });
@@ -22,6 +24,7 @@ describe('Resources tree model', () => {
       assets: [
         createAsset({ kind: 'image' }),
         createAsset({ kind: 'media' }),
+        createAsset({ kind: 'audio' }),
         createAsset({ kind: 'image' }),
         createAsset({ kind: 'font' }),
       ],
@@ -45,6 +48,7 @@ describe('Resources tree model', () => {
       components: 0,
       images: 2,
       media: 1,
+      audio: 1,
       fonts: 1,
       sources: 0,
     });

@@ -215,6 +215,48 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
       2,
     );
   });
+  it('keeps one shared effects stack synchronized across persistent group members', () => {
+    useTimelineStore.getState().setAutoKeyframe(false);
+    const store = useProjectStore.getState(),
+      firstId = store.addLayer('rectangle'),
+      secondId = store.addLayer('text'),
+      layerIds = [firstId, secondId],
+      layers = () =>
+        useProjectStore
+          .getState()
+          .project.compositions[0]!.layers.filter((layer) => layerIds.includes(layer.id));
+    store.groupLayers(layerIds);
+    store.addGroupEffect(layerIds, 'glow');
+    const shared = getEffectStack(layers()[0]!.effects).find((effect) => effect.type === 'glow')!;
+    expect(
+      layers().map((layer) => getEffectStack(layer.effects).map((effect) => effect.id)),
+    ).toEqual([
+      getEffectStack(layers()[0]!.effects).map((effect) => effect.id),
+      getEffectStack(layers()[0]!.effects).map((effect) => effect.id),
+    ]);
+
+    store.updateGroupEffect(layerIds, shared.id, { enabled: true, params: { radius: 18 } }, 0);
+    expect(
+      layers().map(
+        (layer) =>
+          getEffectStack(layer.effects).find((effect) => effect.id === shared.id)!.params.radius,
+      ),
+    ).toEqual([18, 18]);
+
+    store.duplicateGroupEffect(layerIds, shared.id);
+    const ids = getEffectStack(layers()[0]!.effects).map((effect) => effect.id);
+    store.reorderGroupEffects(layerIds, [...ids].reverse());
+    expect(
+      layers().map((layer) => getEffectStack(layer.effects).map((effect) => effect.id)),
+    ).toEqual([[...ids].reverse(), [...ids].reverse()]);
+
+    store.removeGroupEffect(layerIds, shared.id);
+    expect(
+      layers().every(
+        (layer) => !getEffectStack(layer.effects).some((effect) => effect.id === shared.id),
+      ),
+    ).toBe(true);
+  });
   it('applies and removes a pack through Immer with existing token links and rounded shapes', () => {
     const store = useProjectStore.getState();
     const id = store.addLayer('rectangle');

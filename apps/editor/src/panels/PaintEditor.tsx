@@ -1,5 +1,5 @@
 import { PropertyRow } from '../components/PropertyRow';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   createMediaPaint,
   createDefaultGradient,
@@ -16,6 +16,8 @@ import { ShaderSourceEditor } from './ShaderSourceEditor';
 import { shaderPaintWithPatch } from '../state/shaderResources';
 import { SHADER_RESOURCE_MIME, shaderPaintFromResourceDrag } from '../state/shaderDrag';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
+import { mediaPaintReadyToCommit } from './mediaPaintDraft';
+import { MEDIA_FILE_ACCEPT, mediaFileImportError } from './mediaFileImport';
 import './PaintEditor.css';
 
 interface PaintEditorProps {
@@ -50,7 +52,16 @@ export function PaintEditor({
 }: PaintEditorProps) {
   const [dragOver, setDragOver] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
-  const kind = value === undefined ? 'original' : typeof value === 'string' ? 'solid' : value.type;
+  const [mediaDraft, setMediaDraft] = useState<MediaPaint | null>(null);
+  useEffect(() => setMediaDraft(null), [value]);
+  const activeMedia = mediaDraft ?? (isMediaPaint(value) ? value : null);
+  const kind = activeMedia
+    ? 'media'
+    : value === undefined
+      ? 'original'
+      : typeof value === 'string'
+        ? 'solid'
+        : value.type;
   const gradient = isGradientPaint(value) ? value : null;
   const updateGradient = (patch: Partial<GradientPaint>) => {
     if (gradient) onChange({ ...gradient, ...patch });
@@ -89,6 +100,7 @@ export function PaintEditor({
               useProjectStore.getState().project,
               event.dataTransfer.getData(SHADER_RESOURCE_MIME),
             );
+            setMediaDraft(null);
             onChange(paint);
             setDropError(null);
           } catch (cause) {
@@ -100,7 +112,7 @@ export function PaintEditor({
           help={
             label === 'Outline'
               ? 'Choose the text outline paint. Its shader follows editable characters and uses the Stroke Width below. Drop a shader from Resources onto this row to replace it.'
-              : isMediaPaint(value)
+              : activeMedia
                 ? 'Media is this object’s fill. Choosing or dropping a shader here replaces Media; drop the shader onto Effects stack to process the video instead.'
                 : 'Choose the object fill. Drop a shader from Resources onto this row to apply it. Shader controls are declared with #pragma ograf.'
           }
@@ -112,16 +124,19 @@ export function PaintEditor({
             disabled={disabled}
             onChange={(event) => {
               const next = event.target.value;
+              if (next === 'media') {
+                setMediaDraft(createMediaPaint());
+                return;
+              }
+              setMediaDraft(null);
               onChange(
                 next === 'original'
                   ? undefined
-                  : next === 'media'
-                    ? createMediaPaint()
-                    : next === 'shader'
-                      ? createShaderPaint()
-                      : next === 'solid'
-                        ? '#3b3f4a'
-                        : createDefaultGradient(next as GradientPaint['type']),
+                  : next === 'shader'
+                    ? createShaderPaint()
+                    : next === 'solid'
+                      ? '#3b3f4a'
+                      : createDefaultGradient(next as GradientPaint['type']),
               );
             }}
           >
@@ -148,8 +163,27 @@ export function PaintEditor({
           {dropError}
         </p>
       )}
-      {isMediaPaint(value) ? (
-        <MediaPaintControls value={value} disabled={disabled} onChange={onChange} />
+      {activeMedia ? (
+        <>
+          {mediaDraft && !mediaPaintReadyToCommit(mediaDraft) ? (
+            <p className="inspector-hint media-paint-pending">
+              Choose or import a clip. Media is applied only after its source is valid.
+            </p>
+          ) : null}
+          <MediaPaintControls
+            value={activeMedia}
+            disabled={disabled}
+            onChange={(next) => {
+              if (!isMediaPaint(next)) return;
+              if (mediaPaintReadyToCommit(next)) {
+                setMediaDraft(null);
+                onChange(next);
+              } else {
+                setMediaDraft(next);
+              }
+            }}
+          />
+        </>
       ) : isShaderPaint(value) ? (
         <>
           {shaderAnimationActive && (
@@ -294,6 +328,15 @@ function MediaPaintControls({
   onChange: (value: Paint) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [mediaImportError, setMediaImportError] = useState('');
+  const [customClipSource, setCustomClipSource] = useState(
+    value.source.kind === 'clip' ? value.source.src : '',
+  );
+  useEffect(() => {
+    if (value.source.kind === 'clip' && !value.source.src.startsWith('asset:')) {
+      setCustomClipSource(value.source.src);
+    }
+  }, [value.source]);
   const composition = useActiveComposition();
   const importAsset = useProjectStore((state) => state.importAsset);
   const mediaAssets = composition.assets.filter((asset) => asset.kind === 'media');
@@ -350,13 +393,27 @@ function MediaPaintControls({
           {!value.source.src.startsWith('asset:') ? (
             <PropertyRow help="Absolute video URL or asset reference." className="inspector-row">
               <span>Source</span>
-              <input
-                type="text"
-                value={value.source.src}
-                disabled={disabled}
-                placeholder="https://example.com/clip.mp4"
-                onChange={(event) => patch({ source: { kind: 'clip', src: event.target.value } })}
-              />
+              <span className="media-paint-source-editor">
+                <input
+                  type="text"
+                  value={customClipSource}
+                  disabled={disabled}
+                  placeholder="https://example.com/clip.mp4"
+                  onChange={(event) => setCustomClipSource(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && customClipSource.trim()) {
+                      patch({ source: { kind: 'clip', src: customClipSource } });
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={disabled || !customClipSource.trim()}
+                  onClick={() => patch({ source: { kind: 'clip', src: customClipSource.trim() } })}
+                >
+                  Apply
+                </button>
+              </span>
             </PropertyRow>
           ) : null}
           <div className="inspector-button-row media-paint-import">
@@ -367,17 +424,32 @@ function MediaPaintControls({
               ref={fileInputRef}
               className="inspector-file-input"
               type="file"
-              accept="video/mp4,video/webm,.mp4,.webm"
+              accept={MEDIA_FILE_ACCEPT}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = '';
                 if (!file) return;
-                void importAsset(file).then((assetId) =>
-                  patch({ source: { kind: 'clip', src: `asset:${assetId}` } }),
-                );
+                const problem = mediaFileImportError(file);
+                if (problem) {
+                  setMediaImportError(problem);
+                  return;
+                }
+                setMediaImportError('');
+                void importAsset(file)
+                  .then((assetId) => patch({ source: { kind: 'clip', src: `asset:${assetId}` } }))
+                  .catch((cause: unknown) =>
+                    setMediaImportError(
+                      cause instanceof Error ? cause.message : 'The clip could not be imported.',
+                    ),
+                  );
               }}
             />
           </div>
+          {mediaImportError ? (
+            <p className="inspector-error" role="alert">
+              {mediaImportError}
+            </p>
+          ) : null}
         </>
       ) : (
         <>
@@ -512,13 +584,42 @@ function MediaPaintControls({
                 onChange={(event) => patch({ offsetMs: Number(event.target.value) })}
               />
             </PropertyRow>
+            <PropertyRow
+              help="Optional end trim in milliseconds. Leave blank to use the clip duration."
+              className="inspector-row"
+            >
+              <span>Trim end ms</span>
+              <input
+                type="number"
+                min={0}
+                value={value.trimEndMs ?? ''}
+                disabled={disabled}
+                onChange={(event) =>
+                  patch({ trimEndMs: event.target.value ? Number(event.target.value) : null })
+                }
+              />
+            </PropertyRow>
+            <PropertyRow
+              help="Composition time in milliseconds when clip playback becomes active."
+              className="inspector-row"
+            >
+              <span>Timeline start ms</span>
+              <input
+                type="number"
+                min={0}
+                value={value.timelineStartMs}
+                disabled={disabled}
+                onChange={(event) => patch({ timelineStartMs: Number(event.target.value) })}
+              />
+            </PropertyRow>
           </div>
         </>
       ) : null}
       <p className="inspector-hint">Media paint is visual-only and always muted.</p>
       <p className="inspector-playout-warning" role="status">
         Media is real-time-only. Studio keeps Real-time enabled and Non-real-time disabled while a
-        Media paint is present.
+        Media paint is present. Prefer H.264 MP4 or VP8/VP9 WebM, and test the exported package on
+        the target renderer because browser codec support varies.
       </p>
     </div>
   );

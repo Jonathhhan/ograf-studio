@@ -3,6 +3,7 @@ import type { Asset, Composition } from '@ograf-editor/scene-model';
 export interface ResourceAssetsByKind {
   images: Asset[];
   media: Asset[];
+  audio: Asset[];
   fonts: Asset[];
   sources: Asset[];
 }
@@ -11,6 +12,7 @@ export function partitionResourceAssets(assets: readonly Asset[]): ResourceAsset
   return {
     images: assets.filter((asset) => asset.kind === 'image'),
     media: assets.filter((asset) => asset.kind === 'media'),
+    audio: assets.filter((asset) => asset.kind === 'audio'),
     fonts: assets.filter((asset) => asset.kind === 'font'),
     sources: assets.filter((asset) => asset.kind === 'source'),
   };
@@ -23,6 +25,7 @@ export function resourceTreeBranchCounts(composition: Composition) {
     components: composition.components.length,
     images: assets.images.length,
     media: assets.media.length,
+    audio: assets.audio.length,
     fonts: assets.fonts.length,
     sources: assets.sources.length,
   };

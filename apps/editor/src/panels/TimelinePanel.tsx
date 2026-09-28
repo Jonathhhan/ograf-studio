@@ -4,11 +4,13 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import {
+  animationRetimePhaseRange,
   animatablePropertyLabel,
   computeKeyframeFrames,
   createLayerPropertyKeyframe,
@@ -17,30 +19,40 @@ import {
   getResolvedLayerAnimationTracks,
   getLayerPropertyValueAtFrame,
   getTrackValueAtFrame,
+  mediaCueStartFrame,
   parseShaderAnimationProperty,
   shaderAnimationPropertySpec,
   getShaderTrackValueAtFrame,
   type AnimatableLayerProperty,
   type EasingPreset,
+  type MediaCue,
 } from '@ograf-editor/scene-model';
 import { ContextMenu } from '../components/ContextMenu';
 import { selectionIdsForLayer } from '../canvas/groupSelection';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useTimelineStore } from '../state/timelineStore';
 import { useSelectionStore, type SelectedLayerKeyframe } from '../state/selectionStore';
+import { useSoundEventSelectionStore } from '../state/soundEventSelectionStore';
+import { isSoundEventCue, soundEventSource } from '../state/soundEvents';
 import { lifecycleRetimeBounds, MIN_LIFECYCLE_TRANSITION_FRAMES } from '../state/lifecycleRetime';
 import { Panel } from './Panel';
+import { CollapsibleSection } from '../components/CollapsibleSection';
 import { TimelineHoverDetails } from './TimelineHoverDetails';
 import { formatFrameDuration } from './timelineFormatting';
 import { FrameDurationControl } from './FrameDurationControl';
+import { AnimationGraphEditor } from './AnimationGraphEditor';
+import { SoundEventEditor } from './SoundEventEditor';
 import { EASING_OPTION_GROUPS, easingLabel } from './easingOptions';
 import { EasingCurveEditor } from './EasingCurveEditor';
 import { buildTimelineEntries } from './timelineFolders';
 import { buildTimelineLoopBadges } from './timelineLoopBadges';
 import { isTimelineKeyDrag } from './timelinePointerIntent';
 import {
+  collectTimelineKeyframeFrames,
+  jumpTimelineKeyframe,
   stepTimelineFrame,
   timelineFrameDirection,
+  timelineKeyframeDirection,
   timelineTargetOwnsArrows,
   handleTimelinePlaybackKey,
 } from './timelineFrameNavigation';
@@ -124,6 +136,7 @@ function TransportIcon({ name }: { name: TransportIconName }) {
 export function TimelinePanel({ style }: { style?: CSSProperties }) {
   const { window } = useEditorWindow();
   const panelRef = useRef<HTMLDivElement>(null);
+  const navigationKeyframeFramesRef = useRef<number[]>([]);
   useEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;
@@ -136,6 +149,15 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
       if ((!panel.contains(target) && !focusedTimelineTab) || timelineTargetOwnsArrows(target))
         return;
       if (handleTimelinePlaybackKey(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const keyframeDirection = timelineKeyframeDirection(event);
+      if (
+        keyframeDirection !== null &&
+        jumpTimelineKeyframe(navigationKeyframeFramesRef.current, keyframeDirection)
+      ) {
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -168,6 +190,9 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
   const renameKeyframe = useProjectStore((s) => s.renameKeyframe);
   const updateTransition = useProjectStore((s) => s.updateTransition);
   const moveLifecycleKeyframe = useProjectStore((s) => s.moveLifecycleKeyframe);
+  const addSoundEventFromAsset = useProjectStore((s) => s.addSoundEventFromAsset);
+  const updateMediaCue = useProjectStore((s) => s.updateMediaCue);
+  const retimeAnimationPhase = useProjectStore((s) => s.retimeAnimationPhase);
   const addLayerKeyframe = useProjectStore((s) => s.addLayerKeyframe);
   const addLayerHoldFrame = useProjectStore((s) => s.addLayerHoldFrame);
   const moveLayerKeyframe = useProjectStore((s) => s.moveLayerKeyframe);
@@ -219,6 +244,8 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
   const selectLayerKeyframe = useSelectionStore((s) => s.selectLayerKeyframe);
   const selectLayerKeyframes = useSelectionStore((s) => s.selectLayerKeyframes);
   const clearLayerKeyframe = useSelectionStore((s) => s.clearLayerKeyframe);
+  const selectedSoundEventId = useSoundEventSelectionStore((s) => s.selectedSoundEventId);
+  const selectSoundEvent = useSoundEventSelectionStore((s) => s.selectSoundEvent);
 
   const currentFrame = useTimelineStore((s) => s.currentFrame);
   const isPlaying = useTimelineStore((s) => s.isPlaying);
@@ -239,6 +266,11 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
   const [gutterWidth, setGutterWidth] = useState(loadTimelineGutterWidth);
   const [isGutterResizing, setIsGutterResizing] = useState(false);
   const [trackScalePercent, setTrackScalePercent] = useState(100);
+  const [retimePhase, setRetimePhase] = useState<'in' | 'on-air' | 'out' | 'entire'>('in');
+  const [retimeTargetFrames, setRetimeTargetFrames] = useState(
+    () => animationRetimePhaseRange(composition, 'in').durationFrames,
+  );
+  const retimePhaseRange = animationRetimePhaseRange(composition, retimePhase);
   const [expandedLayerIds, setExpandedLayerIds] = useState<Set<string>>(() => new Set());
   const [showAllPropertyLayerIds, setShowAllPropertyLayerIds] = useState<Set<string>>(
     () => new Set(),
@@ -258,6 +290,7 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
   const rulerLabelInterval = pixelsPerFrame >= 10 ? 5 : pixelsPerFrame >= 6 ? 10 : 20;
 
   const keyframeFrames = computeKeyframeFrames(composition);
+  navigationKeyframeFramesRef.current = collectTimelineKeyframeFrames(composition);
   const lifecycleFrameSet = new Set(keyframeFrames.map((item) => item.frame));
   const loopBadges = buildTimelineLoopBadges(composition);
   const loopBadgeByLayerId = new Map(loopBadges.map((badge) => [badge.layerId, badge]));
@@ -280,6 +313,7 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
 
   // Displayed top-to-bottom, matching the Layers panel's z-order convention (topmost first).
   const layers = [...composition.layers].reverse();
+  const soundEvents = (composition.mediaCues ?? []).filter(isSoundEventCue);
   const timelineEntries = buildTimelineEntries(
     layers,
     composition.layout.timelineFolders,
@@ -357,15 +391,19 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
         )
       : undefined;
   const selectedLayer = composition.layers.find((layer) => layer.id === selectedLayerId);
+  const selectedSoundEvent = selectedLayerId
+    ? null
+    : (soundEvents.find((cue) => cue.id === selectedSoundEventId) ?? null);
   const selectedLayerKeyframe = selectedLayer?.keyframes.find(
     (keyframe) => keyframe.id === selectedLayerKeyframeId,
   );
-  const selectedPropertyKeyframe =
+  const selectedPropertyTrack =
     selectedLayer && selectedLayerProperty
-      ? getResolvedLayerAnimationTracks(selectedLayer)[selectedLayerProperty]?.find(
-          (keyframe) => keyframe.id === selectedLayerKeyframeId,
-        )
-      : undefined;
+      ? (getResolvedLayerAnimationTracks(selectedLayer)[selectedLayerProperty] ?? [])
+      : [];
+  const selectedPropertyKeyframe = selectedPropertyTrack.find(
+    (keyframe) => keyframe.id === selectedLayerKeyframeId,
+  );
   const selectedLoopTrack =
     selectedLayer && selectedLayerProperty
       ? (selectedLayer.loop?.tracks[selectedLayerProperty] ?? [])
@@ -377,6 +415,8 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
   const showKeyEditor = Boolean(
     selectedLayer && (selectedPropertyKeyframe || selectedLayerKeyframe || selectedLayerProperty),
   );
+  const showTimelineInspector = showKeyEditor || Boolean(selectedSoundEvent);
+  const showAnimationGraph = selectedPropertyTrack.length > 0;
 
   useEffect(() => {
     if (
@@ -804,6 +844,57 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
     setFrameMenu({ x: event.clientX, y: event.clientY, layerId, frame, property });
   };
 
+  const handleSoundEventPointerDown = (event: ReactPointerEvent<HTMLElement>, cue: MediaCue) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selectLayer(null);
+    selectSoundEvent(cue.id);
+    const startX = event.clientX;
+    const initialFrame = mediaCueStartFrame(cue, composition) ?? 0;
+    const pointerTarget = event.currentTarget;
+    pointerTarget.setPointerCapture?.(event.pointerId);
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', cleanup);
+      window.removeEventListener('pointercancel', cleanup);
+      if (pointerTarget.hasPointerCapture?.(event.pointerId)) {
+        pointerTarget.releasePointerCapture(event.pointerId);
+      }
+    };
+    const onMove = (pointer: PointerEvent) => {
+      const deltaFrames = Math.round((pointer.clientX - startX) / pixelsPerFrame);
+      updateMediaCue(cue.id, {
+        trigger: {
+          type: 'timeline',
+          startFrame: Math.max(0, Math.min(durationFrames, initialFrame + deltaFrames)),
+        },
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', cleanup);
+    window.addEventListener('pointercancel', cleanup);
+  };
+
+  const handleAudioDragOver = (event: ReactDragEvent<HTMLElement>) => {
+    if (!Array.from(event.dataTransfer.types).includes('application/x-ograf-audio-asset-id'))
+      return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleAudioDrop = (event: ReactDragEvent<HTMLElement>) => {
+    const assetId = event.dataTransfer.getData('application/x-ograf-audio-asset-id');
+    if (!assetId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const frame = Math.max(0, Math.min(durationFrames, frameFromClientX(event.clientX)));
+    const cueId = addSoundEventFromAsset(assetId, frame);
+    selectLayer(null);
+    selectSoundEvent(cueId);
+    controller?.seek(frame);
+  };
+
   const frameMenuLayer = frameMenu
     ? composition.layers.find((layer) => layer.id === frameMenu.layerId)
     : undefined;
@@ -825,10 +916,10 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
     <Panel title="Timeline" style={style}>
       <div
         ref={panelRef}
-        className={`timeline-panel${showKeyEditor ? ' has-key-editor' : ''}`}
+        className={`timeline-panel${showTimelineInspector ? ' has-key-editor' : ''}${showAnimationGraph ? ' has-animation-graph' : ''}`}
         role="region"
         aria-label="Timeline editor"
-        aria-keyshortcuts="Space ArrowLeft ArrowRight"
+        aria-keyshortcuts="Space ArrowLeft ArrowRight Control+ArrowLeft Control+ArrowRight Meta+ArrowLeft Meta+ArrowRight"
         tabIndex={0}
         onPointerDownCapture={(event) => {
           if (
@@ -856,7 +947,7 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
               className="timeline-transport-button frame-step"
               aria-label="Previous frame"
               aria-keyshortcuts="ArrowLeft"
-              title="Previous frame (←)"
+              title="Previous frame (←) · Previous keyframe (Ctrl/Cmd+←)"
               onClick={() => seekByFrame(-1)}
               disabled={!controller || displayedFrame <= 0}
             >
@@ -889,7 +980,7 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
               className="timeline-transport-button frame-step"
               aria-label="Next frame"
               aria-keyshortcuts="ArrowRight"
-              title="Next frame (→)"
+              title="Next frame (→) · Next keyframe (Ctrl/Cmd+→)"
               onClick={() => seekByFrame(1)}
               disabled={!controller || displayedFrame >= durationFrames}
             >
@@ -898,29 +989,35 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
             </button>
           </div>
 
-          <label
-            className="timeline-step-playback-toggle"
-            title="Pause playback at each pausable OGraf Step; press Play again to continue"
+          <div
+            className="timeline-toolbar-section timeline-playback-options"
+            role="group"
+            aria-label="Playback and authoring modes"
           >
-            <input
-              type="checkbox"
-              checked={pauseAtOgrafSteps}
-              onChange={(event) => setPauseAtOgrafSteps(event.target.checked)}
-            />
-            <span>Pause at Steps</span>
-          </label>
+            <label
+              className="timeline-step-playback-toggle"
+              title="Pause playback at each pausable OGraf Step; press Play again to continue"
+            >
+              <input
+                type="checkbox"
+                checked={pauseAtOgrafSteps}
+                onChange={(event) => setPauseAtOgrafSteps(event.target.checked)}
+              />
+              <span>Pause at Steps</span>
+            </label>
 
-          <label
-            className="timeline-step-playback-toggle"
-            title="Create keys at the current frame when editing. When off, object edits apply across existing keys without adding animation."
-          >
-            <input
-              type="checkbox"
-              checked={autoKeyframe}
-              onChange={(event) => setAutoKeyframe(event.target.checked)}
-            />
-            <span>Auto-keyframe</span>
-          </label>
+            <label
+              className="timeline-step-playback-toggle"
+              title="Create keys at the current frame when editing. When off, object edits apply across existing keys without adding animation."
+            >
+              <input
+                type="checkbox"
+                checked={autoKeyframe}
+                onChange={(event) => setAutoKeyframe(event.target.checked)}
+              />
+              <span>Auto-keyframe</span>
+            </label>
+          </div>
 
           <div className="timeline-readout" aria-label="Timeline position and duration">
             <strong>{displayedFrame}</strong>
@@ -930,69 +1027,158 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
             <strong className="timeline-readout-duration">{duration}</strong>
           </div>
 
-          <div className="timeline-edit-controls">
-            <button
-              type="button"
-              onClick={handleAddKeyframe}
-              disabled={!autoKeyframe}
-              title={autoKeyframeHint}
-            >
-              {'+ Step'}
-            </button>
-            <button
-              type="button"
-              onClick={handleAddLayerKeyframe}
-              disabled={!autoKeyframe || !selectedLayerId || selectedLayer?.isLocked}
-              title={autoKeyframeHint}
-            >
-              {'◆ Add Keyframe'}
-            </button>
+          <div
+            className="timeline-toolbar-section timeline-keying-section"
+            role="group"
+            aria-label="Create timeline keys"
+          >
+            <span className="timeline-toolbar-section-label">Keys</span>
+            <div className="timeline-edit-controls">
+              <button
+                type="button"
+                onClick={handleAddKeyframe}
+                disabled={!autoKeyframe}
+                title={autoKeyframeHint}
+              >
+                {'+ Step'}
+              </button>
+              <button
+                type="button"
+                onClick={handleAddLayerKeyframe}
+                disabled={!autoKeyframe || !selectedLayerId || selectedLayer?.isLocked}
+                title={autoKeyframeHint}
+              >
+                {'◆ Add Keyframe'}
+              </button>
+            </div>
           </div>
-          <div className="timeline-zoom-controls" role="group" aria-label="Timeline zoom">
-            <input
-              type="range"
-              min={MIN_PX_PER_FRAME}
-              max={MAX_PX_PER_FRAME}
-              step={PX_PER_FRAME_STEP}
-              value={pixelsPerFrame}
-              aria-label="Timeline horizontal zoom"
-              onChange={(event) => setPixelsPerFrame(Number(event.target.value))}
-            />
-            <output>{Math.round((pixelsPerFrame / DEFAULT_PX_PER_FRAME) * 100)}%</output>
-          </div>
-          {incomingTransition && (
-            <div className="timeline-transition-controls">
-              <FrameDurationControl
-                compact
-                label="Incoming lifecycle transition"
-                frames={incomingTransition.durationFrames}
-                frameRate={composition.frameRate}
-                minFrames={MIN_TRANSITION_FRAMES}
-                onChange={(durationFrames) =>
-                  updateTransition(incomingTransition.id, { durationFrames })
+          <div
+            className="timeline-toolbar-section timeline-retime-section"
+            role="group"
+            aria-label="Retime animation phase"
+          >
+            <span className="timeline-toolbar-section-label">Retime</span>
+            <div className="timeline-retime-controls">
+              <select
+                aria-label="Animation phase to retime"
+                value={retimePhase}
+                onChange={(event) => {
+                  const phase = event.target.value as typeof retimePhase;
+                  setRetimePhase(phase);
+                  setRetimeTargetFrames(
+                    animationRetimePhaseRange(composition, phase).durationFrames,
+                  );
+                }}
+              >
+                <option value="in">IN</option>
+                <option value="on-air">On air</option>
+                <option value="out">OUT</option>
+                <option value="entire">Entire</option>
+              </select>
+              <input
+                aria-label="Target phase frames"
+                type="number"
+                min={retimePhaseRange.retimable ? retimePhaseRange.transitionCount : 0}
+                value={retimeTargetFrames}
+                title={`Current ${retimePhase} duration: ${retimePhaseRange.durationFrames} frames. Enter the target duration, then choose Fit phase.`}
+                onChange={(event) =>
+                  setRetimeTargetFrames(
+                    Math.max(
+                      retimePhaseRange.retimable ? retimePhaseRange.transitionCount : 0,
+                      Math.round(Number(event.target.value)),
+                    ),
+                  )
                 }
               />
-              <label title="Transition easing">
-                <select
-                  aria-label="Lifecycle transition easing"
-                  value={incomingTransition.easing}
-                  onChange={(e) =>
-                    updateTransition(incomingTransition.id, {
-                      easing: e.target.value as EasingPreset,
-                    })
+              <span className="timeline-retime-unit" aria-hidden="true">
+                f
+              </span>
+              <button
+                type="button"
+                disabled={!retimePhaseRange.retimable}
+                title={
+                  retimePhaseRange.retimable
+                    ? `Fit ${retimePhase} from ${retimePhaseRange.durationFrames} to ${retimeTargetFrames} frames`
+                    : `The ${retimePhase} phase has no retimable lifecycle range`
+                }
+                onClick={() => {
+                  try {
+                    const result = retimeAnimationPhase(retimePhase, retimeTargetFrames);
+                    setLifecycleRetimeNotice({
+                      message: `${retimePhase.toUpperCase()} fit to ${retimeTargetFrames} frames · ${result.retimedKeys} keys retimed`,
+                      warnings: [],
+                    });
+                  } catch (cause) {
+                    setLifecycleRetimeNotice({
+                      message: cause instanceof Error ? cause.message : String(cause),
+                      warnings: [cause instanceof Error ? cause.message : String(cause)],
+                    });
                   }
-                >
-                  {EASING_OPTION_GROUPS.map((group) => (
-                    <optgroup key={group.label} label={group.label}>
-                      {group.options.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </label>
+                }}
+              >
+                Fit phase
+              </button>
+            </div>
+          </div>
+          <div
+            className="timeline-toolbar-section timeline-view-section"
+            role="group"
+            aria-label="Timeline view"
+          >
+            <span className="timeline-toolbar-section-label">View</span>
+            <div className="timeline-zoom-controls" role="group" aria-label="Timeline zoom">
+              <input
+                type="range"
+                min={MIN_PX_PER_FRAME}
+                max={MAX_PX_PER_FRAME}
+                step={PX_PER_FRAME_STEP}
+                value={pixelsPerFrame}
+                aria-label="Timeline horizontal zoom"
+                onChange={(event) => setPixelsPerFrame(Number(event.target.value))}
+              />
+              <output>{Math.round((pixelsPerFrame / DEFAULT_PX_PER_FRAME) * 100)}%</output>
+            </div>
+          </div>
+          {incomingTransition && (
+            <div
+              className="timeline-toolbar-section timeline-transition-section"
+              role="group"
+              aria-label="Incoming transition"
+            >
+              <span className="timeline-toolbar-section-label">Transition</span>
+              <div className="timeline-transition-controls">
+                <FrameDurationControl
+                  compact
+                  label="Incoming lifecycle transition"
+                  frames={incomingTransition.durationFrames}
+                  frameRate={composition.frameRate}
+                  minFrames={MIN_TRANSITION_FRAMES}
+                  onChange={(durationFrames) =>
+                    updateTransition(incomingTransition.id, { durationFrames })
+                  }
+                />
+                <label title="Transition easing">
+                  <select
+                    aria-label="Lifecycle transition easing"
+                    value={incomingTransition.easing}
+                    onChange={(e) =>
+                      updateTransition(incomingTransition.id, {
+                        easing: e.target.value as EasingPreset,
+                      })
+                    }
+                  >
+                    {EASING_OPTION_GROUPS.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.options.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
           )}
         </div>
@@ -1007,6 +1193,14 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
             {lifecycleRetimeNotice.warnings[0] ?? lifecycleRetimeNotice.message}
           </div>
         )}
+
+        {selectedLayer && selectedLayerProperty ? (
+          <AnimationGraphEditor
+            layer={selectedLayer}
+            property={selectedLayerProperty}
+            durationFrames={durationFrames}
+          />
+        ) : null}
 
         <div
           className={`timeline-body${isGutterResizing ? ' resizing-gutter' : ''}`}
@@ -1256,6 +1450,8 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
                 className={`timeline-ruler${isScrubbing ? ' scrubbing' : ''}`}
                 ref={rulerRef}
                 onPointerDown={handleScrubPointerDown}
+                onDragOver={handleAudioDragOver}
+                onDrop={handleAudioDrop}
               >
                 {rulerTicks.map((frame) => (
                   <span
@@ -1362,6 +1558,39 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
                         />
                       ) : null}
                     </div>
+                  );
+                })}
+                {soundEvents.map((cue, index) => {
+                  const frame = mediaCueStartFrame(cue, composition) ?? 0;
+                  const stackIndex = soundEvents
+                    .slice(0, index)
+                    .filter(
+                      (candidate) => mediaCueStartFrame(candidate, composition) === frame,
+                    ).length;
+                  const source = soundEventSource(cue);
+                  return (
+                    <button
+                      type="button"
+                      key={cue.id}
+                      className={`timeline-sound-event-marker${selectedSoundEvent?.id === cue.id ? ' selected' : ''}`}
+                      style={
+                        {
+                          left: frame * pixelsPerFrame,
+                          '--sound-event-stack': stackIndex,
+                        } as CSSProperties
+                      }
+                      aria-label={`${cue.name} sound event at frame ${frame}`}
+                      title={`${source?.name ?? cue.name} · frame ${frame} · Drag to retime`}
+                      onPointerDown={(event) => handleSoundEventPointerDown(event, cue)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        selectLayer(null);
+                        selectSoundEvent(cue.id);
+                      }}
+                    >
+                      <span aria-hidden="true">🔊</span>
+                      {stackIndex > 0 ? <small>{stackIndex + 1}</small> : null}
+                    </button>
                   );
                 })}
               </div>
@@ -1729,9 +1958,20 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
             </div>
           </div>
         </div>
-        {showKeyEditor && (
-          <aside className="timeline-key-editor" aria-label="Keyframe editor">
-            <h3>Keyframe editor</h3>
+        {selectedSoundEvent ? (
+          <CollapsibleSection
+            sectionId="timeline.sound-event-editor"
+            title="Sound Event"
+            className="timeline-key-editor"
+          >
+            <SoundEventEditor cue={selectedSoundEvent} />
+          </CollapsibleSection>
+        ) : showKeyEditor ? (
+          <CollapsibleSection
+            sectionId="timeline.key-editor"
+            title="Keyframe editor"
+            className="timeline-key-editor"
+          >
             {selectedLayerKeyframes.length > 1 && (
               <div className="timeline-multi-key-selection" role="status">
                 <strong>{selectedLayerKeyframes.length} keys selected</strong>
@@ -1993,7 +2233,9 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
                             value={
                               selectedLayer.loop.activation.type === 'lifecycle'
                                 ? 'lifecycle'
-                                : `step:${selectedLayer.loop.activation.stepKeyframeId}`
+                                : selectedLayer.loop.activation.type === 'step'
+                                  ? `step:${selectedLayer.loop.activation.stepKeyframeId}`
+                                  : `action:${selectedLayer.loop.activation.customActionId}`
                             }
                             onChange={(event) => {
                               const value = event.target.value;
@@ -2001,7 +2243,12 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
                                 activation:
                                   value === 'lifecycle'
                                     ? { type: 'lifecycle' }
-                                    : { type: 'step', stepKeyframeId: value.slice(5) },
+                                    : value.startsWith('step:')
+                                      ? { type: 'step', stepKeyframeId: value.slice(5) }
+                                      : {
+                                          type: 'customAction',
+                                          customActionId: value.slice(7),
+                                        },
                               });
                             }}
                           >
@@ -2013,6 +2260,11 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
                                   {keyframe.name}
                                 </option>
                               ))}
+                            {composition.customActions.map((action) => (
+                              <option key={action.id} value={`action:${action.actionId}`}>
+                                Custom action: {action.name}
+                              </option>
+                            ))}
                           </select>
                         </label>
                       </div>
@@ -2214,8 +2466,8 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
                 </div>
               </details>
             )}
-          </aside>
-        )}
+          </CollapsibleSection>
+        ) : null}
         {frameMenu && frameMenuLayer && (
           <ContextMenu
             x={frameMenu.x}

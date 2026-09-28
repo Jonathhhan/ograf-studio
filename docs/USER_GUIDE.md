@@ -157,6 +157,12 @@ entering that effect, while the layer's blend mode still combines the completed 
 composition underneath. Glow and shadow blend only their generated contribution; blur and color
 adjustments blend their processed image. Normal at 100% keeps the original effect behavior.
 
+Select a complete persistent group to edit a **Group effects stack**. Entries added there are
+shared by every group member, and edits, ordering, duplication, animation and removal stay
+synchronized. Existing object-only effects remain independent and are hidden while the group stack
+is being edited. The shared entries are materialized onto ordinary OGraf layers, so exported
+packages do not require a proprietary group-effects runtime.
+
 **Shader** adds a true WebGL 2 post-process pass. Its `iChannel0` is the layer result after every
 preceding stack entry; the Shader output is blended by that entry's Blend and Effect opacity, then
 passed to later effects. Expand the effect to edit or load its `mainImage` source and exposed
@@ -167,22 +173,137 @@ Bypass retains settings and animation. When all effects are bypassed, the object
 rendering path without effect passes. Existing projects keep their enabled effects and appearance.
 Effect parameters remain animatable; blend mode and effect opacity are static settings.
 
-### Media fills
+### Sound Events
 
-Choose **Media** in an object's **Fill** selector to paint rectangles, ellipses, paths, patterns,
-text, images, image sequences, or Lottie with moving imagery. Select an imported MP4/WebM clip or
-enter a video URL, then choose Cover, Contain, or Stretch and adjust its focal position. Clip paint
-is muted and supports loop, speed, and initial offset controls. **Resources → Media** stores packaged
-clips once for reuse.
+**Resources → Audio** contains imported MP3/WAV/OGG sound effects. Drag an audio file onto any
+frame of the Timeline ruler to create a small speaker marker, or choose **Add at Playhead**. Use
+**Play** beside an imported file to audition it; starting another preview stops the previous one.
+Playback
+crossing the marker plays the sound once. Drag the marker horizontally to retime it; select it to
+edit the audio file, exact frame, volume, start offset and retrigger behavior. Multiple sounds may
+share one frame and appear as stacked markers. Sound Events create neither canvas layers nor audio
+tracks. A sound fires when playback enters its marker frame; leaving that Step with **Take Out**
+does not replay it. Starting a new IN after OUT arms the Sound Events again.
 
-Choose **Live** for a renderer-owned source such as `camera.program`. Exported output emits the
-`zd-ograf-media` version 1 hook; the Zero Density HTML renderer supplies the live frame. Other HTML
-renderers show the selected fallback image or transparency. Live output therefore remains valid
-OGraf but is renderer-specific.
+For action-triggered audio, expand the imported file and choose **Create Playback Cue** instead of
+**Add at Playhead**. The cue appears under Resources → Media with a Manual trigger. Expand it,
+change **Trigger type** to **Custom Action**, and select the action ID. Preview & Export exposes a
+button for each Custom Action so the audio can be tested directly.
 
-The initial Media runtime is realtime-only for both clips and live sources. Disable **Non-real-time**
-in Composition settings and use the **Real-time** export profile. Media is visual-only and always
-muted. Media-painted objects can receive masks but cannot currently act as alpha-mask sources.
+### Media Cues
+
+**Resources → Media** contains advanced audio/video playback cues and renderer-provided live
+inputs. Choose **Create Cue at Keyframe** on an imported video, or **Create Playback Cue** on an
+imported audio file. Video cues default to the active lifecycle keyframe; advanced audio cues start
+as Manual so they remain distinct from timeline Sound Events. Expand a cue under Resources → Media
+to change its source, trigger, trim and playback settings. Media Cues do not create
+Audio/Video Timeline rows or canvas objects. For video, expand the cue and choose a paintable layer
+under **Video target**; Cover,
+Contain, Stretch and focal position remain visual-only settings on that target.
+
+Every cue shares one transport editor: named clip/live sources, trigger type, trim in/out, loop,
+speed, volume, mute and retrigger behavior. Source and trimmed durations appear in the editor.
+Triggers can start at a Timeline frame, an OGraf
+lifecycle state, a Custom Action, or manually during authoring. Custom Action payloads may select a
+named source before triggering the cue.
+
+Use **+ Live Cue** for renderer-owned sources such as `camera.program`. Source changes support Cut or
+Crossfade, an audio transition policy, and Keep current, Use fallback, or Transparency/silence when
+the incoming source fails. Clip-to-clip, clip-to-live and live-to-clip changes prepare an incoming
+slot while the outgoing source remains active.
+
+Media Cues are real-time-only in the initial profile. Disable **Non-real-time** and export with the
+**Real-time** profile. Live output uses the `zd-ograf-media` version 1 renderer hook. Test target
+codec support, browser autoplay policy, live-source readiness and audio routing on the intended
+playout system.
+
+### Automatic layout
+
+Assign child layers to a parent with **Properties → Layout relationships → Parent**, then enable
+**Auto layout** on the parent. Horizontal and Vertical flow arrange direct children in paint order
+with an authored gap, four-sided padding, cross-axis alignment, optional stretching, and hidden-item
+collapse. **Hug width** and **Hug height** resize the parent around its participating children;
+minimum and maximum width clamp a text-following background. Auto-size text uses its measured
+bound content, so a longer live name moves following siblings and grows the parent without scripting. The
+same deterministic solver runs on the Studio canvas and in exported realtime and non-realtime
+playback; nested Auto layout containers move with their descendants.
+
+### Visual rules
+
+Open the dockable **Rules** pane from the Window menu to edit ordered rules across the composition;
+optionally filter to the selected object. Rules
+support equality, emptiness, numeric comparison, and changed/increased/decreased conditions. A
+matching rule can show or hide the layer, set one or more bindable visual or exposed shader
+properties, trigger a custom action or shader-animation action, play a Sound Event, or start an
+audio/video/live Media Cue. State actions remain active while matched; event actions fire only when a
+condition enters the matching state. Rules run after ordinary bindings, in authored order; later
+matching state actions win. Hidden rule results participate in Auto layout's **Collapse hidden**
+spacing.
+
+### Data connections
+
+Use **Data → Data Connections** to preview a template from JSON or CSV without changing its OGraf
+field contract. A connection can fetch an HTTP/HTTPS URL with optional polling or use pasted/imported
+JSON/CSV. Map each Studio field to a dot-separated JSON path or CSV column, choose default, empty, or
+keep-last handling for missing values, then select **Refresh now**. Status and failures stay visible
+in the panel. Connections are editor-side preview configuration; exported packages continue to
+receive ordinary GDD data from the playout system.
+
+### Rankings and paged collections
+
+Runtime Collections can identify items by a stable nested key, sort by a nested value ascending or
+descending, and expose one zero-based page at a time. Set Page size to zero to use the authored
+capacity. Bindings resolve back to the original array item after sorting, and stable keyed items
+animate from their previous slot when rankings change. Capacity still bounds generated DOM and is
+mirrored to the array field's `maxItems`.
+
+### Preserved design resizing
+
+Convert a rectangle or ellipse with **Edit as path**, then enable **Preserve design** in its Path
+properties. Fixed left, right, top, and bottom source regions render as a nine-slice grid: corners
+retain both dimensions, edges stretch along one axis, and only the center stretches freely. This
+keeps angled bar ends, borders, and corner treatments unchanged as the layer grows. The initial
+profile supports solid path fills; complex paints continue to use ordinary scaling and produce a
+validation warning.
+
+### Designed data update transitions
+
+Set the composition's **Update crossfade** duration and **Update interruption** policy, then choose a
+per-layer style under **Properties → Data update transition**. Bound layers can crossfade, slide in
+one of four directions, inherit the composition duration, override it, or update instantly. Unbound
+backgrounds remain on screen. **Queue updates** finishes each transition in order; **Replace active**
+cancels the older visual transition and applies the newest update. Exported action durations report
+the longest authored layer update so playout can schedule accurately.
+
+### Fit animation duration
+
+Use the Timeline's **Retime animation phase** controls to fit IN, On air, OUT, or the Entire sequence
+to an exact frame count. Property keys inside the selected phase scale proportionally, preserving
+stagger relationships. Later keys shift by the exact duration delta so untouched phases keep their
+authored lengths. Layer-local loop clips use their own ruler and are not stretched.
+
+### Motion paths
+
+Select a layer, choose an editable Path under **Layout relationships → Motion path**, and set Path
+progress from 0 to 1. The target follows the path's arc length, can rotate to the tangent, and keeps
+independent X/Y offsets. Motion Path Progress appears as a normal animatable property. Choose **Add
+ping-pong loop** for a ready-made 0→1→0 lifecycle loop, then edit its keys and duration normally.
+Moving, scaling, or rotating the source path updates the attachment deterministically.
+
+### Animation graph editor
+
+Select a numeric property track in Timeline to open its value-over-time graph. The curve samples the
+same easing and custom Bézier data used by playback. Drag a graph key horizontally to change its
+frame and vertically to change its value; Control/Command-click adds keys to the existing selection.
+The selected incoming segment keeps the detailed Bézier-handle editor and numeric controls below.
+
+### Mixed text styles and languages
+
+Text properties provide Automatic, Left-to-right, and Right-to-left base direction plus a BCP 47
+language tag for browser shaping and accessibility. **Enable mixed styles** divides authored text
+into ordered editable runs; each run can override color, weight, italics, and font family while the
+layer retains one transform, outline, animation, and data identity. A runtime content binding
+intentionally replaces styled runs with plain operator text to avoid applying stale character ranges.
 
 ### Shader fills
 

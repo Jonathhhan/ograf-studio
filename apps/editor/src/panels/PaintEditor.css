@@ -17,3 +17,22 @@
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
+
+.media-paint-pending {
+  margin: 0;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.media-paint-source-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.media-paint-source-editor input {
+  min-width: 0;
+}

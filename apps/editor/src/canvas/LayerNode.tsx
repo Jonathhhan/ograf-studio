@@ -29,7 +29,11 @@ import {
   setLottieDeterministicRendering,
   waitForElementContentReady,
 } from '@ograf-editor/ograf-runtime';
-import { resolveEffectiveElement, resolveEffectiveEffects } from '../state/dataBinding';
+import {
+  resolveEffectiveElement,
+  resolveEffectiveEffects,
+  resolveEffectiveVisibility,
+} from '../state/dataBinding';
 import { useTestDataStore } from '../state/testDataStore';
 import { useTimelineStore } from '../state/timelineStore';
 import type { ShaderPreviewClock } from './shaderPreviewClock';
@@ -60,6 +64,7 @@ function emptyContentLabel(element: Element): string | null {
   if (element.type === 'image' && !element.src) return 'Image';
   if (element.type === 'image-sequence' && element.frames.length === 0) return 'Sequence';
   if (element.type === 'lottie' && !element.animationData) return 'Lottie';
+  if (element.type === 'audio' && !element.src) return 'Audio';
   return null;
 }
 
@@ -77,6 +82,7 @@ export function LayerNode({
   patterns,
 }: LayerNodeProps) {
   const testValues = useTestDataStore((s) => s.values);
+  const visualRuleStateOverride = useTestDataStore((s) => s.visualRuleStateOverrides[layer.id]);
   const contentRef = useRef<HTMLDivElement>(null);
   const readinessGeneration = useRef(0);
   const [contentError, setContentError] = useState<string | null>(null);
@@ -84,7 +90,14 @@ export function LayerNode({
   const lastEffectiveElement = useRef<Element>(layer.element);
   const resolvedContent = useMemo(() => {
     try {
-      const next = resolveEffectiveElement(layer, testValues, assets, dataFields, patterns);
+      const next = resolveEffectiveElement(
+        layer,
+        testValues,
+        assets,
+        dataFields,
+        patterns,
+        visualRuleStateOverride,
+      );
       lastEffectiveElement.current = next;
       return { element: next, error: null };
     } catch (error) {
@@ -93,8 +106,14 @@ export function LayerNode({
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }, [assets, dataFields, layer, testValues, patterns]);
+  }, [assets, dataFields, layer, testValues, patterns, visualRuleStateOverride]);
   const element = resolvedContent.element;
+  const effectiveVisible = resolveEffectiveVisibility(
+    layer,
+    testValues,
+    dataFields,
+    visualRuleStateOverride,
+  );
   const hasShaderPaint = hasElementShaderPaint(element);
   const hasMediaPaint = hasElementMediaPaint(element);
   const lottieBackingSize = useMemo(() => lottieBackingSizeForLayer(layer), [layer]);
@@ -139,7 +158,7 @@ export function LayerNode({
     hasShaderPaint,
     hasMediaPaint,
     layer.animationTracks,
-    layer.isVisible,
+    effectiveVisible,
     lottieBackingSize,
     shaderBackingSize,
     shaderStrokePadding,
@@ -151,7 +170,7 @@ export function LayerNode({
     return () => {
       if (host) disposeLayerEffects(host);
     };
-  }, [layer.isVisible]);
+  }, [effectiveVisible]);
 
   useLayoutEffect(() => {
     const host = contentRef.current;
@@ -199,7 +218,7 @@ export function LayerNode({
     return () => {
       if (host) disposeElementContent(host);
     };
-  }, [layer.isVisible]);
+  }, [effectiveVisible]);
 
   useLayoutEffect(() => {
     if (hasShaderPaint || hasMediaPaint) {
@@ -261,7 +280,7 @@ export function LayerNode({
     element,
     hasShaderPaint,
     hasMediaPaint,
-    layer.isVisible,
+    effectiveVisible,
     lottieBackingSize,
     shaderBackingSize,
     shaderPreviewClock,
@@ -310,7 +329,7 @@ export function LayerNode({
     hasMediaPaint,
   ]);
 
-  if (!layer.isVisible) return null;
+  if (!effectiveVisible) return null;
 
   const style: CSSProperties = {
     position: 'absolute',

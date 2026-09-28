@@ -38,6 +38,33 @@ describe('Studio UI typography contract', () => {
     expect(css).toMatch(/\.inspector-row > \.shader-number-control\s*\{[^}]*margin: 1px 4px;/s);
   });
 
+  it('keeps nested Properties editors on the shared compact row contract', () => {
+    const inspector = source('./panels/InspectorPanel.css');
+    const effects = source('./panels/EffectStackEditor.css');
+
+    expect(inspector).toMatch(/\.inspector \.paint-editor\s*\{[^}]*gap: 0;/s);
+    expect(inspector).toMatch(
+      /\.inspector-row > :is\(input:not\(\[type='range'\]\):not\(\[type='checkbox'\]\), select, button\)\s*\{[^}]*height: var\(--ui-control-height\);/s,
+    );
+    expect(inspector).toMatch(
+      /\.inspector-row:not\(\.inspector-row-stacked\):not\(:has\(textarea\)\)\s*\{[^}]*height: var\(--ui-row-height\);/s,
+    );
+    expect(inspector).toMatch(
+      /\.inspector > \.inspector-button-row,[^{]+\{[^}]*min-height: var\(--ui-row-height\);[^}]*padding: 0 4px;/s,
+    );
+    expect(effects).toMatch(
+      /\.effect-stack-blend-controls\s*\{[^}]*min-height: var\(--ui-control-height\);[^}]*margin: 1px 4px;/s,
+    );
+  });
+
+  it('preserves compact top spacing between dock tabs and flush table content', () => {
+    const data = source('./panels/DataPanel.css');
+    const inspector = source('./panels/InspectorPanel.css');
+
+    expect(data).toMatch(/\.data-panel\s*\{[^}]*margin: 0 -6px -4px;/s);
+    expect(inspector).toMatch(/\.inspector\s*\{[^}]*margin: 0 -6px -4px;/s);
+  });
+
   it('bundles the RealityHub Nunito UI face locally', () => {
     const main = source('./main.tsx');
     const css = source('./index.css');

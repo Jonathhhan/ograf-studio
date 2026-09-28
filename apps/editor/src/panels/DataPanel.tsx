@@ -1,4 +1,6 @@
 import { PropertyRow } from '../components/PropertyRow';
+import { CollapsibleSection } from '../components/CollapsibleSection';
+import { DataConnectionsSection } from './DataConnectionsSection';
 import { Fragment, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import {
   createFieldDefinition,
@@ -91,9 +93,11 @@ export function DataPanel() {
   return (
     <Panel title="Data">
       <div className="data-panel">
-        <section className="data-panel-section">
-          <div className="data-panel-section-header">
-            <h3>Fields</h3>
+        <CollapsibleSection
+          sectionId="data.fields"
+          title="Fields"
+          className="data-panel-section"
+          actions={
             <div className="data-panel-add-row">
               <select
                 value={addFieldType}
@@ -109,8 +113,8 @@ export function DataPanel() {
                 {'+ Add Field'}
               </button>
             </div>
-          </div>
-
+          }
+        >
           {composition.dataFields.length === 0 ? (
             <p className="panel-placeholder">
               No fields yet — add one to make this template data-driven.
@@ -243,18 +247,22 @@ export function DataPanel() {
               </tbody>
             </table>
           )}
-        </section>
+        </CollapsibleSection>
+
+        <DataConnectionsSection />
 
         <RuntimeCollectionsSection />
 
-        <section className="data-panel-section">
-          <div className="data-panel-section-header">
-            <h3>Custom Actions</h3>
+        <CollapsibleSection
+          sectionId="data.custom-actions"
+          title="Custom Actions"
+          className="data-panel-section"
+          actions={
             <button type="button" onClick={() => addCustomAction()}>
               {'+ Add Action'}
             </button>
-          </div>
-
+          }
+        >
           {composition.customActions.length === 0 ? (
             <p className="panel-placeholder">No custom actions yet.</p>
           ) : (
@@ -309,16 +317,19 @@ export function DataPanel() {
               </tbody>
             </table>
           )}
-        </section>
+        </CollapsibleSection>
 
         {composition.dataFields.length > 0 && (
-          <section className="data-panel-section">
-            <div className="data-panel-section-header">
-              <h3>Test Data (live preview)</h3>
+          <CollapsibleSection
+            sectionId="data.test-data"
+            title="Test Data (live preview)"
+            className="data-panel-section"
+            actions={
               <button type="button" onClick={resetTestData}>
                 Reset to defaults
               </button>
-            </div>
+            }
+          >
             <div className="test-data-form">
               {composition.dataFields.map((field) => (
                 <PropertyRow
@@ -330,23 +341,29 @@ export function DataPanel() {
                   <DefaultValueInput
                     field={field}
                     value={testValues[field.id] ?? field.defaultValue}
-                    onChange={(value) => setTestValue(field.id, value)}
+                    onChange={(value) =>
+                      setTestValue(field.id, value, composition.layers, composition.dataFields)
+                    }
                   />
                 </PropertyRow>
               ))}
             </div>
-          </section>
+          </CollapsibleSection>
         )}
 
-        <section className="data-panel-section">
-          <h3>Compiled Schema Preview</h3>
+        <CollapsibleSection
+          sectionId="data.compiled-schema"
+          title="Compiled Schema Preview"
+          className="data-panel-section"
+          defaultOpen={false}
+        >
           <pre className="data-json-preview">{JSON.stringify(schema, null, 2)}</pre>
           {compiledCustomActions.length > 0 && (
             <pre className="data-json-preview">
               {JSON.stringify(compiledCustomActions, null, 2)}
             </pre>
           )}
-        </section>
+        </CollapsibleSection>
       </div>
     </Panel>
   );
@@ -828,10 +845,11 @@ function RuntimeCollectionsSection() {
     if (!groups.includes(groupId)) setGroupId(groups[0] ?? '');
   }, [arrayFields, fieldId, groupId, groups]);
   return (
-    <section className="data-panel-section">
-      <div className="data-panel-section-header">
-        <h3>Runtime Collections</h3>
-      </div>
+    <CollapsibleSection
+      sectionId="data.runtime-collections"
+      title="Runtime Collections"
+      className="data-panel-section"
+    >
       <p className="panel-placeholder">
         Repeat one grouped item prototype from an object-item GDD array. Items share the prototype
         timeline; overflow truncates at the authored capacity.
@@ -936,12 +954,64 @@ function RuntimeCollectionsSection() {
               updateRuntimeCollection(collection.id, { capacity: Number(event.target.value) })
             }
           />
+          <input
+            aria-label="Collection stable key path"
+            placeholder="id"
+            value={(collection.itemKeyPath ?? []).join('.')}
+            onChange={(event) =>
+              updateRuntimeCollection(collection.id, {
+                itemKeyPath: event.target.value.split('.').filter(Boolean),
+              })
+            }
+          />
+          <input
+            aria-label="Collection sort path"
+            placeholder="score"
+            value={(collection.sortPath ?? []).join('.')}
+            onChange={(event) =>
+              updateRuntimeCollection(collection.id, {
+                sortPath: event.target.value.split('.').filter(Boolean),
+              })
+            }
+          />
+          <select
+            aria-label="Collection sort direction"
+            value={collection.sortDirection ?? 'none'}
+            onChange={(event) =>
+              updateRuntimeCollection(collection.id, {
+                sortDirection: event.target.value as 'none' | 'ascending' | 'descending',
+              })
+            }
+          >
+            <option value="none">Authored order</option>
+            <option value="ascending">Ascending</option>
+            <option value="descending">Descending</option>
+          </select>
+          <input
+            aria-label="Collection page size"
+            type="number"
+            min={0}
+            max={collection.capacity}
+            value={collection.pageSize ?? 0}
+            onChange={(event) =>
+              updateRuntimeCollection(collection.id, { pageSize: Number(event.target.value) })
+            }
+          />
+          <input
+            aria-label="Collection page index"
+            type="number"
+            min={0}
+            value={collection.page ?? 0}
+            onChange={(event) =>
+              updateRuntimeCollection(collection.id, { page: Number(event.target.value) })
+            }
+          />
           <span>truncate · {collection.prototypeLayerIds.length} prototype layers</span>
           <button type="button" onClick={() => removeRuntimeCollection(collection.id)}>
             Remove
           </button>
         </div>
       ))}
-    </section>
+    </CollapsibleSection>
   );
 }

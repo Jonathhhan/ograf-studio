@@ -44,6 +44,8 @@ export function buildComponentDefinition(
   for (const layer of layers) {
     if (layer.mask && !wanted.has(layer.mask.sourceLayerId))
       throw new Error(`Include the mask source when saving component layer "${layer.name}".`);
+    if (layer.motionPath && !wanted.has(layer.motionPath.sourceLayerId))
+      throw new Error(`Include the motion path when saving component layer "${layer.name}".`);
   }
   const missing = layerIds.filter((layerId) => !layers.some((layer) => layer.id === layerId));
   if (missing.length > 0) throw new Error(`Component layers not found: ${missing.join(', ')}`);
@@ -101,6 +103,13 @@ export function instantiateComponentDefinition(
       : null;
     layer.parentId =
       source.parentId && sourceIds.has(source.parentId) ? layerIds[source.parentId]! : null;
+    layer.motionPath = source.motionPath
+      ? {
+          ...source.motionPath,
+          sourceLayerId:
+            layerIds[source.motionPath.sourceLayerId] ?? source.motionPath.sourceLayerId,
+        }
+      : null;
     layer.mask = source.mask
       ? {
           ...source.mask,

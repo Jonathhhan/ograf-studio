@@ -5,6 +5,7 @@ import {
   type MediaPaint,
 } from '@ograf-editor/scene-model';
 import { createShaderPaintMask } from './shaderPaintMask';
+import { resolveMediaTimelinePosition } from './mediaTimeline';
 
 interface RenderOptions {
   shaderBackingSize?: { width: number; height: number };
@@ -100,7 +101,7 @@ function mediaPaintBaseElement(element: Element): Element {
   return element;
 }
 
-function waitForVideo(video: HTMLVideoElement, signal: AbortSignal): Promise<void> {
+export function waitForMediaClip(video: HTMLVideoElement, signal: AbortSignal): Promise<void> {
   if (!video.src) return Promise.resolve();
   if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0)
     return Promise.resolve();
@@ -245,8 +246,28 @@ function drawRequestedFrame(mounted: MountedMediaPaint): void {
 }
 
 function requestFrame(mounted: MountedMediaPaint, elapsedMs: number): void {
-  if (mounted.error) throw mounted.error;
+  // Readiness reports the error to the caller/editor. Do not throw it through an animation frame,
+  // which would unmount the surrounding React canvas instead of keeping the fault layer-local.
+  if (mounted.error) return;
   mounted.time = elapsedMs;
+  if (mounted.paint.source.kind === 'clip') {
+    const video = mounted.source as HTMLVideoElement;
+    const position = resolveMediaTimelinePosition(elapsedMs, {
+      timelineStartMs: mounted.paint.timelineStartMs,
+      trimStartMs: mounted.paint.offsetMs,
+      trimEndMs: mounted.paint.trimEndMs,
+      loop: mounted.paint.loop,
+      speed: mounted.paint.speed,
+      durationMs: Number.isFinite(video.duration) ? video.duration * 1000 : null,
+    });
+    if (!position.active) {
+      video.pause();
+    } else if (video.readyState >= 2) {
+      const seconds = position.positionMs / 1000;
+      if (Math.abs(video.currentTime - seconds) > 0.08) video.currentTime = seconds;
+      void video.play().catch(() => undefined);
+    }
+  }
   mounted.requested += 1;
   drawRequestedFrame(mounted);
 }
@@ -306,7 +327,7 @@ export function mountMediaPaintContent(
     video.preload = 'auto';
     video.loop = paint.loop;
     video.playbackRate = paint.speed;
-    video.src = paint.source.src;
+    const clipSource = paint.source.src.trim();
     Object.assign(video.style, {
       position: 'absolute',
       width: '1px',
@@ -315,13 +336,19 @@ export function mountMediaPaintContent(
       pointerEvents: 'none',
     });
     visualHost.appendChild(video);
-    video.load();
     source = video;
-    ready = waitForVideo(video, abort.signal).then(() => {
-      if (paint.offsetMs > 0 && Number.isFinite(video.duration))
-        video.currentTime = Math.min(video.duration, paint.offsetMs / 1000);
-      void video.play().catch(() => undefined);
-    });
+    if (clipSource) {
+      video.src = clipSource;
+      video.load();
+      ready = waitForMediaClip(video, abort.signal).then(() => {
+        if (paint.offsetMs > 0 && Number.isFinite(video.duration))
+          video.currentTime = Math.min(video.duration, paint.offsetMs / 1000);
+        void video.play().catch(() => undefined);
+      });
+    } else {
+      visualHost.dataset.ografMediaPending = 'true';
+      ready = Promise.resolve();
+    }
   } else {
     const live = container.ownerDocument.createElement(LIVE_MEDIA_ELEMENT_TAG) as LiveMediaElement;
     live.dataset.ografMediaLive = 'true';

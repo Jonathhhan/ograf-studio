@@ -35,6 +35,9 @@ import {
   applyCompiledClipPaths,
   applyCompiledMasks,
   applyCompiledLayerVisualState,
+  applyCompiledAutoLayout,
+  applyCompiledMotionPaths,
+  MediaCueRuntime,
   sampleCompiledLayerVisualState,
 } from '@ograf-editor/ograf-runtime';
 import { LayerNode } from './LayerNode';
@@ -667,6 +670,12 @@ export function Stage({ style }: { style?: CSSProperties }) {
     const frameRate = composition.frameRate;
     const durationFrames = getTotalFrames(composition);
     const wasPlaying = useTimelineStore.getState().isPlaying;
+    const descriptor = compileDescriptor(composition, { includeGuides: true });
+    const mediaCueHost = document.createElement('div');
+    mediaCueHost.dataset.ografStudioMediaCues = 'true';
+    mediaCueHost.style.display = 'none';
+    document.body.appendChild(mediaCueHost);
+    const mediaCueRuntime = new MediaCueRuntime(mediaCueHost, descriptor);
 
     timelineRef.current?.kill();
     const tl = buildMasterTimeline(composition, layerRefs.current);
@@ -679,7 +688,11 @@ export function Stage({ style }: { style?: CSSProperties }) {
     const currentFrame = useTimelineStore.getState().currentFrame;
     tl.seek(currentFrame / frameRate, true);
 
-    tl.eventCallback('onUpdate', () => setCurrentFrame(tl.time() * frameRate));
+    tl.eventCallback('onUpdate', () => {
+      const timelineTimeMs = tl.time() * 1000;
+      setCurrentFrame(tl.time() * frameRate);
+      if (useTimelineStore.getState().isPlaying) mediaCueRuntime.renderAtTime(timelineTimeMs);
+    });
     tl.eventCallback('onComplete', () => {
       shaderPreviewClock.pause(performance.now());
       setPlaying(false);
@@ -692,6 +705,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
         segmentTween = null;
         tl.pause();
         setPlaying(false);
+        mediaCueRuntime.reset();
         tl.seek(Math.max(0, Math.min(durationFrames, frame)) / frameRate, true);
         setCurrentFrame(tl.time() * frameRate);
         shaderPreviewClock.seek(tl.time() * 1000);
@@ -700,10 +714,13 @@ export function Stage({ style }: { style?: CSSProperties }) {
         // GSAP remains at its completed position after reaching the end. A transport's Play
         // button is expected to start again, rather than appearing to do nothing.
         if (tl.time() >= tl.duration()) {
+          mediaCueRuntime.reset();
           tl.seek(0, true);
           setCurrentFrame(0);
           shaderPreviewClock.seek(0);
         }
+        mediaCueRuntime.resumeBlocked();
+        mediaCueRuntime.renderAtTime(tl.time() * 1000);
         shaderPreviewClock.play(performance.now());
         setPlaying(true);
         const current = tl.time() * frameRate;
@@ -730,6 +747,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
         segmentTween?.kill();
         segmentTween = null;
         tl.pause();
+        mediaCueRuntime.reset();
         shaderPreviewClock.pause(performance.now());
         setPlaying(false);
       },
@@ -737,6 +755,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
         segmentTween?.kill();
         segmentTween = null;
         tl.pause();
+        mediaCueRuntime.reset();
         tl.seek(0, true);
         setCurrentFrame(0);
         shaderPreviewClock.seek(0);
@@ -752,6 +771,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
     return () => {
       segmentTween?.kill();
       tl.kill();
+      mediaCueRuntime.dispose();
       if (useTimelineStore.getState().controller === controller) setController(null);
     };
   }, [
@@ -769,7 +789,13 @@ export function Stage({ style }: { style?: CSSProperties }) {
   useEffect(() => {
     const descriptor = compileDescriptor(composition, { includeGuides: true });
     const loopLayers = descriptor.layers.filter(
-      (layer) => layer.loop || layer.lighting || layer.element.type === 'pattern',
+      (layer) =>
+        layer.loop ||
+        layer.lighting ||
+        layer.element.type === 'pattern' ||
+        layer.layoutParentId ||
+        layer.autoLayout?.direction !== 'none' ||
+        layer.motionPath,
     );
     if (loopLayers.length === 0) return;
     const previewTimeline = timelineRef.current;
@@ -802,8 +828,18 @@ export function Stage({ style }: { style?: CSSProperties }) {
           previewBindingData(composition.dataFields, useTestDataStore.getState().values),
         );
         states.set(layer.id, state);
+      }
+      applyCompiledAutoLayout(
+        descriptor,
+        states,
+        previewBindingData(composition.dataFields, useTestDataStore.getState().values),
+        layerRefs.current,
+      );
+      applyCompiledMotionPaths(descriptor, states);
+      for (const layer of descriptor.layers) {
+        const state = states.get(layer.id);
         const element = layerRefs.current.get(layer.id);
-        if (element) applyCompiledLayerVisualState(element, state, contentTimeMs);
+        if (element && state) applyCompiledLayerVisualState(element, state, contentTimeMs);
       }
       applyCompiledClipPaths(descriptor, layerRefs.current, states);
       applyCompiledMasks(descriptor, layerRefs.current, states);

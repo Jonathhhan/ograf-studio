@@ -7,6 +7,8 @@ import {
   createLayerKeyframe,
   createLayerPropertyKeyframe,
   createLayerOfKind,
+  createMediaCue,
+  createAsset,
   createTransition,
   materializeLowerThird,
   type Composition,
@@ -35,6 +37,26 @@ const POSE = {
 };
 
 describe('compileDescriptor', () => {
+  it('retains only active Auto layout parent relationships for runtime flow', () => {
+    const parent = createLayerOfKind('rectangle');
+    const child = createLayerOfKind('text');
+    child.parentId = parent.id;
+    parent.autoLayout = {
+      ...parent.autoLayout,
+      direction: 'horizontal',
+      gap: 18,
+      paddingLeft: 12,
+      hugWidth: true,
+    };
+    const descriptor = compileDescriptor(compositionWith([parent, child]));
+    expect(descriptor.layers[0]!.autoLayout).toMatchObject({
+      direction: 'horizontal',
+      gap: 18,
+      paddingLeft: 12,
+      hugWidth: true,
+    });
+    expect(descriptor.layers[1]!.layoutParentId).toBe(parent.id);
+  });
   it('preserves shader source and playback controls in the compiled and exported descriptor', () => {
     const shader = createLayerOfKind('shader');
     const paint = getElementShaderPaint(shader.element)!;
@@ -311,6 +333,44 @@ describe('compileDescriptor', () => {
     );
     expect(descriptor.stepCount).toBe(0);
     expect(descriptor.stepKeyframeIds).toEqual([]);
+  });
+
+  it('compiles Media Cues and materializes the active video source onto its target layer', () => {
+    const target = createLayerOfKind('rectangle');
+    const composition = compositionWith([target]);
+    composition.assets.push(
+      createAsset({
+        id: 'clip',
+        kind: 'media',
+        mimeType: 'video/mp4',
+        dataUri: 'data:video/mp4;base64,AAAA',
+      }),
+    );
+    composition.mediaCues.push(
+      createMediaCue({
+        id: 'cue',
+        sources: [
+          { id: 'source', name: 'Clip', kind: 'clip', mediaType: 'video', src: 'asset:clip' },
+        ],
+        activeSourceId: 'source',
+        trimStartMs: 250,
+        visual: { targetLayerId: target.id, fit: 'contain', positionX: 0.25, positionY: 0.75 },
+      }),
+    );
+    const descriptor = compileDescriptor(composition);
+    expect(descriptor.mediaCues?.[0]?.sources[0]).toMatchObject({
+      src: 'data:video/mp4;base64,AAAA',
+    });
+    expect(descriptor.layers[0]!.element).toMatchObject({
+      fill: {
+        type: 'media',
+        source: { kind: 'clip', src: 'data:video/mp4;base64,AAAA' },
+        fit: 'contain',
+        positionX: 0.25,
+        positionY: 0.75,
+        offsetMs: 250,
+      },
+    });
   });
 
   it('rejects a descriptor without both lifecycle boundaries', () => {

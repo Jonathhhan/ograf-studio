@@ -3,7 +3,9 @@ import {
   computeKeyframeFrames,
   compositionWithShaderParameterFields,
   getResolvedLayerAnimationTracks,
+  normalizeLayerAutoLayout,
   resolveElementAssetReferences,
+  resolveAssetValue,
   resolvePatternElement,
   type Composition,
 } from '@ograf-editor/scene-model';
@@ -51,18 +53,69 @@ export function compileDescriptor(
     .map((keyframe) => keyframe.id);
 
   const compileLayer = (layer: Composition['layers'][number]): CompiledLayer => {
+    const autoLayout = normalizeLayerAutoLayout(layer.autoLayout);
     const animationTracks = getResolvedLayerAnimationTracks(layer);
     const clipParent = layer.parentId
       ? composition.layers.find(
           (candidate) => candidate.id === layer.parentId && candidate.clipChildren,
         )
       : undefined;
+    const layoutParent = layer.parentId
+      ? composition.layers.find(
+          (candidate) =>
+            candidate.id === layer.parentId &&
+            normalizeLayerAutoLayout(candidate.autoLayout).direction !== 'none',
+        )
+      : undefined;
+    const mediaCue = composition.mediaCues.find(
+      (candidate) => candidate.visual.targetLayerId === layer.id,
+    );
+    const activeMediaSource = mediaCue?.sources.find(
+      (source) => source.id === mediaCue.activeSourceId,
+    );
+    const mediaTriggerFrame =
+      mediaCue?.trigger.type === 'timeline'
+        ? mediaCue.trigger.startFrame
+        : mediaCue?.trigger.type === 'lifecycle'
+          ? (frameByKeyframeId.get(mediaCue.trigger.keyframeId) ?? 0)
+          : 0;
+    const element =
+      mediaCue &&
+      activeMediaSource &&
+      !(activeMediaSource.kind === 'clip' && activeMediaSource.mediaType === 'audio') &&
+      'fill' in layer.element
+        ? {
+            ...layer.element,
+            fill: {
+              type: 'media' as const,
+              source:
+                activeMediaSource.kind === 'clip'
+                  ? { kind: 'clip' as const, src: activeMediaSource.src }
+                  : {
+                      kind: 'live' as const,
+                      tag: activeMediaSource.tag,
+                      ...(activeMediaSource.fallback
+                        ? { fallback: activeMediaSource.fallback }
+                        : {}),
+                    },
+              fit: mediaCue.visual.fit,
+              positionX: mediaCue.visual.positionX,
+              positionY: mediaCue.visual.positionY,
+              loop: mediaCue.loop,
+              speed: mediaCue.speed,
+              offsetMs: mediaCue.trimStartMs,
+              trimEndMs: mediaCue.trimEndMs,
+              timelineStartMs: (mediaTriggerFrame / composition.frameRate) * 1000,
+              muted: true as const,
+            },
+          }
+        : layer.element;
     return {
       id: layer.id,
       isVisible: layer.isVisible,
       blendMode: layer.blendMode,
       element: resolvePatternElement(
-        resolveElementAssetReferences(migrateShaderElement(layer.element), composition.assets),
+        resolveElementAssetReferences(migrateShaderElement(element), composition.assets),
         composition.patterns,
       ),
       effects: layer.effects,
@@ -116,7 +169,23 @@ export function compileDescriptor(
               },
             ];
       }),
+      visualRules: (layer.visualRules ?? []).flatMap((rule) => {
+        const dataKey = fieldKeyById.get(rule.fieldId);
+        if (!dataKey) return [];
+        const { fieldId: _fieldId, ...compiledRule } = structuredClone(rule);
+        return [{ ...compiledRule, dataKey }];
+      }),
       clipParentId: clipParent?.id ?? null,
+      layoutParentId: layoutParent?.id ?? null,
+      autoLayout,
+      updateTransition: structuredClone(
+        layer.updateTransition ?? { style: 'inherit', durationFrames: 0, distance: 24 },
+      ),
+      motionPath:
+        layer.motionPath &&
+        composition.layers.some((candidate) => candidate.id === layer.motionPath!.sourceLayerId)
+          ? structuredClone(layer.motionPath)
+          : null,
       isMaskOnly: layer.isMaskOnly,
       mask: layer.mask ? { ...layer.mask } : null,
     };
@@ -156,6 +225,11 @@ export function compileDescriptor(
         offsetPerItem: { ...collection.offsetPerItem },
         capacity: collection.capacity,
         overflow: collection.overflow,
+        itemKeyPath: [...(collection.itemKeyPath ?? [])],
+        sortPath: [...(collection.sortPath ?? [])],
+        sortDirection: collection.sortDirection ?? 'none',
+        pageSize: collection.pageSize ?? 0,
+        page: collection.page ?? 0,
       };
     },
   );
@@ -181,6 +255,7 @@ export function compileDescriptor(
     backgroundColor: composition.backgroundColor,
     frameRate: composition.frameRate,
     updateTransitionFrames: composition.updateTransitionFrames,
+    updateInterruption: composition.updateInterruption ?? 'queue',
     fonts: composition.assets
       .filter((asset) => asset.kind === 'font')
       .map((asset) => ({
@@ -190,6 +265,19 @@ export function compileDescriptor(
         weight: asset.fontWeight || '100 900',
         style: asset.fontStyle || 'normal',
       })),
+    mediaCues: composition.mediaCues.map((cue) => ({
+      ...structuredClone(cue),
+      sources: cue.sources.map((source) =>
+        source.kind === 'clip'
+          ? { ...source, src: resolveAssetValue(source.src, composition.assets) }
+          : {
+              ...source,
+              ...(source.fallback
+                ? { fallback: resolveAssetValue(source.fallback, composition.assets) }
+                : {}),
+            },
+      ),
+    })),
     layers,
     collections,
     paintOrder,
@@ -204,6 +292,33 @@ export function compileDescriptor(
     stepCount: stepKeyframeIds.length,
     startKeyframeId,
     endKeyframeId,
-    customActions: composition.customActions.map((a) => ({ id: a.actionId, name: a.name })),
+    customActions: composition.customActions.map((action) => ({
+      id: action.actionId,
+      name: action.name,
+      durationFrames: Math.max(
+        composition.layers.reduce((longest, layer) => {
+          const loop = layer.loop;
+          if (
+            loop?.activation.type !== 'customAction' ||
+            loop.activation.customActionId !== action.actionId
+          ) {
+            return longest;
+          }
+          return Math.max(longest, loop.durationFrames * (loop.repeatCount ?? 1));
+        }, 0),
+        ...composition.mediaCues
+          .filter(
+            (cue) =>
+              cue.trigger.type === 'customAction' && cue.trigger.actionId === action.actionId,
+          )
+          .map((cue) => cue.transition.durationFrames),
+        ...composition.mediaCues
+          .filter(
+            (cue) =>
+              cue.trigger.type === 'customAction' && cue.trigger.actionId === action.actionId,
+          )
+          .map((cue) => cue.durationFrames ?? 0),
+      ),
+    })),
   };
 }

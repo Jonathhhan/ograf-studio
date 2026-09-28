@@ -42,7 +42,7 @@ const mock = vi.hoisted(() => {
     return ++nextFrameId;
   });
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
-  return { paint: vi.fn(), content: vi.fn(), frames };
+  return { paint: vi.fn(), content: vi.fn(), render: vi.fn(), frames };
 });
 vi.mock('./buildRuntimeTimeline', () => ({
   buildRuntimeTimeline: () => {
@@ -65,6 +65,7 @@ vi.mock('./renderElement', async (importOriginal) => {
   return {
     ...actual,
     renderElementContent: (host: HTMLElement, element: Element) => {
+      mock.render(host, element);
       host.dataset.ografRenderedElement = JSON.stringify(element);
     },
     renderAnimatedElementAtTime: mock.content,
@@ -164,6 +165,25 @@ function mediaDescriptor(): CompiledGraphicDescriptor {
   };
 }
 
+function customActionDescriptor(): CompiledGraphicDescriptor {
+  const result = descriptor();
+  const layer = result.layers[0]!;
+  return {
+    ...result,
+    layers: [
+      {
+        ...layer,
+        loop: {
+          ...layer.loop!,
+          activation: { type: 'customAction', customActionId: 'goal_scored' },
+          repeatCount: 1,
+        },
+      },
+    ],
+    customActions: [{ id: 'goal_scored', name: 'Goal scored', durationFrames: 20 }],
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mock.frames.length = 0;
@@ -193,6 +213,52 @@ describe('realtime Media paint playback', () => {
     expect(mock.frames.filter((frame) => frame.name === 'invoke')).toHaveLength(1);
 
     expect(await graphic.dispose()).toMatchObject({ statusCode: 200 });
+  });
+});
+
+describe('custom-action clips', () => {
+  it('applies payload data, plays the authored clip, and settles automatically', async () => {
+    vi.useFakeTimers();
+    try {
+      class Graphic extends GraphicElement {
+        static descriptor = customActionDescriptor();
+      }
+      const graphic = new Graphic();
+      graphic.connectedCallback();
+      expect(
+        await graphic.load({
+          renderType: 'realtime',
+          renderCharacteristics: { resolution: { width: 640, height: 360 }, frameRate: 10 },
+          data: { gain: 0.5, count: 3 },
+        }),
+      ).toMatchObject({ statusCode: 200 });
+
+      let settled = false;
+      const action = graphic
+        .customAction({ id: 'goal_scored', payload: { gain: 1.25 }, skipAnimation: false })
+        .then((result) => {
+          settled = true;
+          return result;
+        });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      expect(
+        mock.render.mock.calls.some(
+          ([, element]) =>
+            element.type === 'rectangle' &&
+            element.fill.type === 'shader' &&
+            element.fill.parameters.gain === 1.25,
+        ),
+      ).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await action).toMatchObject({ statusCode: 200 });
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

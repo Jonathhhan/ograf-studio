@@ -26,6 +26,13 @@ export function normalizeMediaPaint(paint: Partial<MediaPaint> = {}): MediaPaint
     loop: paint.loop ?? true,
     speed: Number.isFinite(paint.speed) ? Math.max(0.1, Math.min(16, paint.speed!)) : 1,
     offsetMs: Number.isFinite(paint.offsetMs) ? Math.max(0, paint.offsetMs!) : 0,
+    trimEndMs:
+      paint.trimEndMs === null || paint.trimEndMs === undefined
+        ? null
+        : Math.max(0, paint.trimEndMs),
+    timelineStartMs: Number.isFinite(paint.timelineStartMs)
+      ? Math.max(0, paint.timelineStartMs!)
+      : 0,
     muted: true,
   };
 }
@@ -45,6 +52,13 @@ export function validateMediaPaint(paint: MediaPaint): string[] {
     errors.push('media speed must be from 0.1 to 16');
   if (!Number.isFinite(paint.offsetMs) || paint.offsetMs < 0)
     errors.push('media offset must be a non-negative number of milliseconds');
+  if (
+    paint.trimEndMs !== null &&
+    (!Number.isFinite(paint.trimEndMs) || paint.trimEndMs <= paint.offsetMs)
+  )
+    errors.push('media trim end must be greater than its initial offset');
+  if (!Number.isFinite(paint.timelineStartMs) || paint.timelineStartMs < 0)
+    errors.push('media timeline start must be a non-negative number of milliseconds');
   if (paint.muted !== true) errors.push('media paint must remain muted');
   if (paint.source.kind === 'clip') {
     if (!paint.source.src.trim()) errors.push('media clip source is required');

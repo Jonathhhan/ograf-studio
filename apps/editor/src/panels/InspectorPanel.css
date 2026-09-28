@@ -4,6 +4,59 @@
   gap: 4px;
 }
 
+.properties-filter {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  min-height: var(--ui-header-height);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px;
+  box-sizing: border-box;
+  padding: 2px 5px;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-header);
+  color: var(--text-dim);
+}
+
+.properties-filter input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ui-control-height);
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-canvas);
+  color: var(--text);
+}
+
+.properties-filter input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.properties-filter button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.properties-filter button:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+[data-property-filter-hidden='true'],
+.inspector [hidden] {
+  display: none !important;
+}
+
 .paint-editor {
   display: grid;
   gap: 4px;
@@ -303,7 +356,21 @@
 /* RealityHub-style configuration table: one stable label column and one value column. */
 .inspector {
   display: block;
-  margin: -8px -10px;
+  margin: 0 -6px -4px;
+}
+
+.inspector .collapsible-section-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Nested property editors must participate in the same flush row table as direct controls. */
+.inspector .paint-editor {
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border-bottom: 0;
 }
 
 .inspector > .panel-placeholder,
@@ -316,6 +383,21 @@
 .inspector > .inspector-frame-list,
 .inspector > .inspector-button-row,
 .inspector > .paint-editor {
+  margin: 0;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.inspector .collapsible-section-content > .panel-placeholder,
+.inspector .collapsible-section-content > .inspector-error,
+.inspector .collapsible-section-content > .inspector-hint,
+.inspector .collapsible-section-content > .inspector-playout-warning,
+.inspector .collapsible-section-content > .inspector-evaluated-pose,
+.inspector .collapsible-section-content > .inspector-font-preview,
+.inspector .collapsible-section-content > .inspector-binding-list,
+.inspector .collapsible-section-content > .inspector-frame-list,
+.inspector .collapsible-section-content > .inspector-button-row,
+.inspector .collapsible-section-content > .paint-editor {
   margin: 0;
   padding: 7px 8px;
   border-bottom: 1px solid var(--border);
@@ -356,6 +438,11 @@
   background: var(--bg-panel);
 }
 
+.inspector-row:not(.inspector-row-stacked):not(:has(textarea)) {
+  height: var(--ui-row-height);
+  box-sizing: border-box;
+}
+
 .inspector-row:hover {
   background: #303030;
 }
@@ -380,6 +467,12 @@
   margin: 1px 4px;
 }
 
+.inspector-row > :is(input:not([type='range']):not([type='checkbox']), select, button) {
+  height: var(--ui-control-height);
+  box-sizing: border-box;
+  padding: 1px 5px;
+}
+
 .inspector-row > textarea {
   min-height: 54px;
   resize: vertical;
@@ -394,12 +487,12 @@
 
 .inspector-row input[type='color'] {
   width: 42px;
-  height: 24px;
+  height: var(--ui-control-height);
   justify-self: start;
 }
 
 .inspector-alpha-control {
-  min-height: 26px;
+  min-height: var(--ui-row-height);
   grid-template-columns: var(--property-label-width, minmax(118px, 42%)) minmax(0, 1fr) 72px;
   gap: 4px;
   margin: 0;
@@ -423,4 +516,22 @@
 .paint-stops {
   background: #292929;
   border-color: var(--border-strong);
+}
+
+.inspector > .inspector-button-row,
+.inspector .collapsible-section-content > .inspector-button-row,
+.inspector .media-paint-import,
+.inspector .shader-source-actions {
+  min-height: var(--ui-row-height);
+  box-sizing: border-box;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 4px;
+}
+
+.inspector :is(.inspector-button-row, .shader-source-actions) button {
+  height: var(--ui-control-height);
+  box-sizing: border-box;
+  padding: 1px 6px;
 }

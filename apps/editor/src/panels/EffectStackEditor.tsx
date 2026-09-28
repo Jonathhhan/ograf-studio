@@ -1,5 +1,6 @@
 import { effectParameterHelp } from './propertyHelp';
 import { PropertyRow } from '../components/PropertyRow';
+import { CollapsibleSection } from '../components/CollapsibleSection';
 import { useState } from 'react';
 import {
   EFFECT_CATALOG,
@@ -29,7 +30,15 @@ const swallow = {
   onKeyDown: (event: { stopPropagation: () => void }) => event.stopPropagation(),
 };
 
-export function EffectStackEditor({ layer, frame }: { layer: Layer; frame: number }) {
+export function EffectStackEditor({
+  layer,
+  frame,
+  groupLayers = [layer],
+}: {
+  layer: Layer;
+  frame: number;
+  groupLayers?: Layer[];
+}) {
   const [type, setType] = useState<EffectType>('glow'),
     [error, setError] = useState(''),
     [dragOver, setDragOver] = useState(false);
@@ -37,9 +46,25 @@ export function EffectStackEditor({ layer, frame }: { layer: Layer; frame: numbe
     update = useProjectStore((s) => s.updateLayerEffect),
     remove = useProjectStore((s) => s.removeLayerEffect),
     duplicate = useProjectStore((s) => s.duplicateLayerEffect),
-    reorder = useProjectStore((s) => s.reorderLayerEffects);
+    reorder = useProjectStore((s) => s.reorderLayerEffects),
+    addGroup = useProjectStore((s) => s.addGroupEffect),
+    updateGroup = useProjectStore((s) => s.updateGroupEffect),
+    removeGroup = useProjectStore((s) => s.removeGroupEffect),
+    duplicateGroup = useProjectStore((s) => s.duplicateGroupEffect),
+    reorderGroup = useProjectStore((s) => s.reorderGroupEffects);
+  const isGroup = groupLayers.length > 1,
+    targetIds = groupLayers.map((candidate) => candidate.id),
+    groupLocked = groupLayers.some((candidate) => candidate.isLocked);
   const effects = getLayerEffectsAtFrame(layer, frame),
-    stack = getEffectStack(effects);
+    stack = getEffectStack(effects).filter(
+      (effect) =>
+        !isGroup ||
+        groupLayers.every((candidate) =>
+          getEffectStack(getLayerEffectsAtFrame(candidate, frame)).some(
+            (groupEffect) => groupEffect.id === effect.id,
+          ),
+        ),
+    );
   const run = (action: () => void) => {
     try {
       action();
@@ -52,9 +77,22 @@ export function EffectStackEditor({ layer, frame }: { layer: Layer; frame: numbe
     run(() => {
       const ids = stack.map((e) => e.id);
       [ids[index], ids[index + delta]] = [ids[index + delta]!, ids[index]!];
-      reorder(layer.id, ids);
+      if (isGroup) reorderGroup(targetIds, ids);
+      else reorder(layer.id, ids);
     });
-  const full = stack.length >= MAX_EFFECTS;
+  const addTarget = (effectType: EffectType, patch?: Parameters<typeof add>[2]) =>
+      isGroup ? addGroup(targetIds, effectType, patch) : add(layer.id, effectType, patch),
+    updateTarget = (effectId: string, patch: Parameters<typeof update>[2]) =>
+      isGroup
+        ? updateGroup(targetIds, effectId, patch, frame)
+        : update(layer.id, effectId, patch, frame),
+    removeTarget = (effectId: string) =>
+      isGroup ? removeGroup(targetIds, effectId) : remove(layer.id, effectId),
+    duplicateTarget = (effectId: string) =>
+      isGroup ? duplicateGroup(targetIds, effectId) : duplicate(layer.id, effectId),
+    full = groupLayers.some(
+      (candidate) => getEffectStack(getLayerEffectsAtFrame(candidate, frame)).length >= MAX_EFFECTS,
+    );
   return (
     <div
       className={`effect-stack-editor${dragOver ? ' is-shader-drag-over' : ''}`}
@@ -63,15 +101,15 @@ export function EffectStackEditor({ layer, frame }: { layer: Layer; frame: numbe
         if (!event.dataTransfer.types.includes(SHADER_RESOURCE_MIME)) return;
         event.preventDefault();
         event.stopPropagation();
-        event.dataTransfer.dropEffect = full || layer.isLocked ? 'none' : 'copy';
-        setDragOver(!full && !layer.isLocked);
+        event.dataTransfer.dropEffect = full || groupLocked ? 'none' : 'copy';
+        setDragOver(!full && !groupLocked);
       }}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes(SHADER_RESOURCE_MIME)) return;
         event.preventDefault();
         event.stopPropagation();
-        event.dataTransfer.dropEffect = full || layer.isLocked ? 'none' : 'copy';
-        setDragOver(!full && !layer.isLocked);
+        event.dataTransfer.dropEffect = full || groupLocked ? 'none' : 'copy';
+        setDragOver(!full && !groupLocked);
       }}
       onDragLeave={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false);
@@ -81,10 +119,9 @@ export function EffectStackEditor({ layer, frame }: { layer: Layer; frame: numbe
         event.preventDefault();
         event.stopPropagation();
         setDragOver(false);
-        if (full || layer.isLocked) return;
+        if (full || groupLocked) return;
         run(() =>
-          add(
-            layer.id,
+          addTarget(
             'shader',
             shaderEffectPatchFromResourceDrag(
               useProjectStore.getState().project,
@@ -94,222 +131,214 @@ export function EffectStackEditor({ layer, frame }: { layer: Layer; frame: numbe
         );
       }}
     >
-      <h3
-        className="inspector-section"
-        title="Effects run top to bottom. Reorder to change the result; bypass keeps settings and animation. Animate numeric parameters in Timeline."
+      <CollapsibleSection
+        sectionId="properties.effects-stack"
+        ariaLabel="Effects stack"
+        className="effect-stack-section"
+        title={
+          <>
+            {isGroup ? 'Group effects stack' : 'Effects stack'}
+            {stack.length > 0 && <span className="effect-stack-count">{stack.length}</span>}
+          </>
+        }
       >
-        Effects stack
-        {stack.length > 0 && <span className="effect-stack-count">{stack.length}</span>}
-      </h3>
-      <div className="effect-stack-add">
-        <select
-          aria-label="New effect type"
-          value={type}
-          onChange={(e) => setType(e.target.value as EffectType)}
-        >
-          {EFFECT_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {EFFECT_CATALOG[t].label}
-            </option>
-          ))}
-        </select>
-        <button
-          disabled={full}
-          title={full ? `Limit of ${MAX_EFFECTS} effects reached` : 'Add this effect to the stack'}
-          onClick={() => run(() => add(layer.id, type))}
-        >
-          Add
-        </button>
-      </div>
-      <p className="effect-stack-drop-hint">
-        Drop a shader here to process this layer without replacing its fill.
-      </p>
-      {error && (
-        <p role="alert" className="effect-stack-error">
-          {error}
-        </p>
-      )}
-      {stack.map((effect, index) => {
-        const params = effectParams(effect, effects),
-          enabled = effectEnabled(effect, effects),
-          catalog = EFFECT_CATALOG[effect.type];
-        return (
-          <details
-            className={`effect-stack-item${enabled ? '' : ' is-bypassed'}`}
-            data-effect-id={effect.id}
-            key={effect.id}
-            open
+        <div className="effect-stack-add">
+          <select
+            aria-label="New effect type"
+            value={type}
+            onChange={(e) => setType(e.target.value as EffectType)}
           >
-            <summary aria-label={`Effect ${effect.name}`}>
-              <input
-                className="effect-stack-name"
-                aria-label={`Effect name ${index + 1}`}
-                value={effect.name}
-                title={`${catalog.label} effect`}
-                {...swallow}
-                onChange={(e) =>
-                  run(() => update(layer.id, effect.id, { name: e.target.value }, frame))
-                }
-              />
-              {/* The type only earns space once the name no longer says it. */}
-              {effect.name !== catalog.label && (
-                <span className="effect-stack-type">{catalog.label}</span>
-              )}
-              {!enabled && <span className="effect-stack-badge">bypassed</span>}
-              <span className="effect-stack-actions" {...swallow}>
-                <button
-                  aria-label={`Move ${effect.name} up`}
-                  title="Move up"
-                  disabled={index === 0}
-                  onClick={() => move(index, -1)}
-                >
-                  ↑
-                </button>
-                <button
-                  aria-label={`Move ${effect.name} down`}
-                  title="Move down"
-                  disabled={index === stack.length - 1}
-                  onClick={() => move(index, 1)}
-                >
-                  ↓
-                </button>
-                <button
-                  aria-label={`Duplicate ${effect.name}`}
-                  title={full ? `Limit of ${MAX_EFFECTS} effects reached` : 'Duplicate'}
-                  disabled={full}
-                  onClick={() => run(() => duplicate(layer.id, effect.id))}
-                >
-                  ⧉
-                </button>
-                <button
-                  aria-label={`Remove ${effect.name}`}
-                  title="Remove this effect and its own animation/bindings"
-                  onClick={() => run(() => remove(layer.id, effect.id))}
-                >
-                  ✕
-                </button>
-              </span>
-            </summary>
-            <PropertyRow
-              className="inspector-row effect-stack-blend"
-              help="Bypass skips this effect. A blend mode activates it and combines its result with the incoming image, at the opacity beside it."
-            >
-              <span>Blend</span>
-              <span className="effect-stack-blend-controls">
-                <select
-                  aria-label={`${effect.name} blend mode`}
-                  value={enabled ? (effect.blendMode ?? 'normal') : 'bypass'}
-                  onChange={(event) =>
-                    run(() =>
-                      update(
-                        layer.id,
-                        effect.id,
-                        event.target.value === 'bypass'
-                          ? { enabled: false }
-                          : { enabled: true, blendMode: event.target.value as EffectBlendMode },
-                        frame,
-                      ),
-                    )
-                  }
-                >
-                  <option value="bypass">Bypass</option>
-                  {EFFECT_BLEND_MODES.map((mode) => (
-                    <option key={mode} value={mode}>
-                      {blendLabel(mode)}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  aria-label={`${effect.name} blend opacity`}
-                  title="Effect opacity: mix this effect's blended result with its input; zero contributes nothing."
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={Math.round((effect.blendOpacity ?? 1) * 100)}
-                  onChange={(event) =>
-                    run(() =>
-                      update(
-                        layer.id,
-                        effect.id,
-                        {
-                          blendOpacity:
-                            Math.max(0, Math.min(100, Number(event.target.value))) / 100,
-                        },
-                        frame,
-                      ),
-                    )
-                  }
-                />
-              </span>
-            </PropertyRow>
-            {effect.type === 'shader' && effect.shader && (
-              <div className="effect-stack-shader">
-                <p className="inspector-hint">
-                  iChannel0 is the result of every preceding effect in this stack.
-                </p>
-                <ShaderSourceEditor
-                  element={effect.shader}
-                  labelPrefix={`${effect.name} shader`}
-                  allowImageInput={false}
-                  onChange={(patch) =>
-                    run(() =>
-                      update(
-                        layer.id,
-                        effect.id,
-                        {
-                          shader: shaderPaintWithPatch(effect.shader!, patch, {
-                            channel0Provided: true,
-                          }),
-                        },
-                        frame,
-                      ),
-                    )
-                  }
-                />
-              </div>
-            )}
-            {Object.entries(catalog.params).map(([key, spec]) => (
-              <PropertyRow
-                help={effectParameterHelp(effect.type, key)}
-                className="inspector-row"
-                key={key}
-              >
-                <span>{spec.label}</span>
-                <input
-                  aria-label={`${effect.name} ${spec.label}`}
-                  type={typeof spec.default === 'number' ? 'number' : 'color'}
-                  min={spec.min}
-                  max={spec.max}
-                  step={spec.step ?? 1}
-                  value={
-                    typeof spec.default === 'number'
-                      ? Number(Number(params[key]).toFixed(4))
-                      : String(params[key]).slice(0, 7)
-                  }
-                  onChange={(e) =>
-                    run(() =>
-                      update(
-                        layer.id,
-                        effect.id,
-                        {
-                          params: {
-                            [key]:
-                              typeof spec.default === 'number'
-                                ? Number(e.target.value)
-                                : e.target.value,
-                          },
-                        },
-                        frame,
-                      ),
-                    )
-                  }
-                />
-              </PropertyRow>
+            {EFFECT_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {EFFECT_CATALOG[t].label}
+              </option>
             ))}
-          </details>
-        );
-      })}
+          </select>
+          <button
+            disabled={full || groupLocked}
+            title={
+              full ? `Limit of ${MAX_EFFECTS} effects reached` : 'Add this effect to the stack'
+            }
+            onClick={() => run(() => addTarget(type))}
+          >
+            Add
+          </button>
+        </div>
+        <p className="effect-stack-drop-hint">
+          {isGroup
+            ? `Shared by all ${groupLayers.length} group layers. Individual layer effects remain independent.`
+            : 'Drop a shader here to process this layer without replacing its fill.'}
+        </p>
+        {error && (
+          <p role="alert" className="effect-stack-error">
+            {error}
+          </p>
+        )}
+        <div className="effect-stack-list">
+          {stack.map((effect, index) => {
+            const params = effectParams(effect, effects),
+              enabled = effectEnabled(effect, effects),
+              catalog = EFFECT_CATALOG[effect.type];
+            return (
+              <details
+                className={`effect-stack-item${enabled ? '' : ' is-bypassed'}`}
+                data-effect-id={effect.id}
+                key={effect.id}
+                open
+              >
+                <summary aria-label={`Effect ${effect.name}`}>
+                  <input
+                    className="effect-stack-name"
+                    aria-label={`Effect name ${index + 1}`}
+                    value={effect.name}
+                    title={`${catalog.label} effect`}
+                    {...swallow}
+                    onChange={(e) => run(() => updateTarget(effect.id, { name: e.target.value }))}
+                  />
+                  {/* The type only earns space once the name no longer says it. */}
+                  {effect.name !== catalog.label && (
+                    <span className="effect-stack-type">{catalog.label}</span>
+                  )}
+                  {!enabled && <span className="effect-stack-badge">bypassed</span>}
+                  <span className="effect-stack-actions" {...swallow}>
+                    <button
+                      aria-label={`Move ${effect.name} up`}
+                      title="Move up"
+                      disabled={index === 0}
+                      onClick={() => move(index, -1)}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      aria-label={`Move ${effect.name} down`}
+                      title="Move down"
+                      disabled={index === stack.length - 1}
+                      onClick={() => move(index, 1)}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      aria-label={`Duplicate ${effect.name}`}
+                      title={full ? `Limit of ${MAX_EFFECTS} effects reached` : 'Duplicate'}
+                      disabled={full}
+                      onClick={() => run(() => duplicateTarget(effect.id))}
+                    >
+                      ⧉
+                    </button>
+                    <button
+                      aria-label={`Remove ${effect.name}`}
+                      title="Remove this effect and its own animation/bindings"
+                      onClick={() => run(() => removeTarget(effect.id))}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                </summary>
+                <PropertyRow
+                  className="inspector-row effect-stack-blend"
+                  help="Bypass skips this effect. A blend mode activates it and combines its result with the incoming image, at the opacity beside it."
+                >
+                  <span>Blend</span>
+                  <span className="effect-stack-blend-controls">
+                    <select
+                      aria-label={`${effect.name} blend mode`}
+                      value={enabled ? (effect.blendMode ?? 'normal') : 'bypass'}
+                      onChange={(event) =>
+                        run(() =>
+                          updateTarget(
+                            effect.id,
+                            event.target.value === 'bypass'
+                              ? { enabled: false }
+                              : { enabled: true, blendMode: event.target.value as EffectBlendMode },
+                          ),
+                        )
+                      }
+                    >
+                      <option value="bypass">Bypass</option>
+                      {EFFECT_BLEND_MODES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {blendLabel(mode)}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      aria-label={`${effect.name} blend opacity`}
+                      title="Effect opacity: mix this effect's blended result with its input; zero contributes nothing."
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={Math.round((effect.blendOpacity ?? 1) * 100)}
+                      onChange={(event) =>
+                        run(() =>
+                          updateTarget(effect.id, {
+                            blendOpacity:
+                              Math.max(0, Math.min(100, Number(event.target.value))) / 100,
+                          }),
+                        )
+                      }
+                    />
+                  </span>
+                </PropertyRow>
+                {effect.type === 'shader' && effect.shader && (
+                  <div className="effect-stack-shader">
+                    <p className="inspector-hint">
+                      iChannel0 is the result of every preceding effect in this stack.
+                    </p>
+                    <ShaderSourceEditor
+                      element={effect.shader}
+                      labelPrefix={`${effect.name} shader`}
+                      allowImageInput={false}
+                      onChange={(patch) =>
+                        run(() =>
+                          updateTarget(effect.id, {
+                            shader: shaderPaintWithPatch(effect.shader!, patch, {
+                              channel0Provided: true,
+                            }),
+                          }),
+                        )
+                      }
+                    />
+                  </div>
+                )}
+                {Object.entries(catalog.params).map(([key, spec]) => (
+                  <PropertyRow
+                    help={effectParameterHelp(effect.type, key)}
+                    className="inspector-row"
+                    key={key}
+                  >
+                    <span>{spec.label}</span>
+                    <input
+                      aria-label={`${effect.name} ${spec.label}`}
+                      type={typeof spec.default === 'number' ? 'number' : 'color'}
+                      min={spec.min}
+                      max={spec.max}
+                      step={spec.step ?? 1}
+                      value={
+                        typeof spec.default === 'number'
+                          ? Number(Number(params[key]).toFixed(4))
+                          : String(params[key]).slice(0, 7)
+                      }
+                      onChange={(e) =>
+                        run(() =>
+                          updateTarget(effect.id, {
+                            params: {
+                              [key]:
+                                typeof spec.default === 'number'
+                                  ? Number(e.target.value)
+                                  : e.target.value,
+                            },
+                          }),
+                        )
+                      }
+                    />
+                  </PropertyRow>
+                ))}
+              </details>
+            );
+          })}
+        </div>
+      </CollapsibleSection>
     </div>
   );
 }

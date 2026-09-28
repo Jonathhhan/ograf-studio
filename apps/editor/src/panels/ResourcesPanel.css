@@ -130,6 +130,27 @@
   padding-left: 10px;
 }
 
+.resources-media-cues {
+  display: grid;
+  gap: 2px;
+  padding: 3px 0 4px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.resources-media-cues-heading {
+  color: var(--text-dim);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.resources-audio-drag-source {
+  cursor: grab;
+}
+
+.resources-audio-drag-source:active {
+  cursor: grabbing;
+}
+
 .resources-tree-item {
   min-width: 0;
   border-left: 1px solid color-mix(in srgb, var(--border) 75%, transparent);

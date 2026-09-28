@@ -9,6 +9,7 @@ import {
   createLayerOfKind,
   createLayerPropertyKeyframe,
   createMediaPaint,
+  createMediaCue,
   createProject,
   createTransition,
   defaultTransformForRole,
@@ -47,6 +48,72 @@ describe('canonical OGraf validation', () => {
 
     layer.element.fill = createMediaPaint({ source: { kind: 'live', tag: 'camera.program' } });
     expect(validateProject(project).errors).toEqual([]);
+  });
+
+  it('validates first-class audio assets, trim ranges, and realtime-only playback', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const asset = createAsset({
+      id: 'audio',
+      kind: 'audio',
+      mimeType: 'audio/mpeg',
+      dataUri: 'data:audio/mpeg;base64,AAAA',
+    });
+    const layer = createLayerOfKind('audio');
+    if (layer.element.type !== 'audio') throw new Error('Expected audio');
+    layer.element.src = 'asset:audio';
+    layer.element.trimStartMs = 250;
+    layer.element.trimEndMs = 1_250;
+    layer.element.timelineStartMs = 2_000;
+    layer.keyframes = composition.keyframes.map((keyframe, index) =>
+      createLayerKeyframe(
+        computeKeyframeFrames(composition)[index]!.frame,
+        defaultTransformForRole('audio', keyframe.role),
+      ),
+    );
+    composition.assets.push(asset);
+    composition.layers.push(layer);
+    expect(validateProject(project).errors.join(' ')).toContain(
+      'uses audio, which is real-time-only',
+    );
+    project.supportsNonRealTime = false;
+    expect(validateProject(project).errors).toEqual([]);
+    layer.element.trimEndMs = 100;
+    expect(validateProject(project).errors.join(' ')).toContain('invalid trim/timeline values');
+  });
+
+  it('validates Media Cue sources, triggers, transitions, and real-time profile', () => {
+    const project = createProject({ supportsNonRealTime: false });
+    const composition = project.compositions[0]!;
+    composition.assets.push(
+      createAsset({
+        id: 'clip',
+        kind: 'media',
+        mimeType: 'video/mp4',
+        dataUri: 'data:video/mp4;base64,AAAA',
+      }),
+    );
+    composition.mediaCues.push(
+      createMediaCue({
+        name: 'Program',
+        sources: [
+          { id: 'source', name: 'Clip', kind: 'clip', mediaType: 'video', src: 'asset:clip' },
+        ],
+        activeSourceId: 'source',
+        transition: {
+          type: 'crossfade',
+          durationFrames: 12,
+          audio: 'follow-picture',
+          onFailure: 'keep-current',
+        },
+      }),
+    );
+    expect(validateProject(project).errors).toEqual([]);
+    project.supportsNonRealTime = true;
+    expect(validateProject(project).errors.join(' ')).toContain('uses Media Cues');
+    project.supportsNonRealTime = false;
+    composition.mediaCues[0]!.activeSourceId = 'missing';
+    expect(validateProject(project).errors.join(' ')).toContain('active source does not exist');
   });
   it('accepts typed vector object bindings and rejects mismatched shader parameter field types', () => {
     const project = createProject();

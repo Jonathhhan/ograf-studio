@@ -18,6 +18,8 @@ describe('media paint', () => {
       loop: true,
       speed: 1,
       offsetMs: 0,
+      trimEndMs: null,
+      timelineStartMs: 0,
       muted: true,
     });
     expect(mediaPaintAssetReferences(paint)).toEqual(['asset:clip']);

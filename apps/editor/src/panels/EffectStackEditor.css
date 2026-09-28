@@ -11,8 +11,16 @@
   line-height: 15px;
 }
 
+.effect-stack-list {
+  margin-left: 10px;
+  padding-left: 4px;
+  border-left: 1px solid var(--border-strong);
+}
+
 .effect-stack-add {
+  height: var(--ui-row-height);
   min-height: var(--ui-row-height);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -56,7 +64,9 @@
 }
 
 .effect-stack-item > summary {
+  height: var(--ui-row-height);
   min-height: var(--ui-row-height);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -162,10 +172,11 @@
 
 .effect-stack-blend-controls {
   min-width: 0;
+  min-height: var(--ui-control-height);
   display: flex;
   align-items: center;
   gap: 4px;
-  margin: 3px 6px;
+  margin: 1px 4px;
 }
 
 .effect-stack-blend-controls select {
@@ -181,5 +192,9 @@
 /* The row grid styles a lone control; this cell holds two, so reset its inherited sizing. */
 .effect-stack-blend > .effect-stack-blend-controls > :is(select, input) {
   width: auto;
+  height: var(--ui-control-height);
+  box-sizing: border-box;
   margin: 0;
+  padding-top: 1px;
+  padding-bottom: 1px;
 }

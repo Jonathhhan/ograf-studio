@@ -5,6 +5,7 @@ import {
   createImageLayer,
   createLayerOfKind,
   createMediaPaint,
+  createMediaCue,
   createProject,
 } from '@ograf-editor/scene-model';
 import type { CompiledGraphicDescriptor } from '@ograf-editor/ograf-types';
@@ -39,6 +40,11 @@ function descriptor() {
       capacity: 2,
       overflow: 'truncate',
       offsetPerItem: { x: 0, y: 0 },
+      itemKeyPath: [],
+      sortPath: [],
+      sortDirection: 'none',
+      pageSize: 0,
+      page: 0,
       prototypeLayers: [
         {
           ...structuredClone(image),
@@ -250,6 +256,99 @@ describe('exported package resource resolution', () => {
         type: 'media',
         source: { kind: 'clip', src: 'https://renderer.example/package/assets/clip.mp4' },
       },
+    });
+  });
+
+  it('packages first-class audio and resolves its runtime source', () => {
+    const project = createProject({ supportsNonRealTime: false });
+    const composition = project.compositions[0]!;
+    const audioAsset = createAsset({
+      id: 'theme',
+      name: 'Theme',
+      kind: 'audio',
+      mimeType: 'audio/mpeg',
+      dataUri: 'data:audio/mpeg;base64,AAAA',
+    });
+    const layer = createLayerOfKind('audio');
+    if (layer.element.type !== 'audio') throw new Error('Expected audio');
+    layer.element.src = `asset:${audioAsset.id}`;
+    layer.element.trimStartMs = 500;
+    layer.element.timelineStartMs = 1_000;
+    composition.assets.push(audioAsset);
+    composition.layers.push(layer);
+
+    const artifacts = buildExportArtifactsWithRuntime(project, composition, runtime);
+    expect(artifacts.resources).toContainEqual({
+      path: 'assets/theme.mp3',
+      data: 'AAAA',
+      base64: true,
+      mimeType: 'audio/mpeg',
+    });
+    const compiled = compileDescriptor(composition);
+    const packaged = structuredClone(compiled);
+    const packagedAudio = packaged.layers[0]!.element;
+    if (packagedAudio.type !== 'audio') throw new Error('Expected audio');
+    packagedAudio.src = 'assets/theme.mp3';
+    const Graphic = evaluate('https://renderer.example/package/main.js', packaged, [
+      'assets/theme.mp3',
+    ]);
+    expect(Graphic.descriptor.layers[0]!.element).toMatchObject({
+      type: 'audio',
+      src: 'https://renderer.example/package/assets/theme.mp3',
+      trimStartMs: 500,
+      timelineStartMs: 1_000,
+    });
+  });
+
+  it('packages Media Cue sources once and resolves them in the exported descriptor', () => {
+    const project = createProject({ supportsNonRealTime: false });
+    const composition = project.compositions[0]!;
+    composition.assets.push(
+      createAsset({
+        id: 'cue-audio',
+        name: 'Cue Audio',
+        kind: 'audio',
+        mimeType: 'audio/ogg',
+        dataUri: 'data:audio/ogg;base64,AAAA',
+      }),
+    );
+    composition.mediaCues.push(
+      createMediaCue({
+        id: 'cue',
+        sources: [
+          {
+            id: 'source',
+            name: 'Audio',
+            kind: 'clip',
+            mediaType: 'audio',
+            src: 'asset:cue-audio',
+          },
+        ],
+        activeSourceId: 'source',
+      }),
+    );
+    const artifacts = buildExportArtifactsWithRuntime(project, composition, runtime);
+    expect(artifacts.resources).toContainEqual({
+      path: 'assets/cue-audio.ogg',
+      data: 'AAAA',
+      base64: true,
+      mimeType: 'audio/ogg',
+    });
+    const descriptor = compileDescriptor(composition);
+    descriptor.mediaCues![0]!.sources = [
+      {
+        id: 'source',
+        name: 'Audio',
+        kind: 'clip',
+        mediaType: 'audio',
+        src: 'assets/cue-audio.ogg',
+      },
+    ];
+    const Graphic = evaluate('https://renderer.example/package/main.js', descriptor, [
+      'assets/cue-audio.ogg',
+    ]);
+    expect(Graphic.descriptor.mediaCues?.[0]?.sources[0]).toMatchObject({
+      src: 'https://renderer.example/package/assets/cue-audio.ogg',
     });
   });
 });

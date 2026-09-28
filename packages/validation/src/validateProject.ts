@@ -287,7 +287,7 @@ function validateComposition(composition: Composition, errors: string[], warning
     if (layer.element.type === 'pattern') {
       if (!patternIds.has(layer.element.patternId))
         errors.push(`${prefix}: layer "${layer.name}" references a missing pattern.`);
-      if (layer.loop?.activation.type === 'step')
+      if (layer.loop && layer.loop.activation.type !== 'lifecycle')
         errors.push(
           `${prefix}: pattern layer "${layer.name}" requires lifecycle loop activation to preserve the shared clock.`,
         );
@@ -498,8 +498,43 @@ function validateComposition(composition: Composition, errors: string[], warning
     if (layer.element.type === 'path' && !['nonzero', 'evenodd'].includes(layer.element.fillRule)) {
       errors.push(`${prefix}: layer "${layer.name}" has an invalid path fill rule.`);
     }
+    if (layer.element.type === 'path' && layer.element.stretchInsets) {
+      const { left, right, top, bottom } = layer.element.stretchInsets;
+      if (
+        [left, right, top, bottom].some((value) => !Number.isFinite(value) || value < 0) ||
+        left + right > layer.element.viewBoxWidth ||
+        top + bottom > layer.element.viewBoxHeight
+      ) {
+        errors.push(`${prefix}: layer "${layer.name}" has invalid path stretch insets.`);
+      }
+      if (typeof layer.element.fill !== 'string') {
+        warnings.push(
+          `${prefix}: layer "${layer.name}" path stretch regions currently preserve solid fills only; its complex paint uses ordinary scaling.`,
+        );
+      }
+    }
     if (layer.parentId === layer.id) {
       errors.push(`${prefix}: layer "${layer.name}" cannot parent itself.`);
+    }
+    if (layer.motionPath) {
+      const source = composition.layers.find(
+        (candidate) => candidate.id === layer.motionPath!.sourceLayerId,
+      );
+      if (!source || source.element.type !== 'path') {
+        errors.push(
+          `${prefix}: layer "${layer.name}" motion path references a missing path layer.`,
+        );
+      }
+      if (
+        layer.motionPath.sourceLayerId === layer.id ||
+        !Number.isFinite(layer.motionPath.progress) ||
+        layer.motionPath.progress < 0 ||
+        layer.motionPath.progress > 1 ||
+        !Number.isFinite(layer.motionPath.offsetX) ||
+        !Number.isFinite(layer.motionPath.offsetY)
+      ) {
+        errors.push(`${prefix}: layer "${layer.name}" has invalid motion-path settings.`);
+      }
     }
     const visited = new Set<string>([layer.id]);
     let parentId = layer.parentId;
@@ -660,6 +695,17 @@ function validateComposition(composition: Composition, errors: string[], warning
       ) {
         errors.push(`${prefix}: layer "${layer.name}" loop references a missing OGraf Step.`);
       }
+      if (
+        activation.type === 'customAction' &&
+        !composition.customActions.some((action) => action.actionId === activation.customActionId)
+      ) {
+        errors.push(`${prefix}: layer "${layer.name}" loop references a missing custom action.`);
+      }
+      if (activation.type === 'customAction' && loop.repeatCount === null) {
+        errors.push(
+          `${prefix}: layer "${layer.name}" custom-action clip must use a finite repeat count.`,
+        );
+      }
       for (const [property, keys = []] of Object.entries(loop.tracks)) {
         if (property === 'strokeWidth' && layer.element.type !== 'text') {
           errors.push(
@@ -745,6 +791,7 @@ function validateComposition(composition: Composition, errors: string[], warning
     errors.push(`${prefix}: duplicate custom action id "${actionId}".`);
   }
   const fieldIds = new Set(composition.dataFields.map((field) => field.id));
+  const customActionIds = new Set(composition.customActions.map((action) => action.actionId));
   const fieldById = new Map(composition.dataFields.map((field) => [field.id, field]));
   const collectionByPrototypeLayerId = new Map<string, Composition['runtimeCollections'][number]>();
   const collectionFieldIds = new Set<string>();
@@ -767,6 +814,15 @@ function validateComposition(composition: Composition, errors: string[], warning
     if (collection.overflow !== 'truncate') {
       errors.push(`${prefix}: runtime collection "${collection.name}" has unsupported overflow.`);
     }
+    if (
+      !Number.isInteger(collection.pageSize ?? 0) ||
+      (collection.pageSize ?? 0) < 0 ||
+      (collection.pageSize ?? 0) > collection.capacity ||
+      !Number.isInteger(collection.page ?? 0) ||
+      (collection.page ?? 0) < 0
+    ) {
+      errors.push(`${prefix}: runtime collection "${collection.name}" has invalid pagination.`);
+    }
     const field = fieldById.get(collection.fieldId);
     if (!field) {
       errors.push(`${prefix}: runtime collection "${collection.name}" references a missing field.`);
@@ -786,6 +842,16 @@ function validateComposition(composition: Composition, errors: string[], warning
         errors.push(
           `${prefix}: runtime collection "${collection.name}" capacity must equal field maxItems.`,
         );
+      }
+      for (const [label, path] of [
+        ['item key', collection.itemKeyPath ?? []],
+        ['sort', collection.sortPath ?? []],
+      ] as const) {
+        if (path.length && !fieldDefinitionAtPath(field, path, { fromArrayItem: true })) {
+          errors.push(
+            `${prefix}: runtime collection "${collection.name}" ${label} path is missing.`,
+          );
+        }
       }
     }
     if (collection.prototypeLayerIds.length === 0) {
@@ -878,6 +944,109 @@ function validateComposition(composition: Composition, errors: string[], warning
     ) {
       errors.push(
         `${prefix}: font asset "${asset.name}" weight must be a CSS weight such as 400 or a range such as 100 900.`,
+      );
+    }
+  }
+  for (const cueId of duplicates(composition.mediaCues.map((cue) => cue.id))) {
+    errors.push(`${prefix}: duplicate media cue id "${cueId}".`);
+  }
+  const lifecycleIds = new Set(composition.keyframes.map((keyframe) => keyframe.id));
+  for (const cue of composition.mediaCues) {
+    const owner = `${prefix}: media cue "${cue.name || cue.id}"`;
+    if (!cue.name.trim()) errors.push(`${owner} requires a name.`);
+    if (cue.sources.length === 0) errors.push(`${owner} requires at least one source.`);
+    for (const sourceId of duplicates(cue.sources.map((source) => source.id))) {
+      errors.push(`${owner} repeats source id "${sourceId}".`);
+    }
+    if (!cue.sources.some((source) => source.id === cue.activeSourceId)) {
+      errors.push(`${owner} active source does not exist.`);
+    }
+    const activeSource = cue.sources.find((source) => source.id === cue.activeSourceId);
+    if (cue.visual.targetLayerId) {
+      const target = composition.layers.find((layer) => layer.id === cue.visual.targetLayerId);
+      if (!target || !('fill' in target.element)) {
+        errors.push(`${owner} references an invalid video paint target.`);
+      }
+      if (activeSource?.kind === 'clip' && activeSource.mediaType === 'audio') {
+        errors.push(`${owner} cannot paint an audio-only source onto a layer.`);
+      }
+    }
+    if (
+      !Number.isFinite(cue.visual.positionX) ||
+      cue.visual.positionX < 0 ||
+      cue.visual.positionX > 1 ||
+      !Number.isFinite(cue.visual.positionY) ||
+      cue.visual.positionY < 0 ||
+      cue.visual.positionY > 1
+    ) {
+      errors.push(`${owner} video position must stay within 0..1.`);
+    }
+    for (const source of cue.sources) {
+      if (!source.name.trim()) errors.push(`${owner} has an unnamed source.`);
+      if (source.kind === 'clip') {
+        if (!source.src.trim()) errors.push(`${owner} clip source is required.`);
+        validateAssetReference(source.src, `media cue "${cue.name}"`);
+        if (source.src.startsWith('asset:')) {
+          const asset = assetById.get(source.src.slice('asset:'.length));
+          const expectedKind = source.mediaType === 'audio' ? 'audio' : 'media';
+          if (asset && asset.kind !== expectedKind) {
+            errors.push(
+              `${owner} ${source.mediaType} source "${source.name}" references a ${asset.kind} asset.`,
+            );
+          }
+        }
+      } else {
+        if (!/^[A-Za-z0-9._:-]+$/.test(source.tag)) {
+          errors.push(`${owner} live source "${source.name}" has an invalid renderer tag.`);
+        }
+        if (source.fallback) {
+          validateAssetReference(source.fallback, `media cue "${cue.name}" live fallback`);
+        }
+      }
+    }
+    if (
+      !Number.isFinite(cue.trimStartMs) ||
+      cue.trimStartMs < 0 ||
+      (cue.trimEndMs !== null &&
+        (!Number.isFinite(cue.trimEndMs) || cue.trimEndMs <= cue.trimStartMs))
+    ) {
+      errors.push(`${owner} has an invalid trim range.`);
+    }
+    if (
+      cue.durationFrames != null &&
+      (!Number.isInteger(cue.durationFrames) || cue.durationFrames < 1)
+    ) {
+      errors.push(`${owner} Timeline duration must be a positive integer frame count.`);
+    }
+    if (!Number.isFinite(cue.speed) || cue.speed < 0.1 || cue.speed > 16) {
+      errors.push(`${owner} speed must be from 0.1 to 16.`);
+    }
+    if (!Number.isFinite(cue.volume) || cue.volume < 0 || cue.volume > 1) {
+      errors.push(`${owner} volume must be from 0 to 1.`);
+    }
+    if (cue.trigger.type === 'timeline') {
+      if (
+        !Number.isInteger(cue.trigger.startFrame) ||
+        cue.trigger.startFrame < 0 ||
+        cue.trigger.startFrame > durationFrames
+      ) {
+        errors.push(`${owner} timeline trigger must be inside the composition duration.`);
+      }
+    } else if (cue.trigger.type === 'lifecycle' && !lifecycleIds.has(cue.trigger.keyframeId)) {
+      errors.push(`${owner} references a missing lifecycle state.`);
+    } else if (cue.trigger.type === 'customAction' && !customActionIds.has(cue.trigger.actionId)) {
+      errors.push(`${owner} references a missing custom action.`);
+    }
+    if (
+      !Number.isInteger(cue.transition.durationFrames) ||
+      cue.transition.durationFrames < 0 ||
+      (cue.transition.type === 'crossfade' && cue.transition.durationFrames < 1)
+    ) {
+      errors.push(`${owner} source transition duration is invalid.`);
+    }
+    if (cue.sources.some((source) => source.kind === 'live')) {
+      warnings.push(
+        `${owner} uses renderer-provided live media; verify source readiness and fallback behavior on the target renderer.`,
       );
     }
   }
@@ -1023,6 +1192,37 @@ function validateComposition(composition: Composition, errors: string[], warning
         `${prefix}: layer "${layer.name}" binds target property "${targetProperty}" more than once.`,
       );
     }
+    for (const ruleId of duplicates((layer.visualRules ?? []).map((rule) => rule.id))) {
+      errors.push(`${prefix}: layer "${layer.name}" repeats visual rule id "${ruleId}".`);
+    }
+    for (const rule of layer.visualRules ?? []) {
+      if (!fieldIds.has(rule.fieldId)) {
+        errors.push(
+          `${prefix}: layer "${layer.name}" visual rule references a missing data field.`,
+        );
+      }
+      if (rule.actions.length === 0) {
+        errors.push(`${prefix}: layer "${layer.name}" visual rule "${rule.name}" has no actions.`);
+      }
+      for (const action of rule.actions) {
+        if (
+          (action.type === 'custom-action' || action.type === 'shader-animation') &&
+          !customActionIds.has(action.actionId)
+        ) {
+          errors.push(
+            `${prefix}: layer "${layer.name}" visual rule references missing custom action "${action.actionId}".`,
+          );
+        }
+        if (
+          (action.type === 'play-sound' || action.type === 'take-media') &&
+          !composition.mediaCues.some((cue) => cue.id === action.cueId)
+        ) {
+          errors.push(
+            `${prefix}: layer "${layer.name}" visual rule references missing media cue "${action.cueId}".`,
+          );
+        }
+      }
+    }
     for (const { slot, paint } of getElementShaderPaints(layer.element)) {
       errors.push(
         ...inspectShaderElement(paint).errors.map(
@@ -1102,6 +1302,30 @@ function validateComposition(composition: Composition, errors: string[], warning
           `${prefix}: Lottie layer "${layer.name}" speed must be finite and non-negative.`,
         );
       }
+    } else if (layer.element.type === 'audio') {
+      if (!layer.element.src) errors.push(`${prefix}: audio layer "${layer.name}" has no source.`);
+      else {
+        validateAssetReference(layer.element.src, `audio layer "${layer.name}"`);
+        if (layer.element.src.startsWith('asset:')) {
+          const asset = assetById.get(layer.element.src.slice('asset:'.length));
+          if (asset && (asset.kind !== 'audio' || !asset.mimeType.startsWith('audio/')))
+            errors.push(`${prefix}: audio layer "${layer.name}" must reference an audio asset.`);
+        }
+      }
+      if (
+        !Number.isFinite(layer.element.volume) ||
+        layer.element.volume < 0 ||
+        layer.element.volume > 1
+      )
+        errors.push(`${prefix}: audio layer "${layer.name}" volume must be from 0 to 1.`);
+      if (
+        !Number.isFinite(layer.element.trimStartMs) ||
+        layer.element.trimStartMs < 0 ||
+        !Number.isFinite(layer.element.timelineStartMs) ||
+        layer.element.timelineStartMs < 0 ||
+        (layer.element.trimEndMs !== null && layer.element.trimEndMs <= layer.element.trimStartMs)
+      )
+        errors.push(`${prefix}: audio layer "${layer.name}" has invalid trim/timeline values.`);
     } else if (layer.element.type === 'text') {
       if (
         !(['auto-size', 'shrink-to-fit', 'fit-to-width', 'squeeze', 'fixed'] as const).includes(
@@ -1132,6 +1356,30 @@ function validateComposition(composition: Composition, errors: string[], warning
         errors.push(
           `${prefix}: text layer "${layer.name}" minimum font size must be between 1 and its authored font size.`,
         );
+      }
+      if (!['auto', 'ltr', 'rtl'].includes(layer.element.direction)) {
+        errors.push(`${prefix}: text layer "${layer.name}" has an invalid text direction.`);
+      }
+      if (
+        layer.element.language &&
+        !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(layer.element.language)
+      ) {
+        errors.push(`${prefix}: text layer "${layer.name}" has an invalid language tag.`);
+      }
+      if (
+        layer.element.runs.length > 0 &&
+        layer.element.runs.map((run) => run.text).join('') !== layer.element.content
+      ) {
+        errors.push(
+          `${prefix}: text layer "${layer.name}" styled runs must concatenate to content.`,
+        );
+      }
+      for (const run of layer.element.runs) {
+        if (
+          run.fontWeight !== undefined &&
+          (!Number.isFinite(run.fontWeight) || run.fontWeight < 1)
+        )
+          errors.push(`${prefix}: text layer "${layer.name}" has an invalid styled-run weight.`);
       }
     }
   }
@@ -1218,11 +1466,20 @@ export function validateProject(project: Project): ProjectValidationResult {
     validateComposition(composition, errors, warnings);
   if (project.supportsNonRealTime) {
     for (const composition of project.compositions) {
+      if (composition.mediaCues.length > 0) {
+        errors.push(
+          `Composition "${composition.name}" uses Media Cues, whose initial runtime is real-time-only and cannot declare non-real-time support.`,
+        );
+      }
       for (const layer of composition.layers) {
         const paint = getElementFill(layer.element);
         if (isMediaPaint(paint))
           errors.push(
             `Composition "${composition.name}": layer "${layer.name}" uses media paint, whose initial runtime is real-time-only and cannot declare non-real-time support.`,
+          );
+        if (layer.element.type === 'audio')
+          errors.push(
+            `Composition "${composition.name}": layer "${layer.name}" uses audio, which is real-time-only and cannot declare non-real-time support.`,
           );
       }
     }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createAnimationTracksFromLegacyLayer,
   createComposition,
+  createCustomActionDefinition,
   createDefaultTransform,
   createLayerKeyframe,
   createLayerLoopClip,
@@ -191,6 +192,28 @@ describe('design and motion QA', () => {
     layer.semantics.tags = [];
 
     layer.loop.tracks.opacity![1]!.value = 0.2;
+    expect(
+      reviewCompositionDesign(composition).findings.some((finding) =>
+        finding.id.startsWith('loop.seam'),
+      ),
+    ).toBe(false);
+  });
+
+  it('does not require one-shot custom-action clips to have matching endpoints', () => {
+    const composition = createComposition({
+      customActions: [createCustomActionDefinition({ actionId: 'celebrate', name: 'Celebrate' })],
+    });
+    const pose = staticTransform({ x: 100, y: 100 });
+    const layer = authoredLayer('rectangle', 'One-shot plate', [pose, pose, pose]);
+    layer.loop = createLayerLoopClip({
+      activation: { type: 'customAction', customActionId: 'celebrate' },
+      durationFrames: 10,
+      repeatCount: 1,
+      tracks: {
+        x: [createLayerPropertyKeyframe(0, 100), createLayerPropertyKeyframe(10, 300)],
+      },
+    });
+    composition.layers = [layer];
     expect(
       reviewCompositionDesign(composition).findings.some((finding) =>
         finding.id.startsWith('loop.seam'),

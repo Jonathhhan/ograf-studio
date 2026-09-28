@@ -15,11 +15,13 @@ import {
 } from '@ograf-editor/scene-model';
 import type { CompiledLayer } from '@ograf-editor/ograf-types';
 import { easingForGsap } from './easing';
-import { applyAnimatedPaint, resolveBoundEffects } from './renderElement';
+import { resolveBoundEffects } from './renderElement';
 import { applyCompiledMasks } from './maskRendering';
 import { sampleCompiledLayerVisualState, applyCompiledLayerVisualState } from './loopRendering';
 import { compiledLoopElapsedFrames } from './loopRendering';
 import { renderPatternAtElapsed } from './patternRendering';
+import { applyCompiledAutoLayout } from './autoLayoutRendering';
+import { applyCompiledMotionPaths } from './motionPathRendering';
 
 const DIRECT_GSAP_PROPERTIES: Partial<Record<keyof LayerTransform, string>> = {
   x: 'x',
@@ -156,30 +158,26 @@ export function buildRuntimeTimeline(
   const endFrame = descriptor.keyframes.at(-1)?.frame ?? 0;
   const updateDynamicRendering = () => {
     const frame = tl.time() * frameRate;
+    const data = dataProvider();
+    const states = new Map(
+      descriptor.layers.map((layer) => [
+        layer.id,
+        sampleCompiledLayerVisualState(
+          layer,
+          frame,
+          compiledLoopElapsedFrames(descriptor, layer, frame),
+          data,
+        ),
+      ]),
+    );
+    applyCompiledAutoLayout(descriptor, states, data, layerEls);
+    applyCompiledMotionPaths(descriptor, states);
     for (const layer of descriptor.layers) {
       const child = layerEls.get(layer.id);
-      if (child && layer.effects.stack?.some((e) => !e.legacy))
-        applyLayerEffectsFilter(
-          child,
-          sampleCompiledLayerVisualState(layer, frame, undefined, dataProvider()).effects,
-          tl.time() * 1000,
-        );
-      if (child) {
-        const sampled = sampleCompiledLayerVisualState(layer, frame, undefined, dataProvider());
-        applyAnimatedPaint(child, sampled.paintTracks, sampled.paintFrame);
-      }
+      const state = states.get(layer.id);
+      if (child && state) applyCompiledLayerVisualState(child, state, tl.time() * 1000);
       if (child && layer.element.type === 'pattern')
         renderPatternAtElapsed(child, compiledLoopElapsedFrames(descriptor, layer, frame) ?? 0);
-      if (child && layer.lighting)
-        applyCompiledLayerVisualState(
-          child,
-          sampleCompiledLayerVisualState(
-            layer,
-            frame,
-            compiledLoopElapsedFrames(descriptor, layer, frame),
-            dataProvider(),
-          ),
-        );
       if (!layer.clipParentId) continue;
       const parent = layerEls.get(layer.clipParentId);
       if (!child || !parent) {
@@ -193,43 +191,20 @@ export function buildRuntimeTimeline(
         parentLayer?.element.type === 'rectangle' ? parentLayer.element.borderRadius : 0;
       if (parentLayer) {
         child.style.clipPath = clipPathForParentBounds(
-          layer.lighting
-            ? sampleCompiledLayerVisualState(
-                layer,
-                frame,
-                compiledLoopElapsedFrames(descriptor, layer, frame),
-              ).transform
-            : compiledPoseAtFrame(layer, frame),
-          parentLayer.lighting
-            ? sampleCompiledLayerVisualState(
-                parentLayer,
-                frame,
-                compiledLoopElapsedFrames(descriptor, parentLayer, frame),
-              ).transform
-            : compiledPoseAtFrame(parentLayer, frame),
+          states.get(layer.id)?.transform ?? compiledPoseAtFrame(layer, frame),
+          states.get(parentLayer.id)?.transform ?? compiledPoseAtFrame(parentLayer, frame),
           radius,
         );
       }
     }
-    applyCompiledMasks(
-      descriptor,
-      layerEls,
-      new Map(
-        descriptor.layers.map((layer) => [
-          layer.id,
-          sampleCompiledLayerVisualState(
-            layer,
-            frame,
-            compiledLoopElapsedFrames(descriptor, layer, frame),
-            dataProvider(),
-          ),
-        ]),
-      ),
-    );
+    applyCompiledMasks(descriptor, layerEls, states);
   };
   const hasDynamicRendering = descriptor.layers.some(
     (layer) =>
       layer.clipParentId ||
+      layer.layoutParentId ||
+      layer.autoLayout?.direction !== 'none' ||
+      layer.motionPath ||
       layer.mask ||
       layer.element.type === 'pattern' ||
       layer.lighting ||

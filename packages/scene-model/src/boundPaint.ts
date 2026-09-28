@@ -29,7 +29,10 @@ export function applyElementDataValue(element: Element, property: string, value:
       normalized = authored;
     const fill = { ...shader, parameters: { ...shader.parameters, [name]: normalized } };
     if (slot === 'stroke' && element.type === 'text') return { ...element, strokePaint: fill };
-    return element.type === 'shader' ? fill : { ...element, fill };
+    if (element.type === 'shader') return fill;
+    if (!('fill' in element))
+      throw new Error(`Shader parameter binding "${property}" requires a paintable object.`);
+    return { ...element, fill };
   }
   const stop = /^fill\.stops\[(0|[1-9]\d*)\]\.color$/.exec(property);
   if (stop) {
@@ -50,6 +53,9 @@ export function applyElementDataValue(element: Element, property: string, value:
       color: String(value),
       ...(typeof element.fill === 'string' ? { fill: String(value) } : {}),
     };
+  }
+  if (element.type === 'text' && property === 'content') {
+    return { ...element, content: String(value), runs: [] };
   }
   return {
     ...element,
