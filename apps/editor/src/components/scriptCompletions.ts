@@ -3,12 +3,14 @@ import { syntaxTree } from '@codemirror/language';
 import { javascriptLanguage } from '@codemirror/lang-javascript';
 import {
   EXPRESSION_PROPERTIES,
+  SCRIPT_SAMPLED_PROPERTIES,
   SCRIPT_ELEMENT_CATALOG,
   SCRIPT_EFFECT_CATALOG,
   scriptLayerPropertyCatalog,
   scriptModuleName,
   type Composition,
   type Layer,
+  type LayerExpressionProperty,
   type ScriptPropertyDefinition,
 } from '@ograf-editor/scene-model';
 
@@ -16,6 +18,7 @@ export interface ScriptEditorContext {
   composition: Composition;
   mode: 'expression' | 'composition' | 'module';
   layer?: Layer;
+  property?: LayerExpressionProperty;
 }
 
 const identifier = /^[A-Za-z_$][\w$]*$/;
@@ -74,15 +77,22 @@ function properties(catalog: Record<string, ScriptPropertyDefinition>): Completi
 }
 
 export function createScriptCompletionSource(config: ScriptEditorContext) {
+  const supportsCurrent = (config.composition.expressionApiVersion ?? 1) === 1;
+  const isTextExpression = config.mode === 'expression' && config.property === 'text';
+  const sampledProperties = supportsCurrent ? SCRIPT_SAMPLED_PROPERTIES : EXPRESSION_PROPERTIES;
   const modules = new Map<string, Completion[]>();
   for (const module of config.composition.scripting?.modules ?? []) {
+    if (module.fileName.endsWith('.json')) continue;
     try {
       let exports = exportCache.get(module);
       if (!exports) {
         exports = moduleExportCompletions(module.source);
         exportCache.set(module, exports);
       }
-      modules.set(scriptModuleName(module.fileName), exports);
+      modules.set(
+        scriptModuleName(module.fileName, config.composition.expressionApiVersion ?? 1),
+        exports,
+      );
     } catch {
       /* Incomplete filenames remain editable, but are not executable namespaces. */
     }
@@ -169,10 +179,10 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
       const next = context.state.sliceDoc(context.pos, context.pos + 1);
       return {
         from: context.pos - propertyName[3]!.length,
-        options: EXPRESSION_PROPERTIES.map((label) => ({
+        options: sampledProperties.map((label) => ({
           label,
           type: 'property',
-          detail: 'number - authored time sampling',
+          detail: `${['position', 'size', 'transformOrigin'].includes(label) ? 'array' : 'number'} - authored time sampling`,
           apply: label + (next === quote ? '' : quote),
         })),
       };
@@ -184,7 +194,7 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
     if (sampledProperty) {
       if (
         !referenceLayer(sampledProperty[1]!) ||
-        !EXPRESSION_PROPERTIES.some(
+        !sampledProperties.some(
           (name) =>
             sampledProperty[2] === quoted(name, '"') || sampledProperty[2] === quoted(name, "'"),
         )
@@ -195,7 +205,16 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
         validFor: /^[\w$]*$/,
         options: properties({
           name: { type: 'string', readOnly: true },
-          value: { type: 'number', readOnly: true },
+          value: {
+            type: ['position', 'size', 'transformOrigin'].some(
+              (name) =>
+                sampledProperty[2] === quoted(name, '"') ||
+                sampledProperty[2] === quoted(name, "'"),
+            )
+              ? 'array'
+              : 'number',
+            readOnly: true,
+          },
           valueAtTime: {
             type: 'function',
             readOnly: true,
@@ -239,7 +258,13 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
       let options: Completion[] | undefined;
       if (layer) {
         if (!path.length)
-          options = properties(scriptLayerPropertyCatalog(layer.element.type, config.mode));
+          options = properties(
+            scriptLayerPropertyCatalog(
+              layer.element.type,
+              config.mode,
+              config.composition.expressionApiVersion ?? 1,
+            ),
+          );
         else if (config.mode === 'composition' && path.join('.') === 'element')
           options = properties({
             ...SCRIPT_ELEMENT_CATALOG[layer.element.type],
@@ -282,6 +307,16 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
           }));
         if (base === 'modules')
           options = [...modules.keys()].map((label) => ({ label, type: 'namespace' }));
+        else if (base === 'text' && !path.length && supportsCurrent && isTextExpression)
+          options = properties({
+            ...SCRIPT_ELEMENT_CATALOG.text,
+            ...Object.fromEntries(
+              [...Object.keys(SCRIPT_ELEMENT_CATALOG.text), 'Text'].map((property) => [
+                'set' + property[0]!.toUpperCase() + property.slice(1),
+                { type: 'function', readOnly: true },
+              ]),
+            ),
+          });
       } else if (base === 'modules' && path.length === 1) options = modules.get(path[0]!);
       return options ? { from, options, validFor: /^[\w$]*$/ } : null;
     }
@@ -301,8 +336,17 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
       'ease',
       'modules',
     ];
+    if (supportsCurrent) globals.push('json');
     if (config.mode === 'expression')
-      globals.push('value', 'thisLayer', 'thisProperty', 'valueAtTime', 'sourceRectAtTime');
+      globals.push(
+        ...(supportsCurrent ? ['position', 'size', 'transformOrigin'] : []),
+        ...(supportsCurrent && isTextExpression ? ['text'] : []),
+        'value',
+        'thisLayer',
+        'thisProperty',
+        'valueAtTime',
+        'sourceRectAtTime',
+      );
     return {
       from: word.from,
       options: [...globals, ...modules.keys()].map((label) => ({
@@ -313,6 +357,7 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
           'lerp',
           'clamp',
           'ease',
+          'json',
           'valueAtTime',
           'sourceRectAtTime',
         ].includes(label)

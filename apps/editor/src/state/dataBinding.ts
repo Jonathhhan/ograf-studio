@@ -39,6 +39,7 @@ export const BINDABLE_PROPERTIES: Record<ElementType, BindableProperty[]> = {
     { value: 'fontWeight', label: 'Font weight' },
     { value: 'strokeWidth', label: 'Outline width' },
     { value: 'textAlign', label: 'Text alignment' },
+    { value: 'direction', label: 'Text direction' },
     { value: 'verticalAlign', label: 'Vertical alignment' },
     { value: 'lineHeight', label: 'Line height' },
     { value: 'letterSpacing', label: 'Letter spacing' },

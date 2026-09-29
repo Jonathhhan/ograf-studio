@@ -179,6 +179,7 @@ function normalizeElement(element: Element): Element {
     ...element,
     strokeColor: element.strokeColor ?? 'transparent',
     strokeWidth: element.strokeWidth ?? 0,
+    direction: element.direction ?? 'ltr',
     lineHeight: element.lineHeight ?? 1.2,
     letterSpacing: element.letterSpacing ?? 0,
     textTransform: element.textTransform ?? 'none',
@@ -396,7 +397,10 @@ function normalizeComposition(composition: LegacyComposition): Composition {
 
   return {
     ...composition,
-    expressionApiVersion: composition.expressionApiVersion ?? 1,
+    // All expression features currently belong to API v1. Keep unknown future versions intact;
+    // only projects created by the unreleased v2 branch are normalized back to the current API.
+    expressionApiVersion:
+      composition.expressionApiVersion === 2 ? 1 : (composition.expressionApiVersion ?? 1),
     updateTransitionFrames: Math.max(0, Math.round(composition.updateTransitionFrames ?? 0)),
     keyframes: normalizedKeyframes,
     transitions,

@@ -31,7 +31,7 @@ import {
   resolveExpressionTransforms,
   sampleScriptElement,
   type ScriptLayerVisuals,
-  EXPRESSION_PROPERTIES,
+  hasActiveTransformExpression,
   expressionDataScope,
   expressionSourceRect,
   expressionTimelineScope,
@@ -50,6 +50,15 @@ const escapeXml = (value: unknown) =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;');
+
+function textDirection(content: string, direction: 'auto' | 'ltr' | 'rtl' | undefined) {
+  if (direction === 'ltr' || direction === 'rtl') return direction;
+  for (const character of content) {
+    if (/[\u0590-\u08ff\ufb1d-\ufdfd\ufe70-\ufefc]/u.test(character)) return 'rtl';
+    if (/\p{L}/u.test(character)) return 'ltr';
+  }
+  return 'ltr';
+}
 
 function elementSvg(
   element: Element,
@@ -86,8 +95,17 @@ function elementSvg(
               ? element.content.replace(/\b\p{L}/gu, (character) => character.toUpperCase())
               : element.content;
       const lines = transformed.split(/\r?\n/);
+      const direction = textDirection(transformed, element.direction);
       const anchor =
-        element.textAlign === 'center' ? 'middle' : element.textAlign === 'right' ? 'end' : 'start';
+        element.textAlign === 'center'
+          ? 'middle'
+          : element.textAlign === 'right'
+            ? direction === 'rtl'
+              ? 'start'
+              : 'end'
+            : direction === 'rtl'
+              ? 'end'
+              : 'start';
       const x =
         element.textAlign === 'center' ? width / 2 : element.textAlign === 'right' ? width : 0;
       const blockHeight = Math.max(1, lines.length) * element.fontSize * element.lineHeight;
@@ -105,7 +123,7 @@ function elementSvg(
         );
         const scaleX = width / naturalWidth;
         const scaleY = height / Math.max(1, blockHeight + element.strokeWidth);
-        return `${paintDefs}<g transform="scale(${scaleX} ${scaleY})"><text x="0" y="${element.fontSize + element.baselineShift}" fill="${paint.fill}" stroke="${element.strokeWidth > 0 ? escapeXml(element.strokeColor) : 'none'}" stroke-width="${element.strokeWidth}" paint-order="stroke fill" font-family="${escapeXml(element.fontFamily)}" font-size="${element.fontSize}" font-weight="${element.fontWeight}" letter-spacing="${element.letterSpacing}" text-anchor="start">${lines.map((line, index) => `<tspan x="0" dy="${index === 0 ? 0 : element.fontSize * element.lineHeight}">${escapeXml(line)}</tspan>`).join('')}</text></g>`;
+        return `${paintDefs}<g transform="scale(${scaleX} ${scaleY})"><text x="0" y="${element.fontSize + element.baselineShift}" fill="${paint.fill}" stroke="${element.strokeWidth > 0 ? escapeXml(element.strokeColor) : 'none'}" stroke-width="${element.strokeWidth}" paint-order="stroke fill" font-family="${escapeXml(element.fontFamily)}" font-size="${element.fontSize}" font-weight="${element.fontWeight}" letter-spacing="${element.letterSpacing}" direction="${direction}" unicode-bidi="isolate" text-anchor="${anchor}">${lines.map((line, index) => `<tspan x="0" dy="${index === 0 ? 0 : element.fontSize * element.lineHeight}">${escapeXml(line)}</tspan>`).join('')}</text></g>`;
       }
       const verticalOffset =
         element.verticalAlign === 'middle'
@@ -113,7 +131,7 @@ function elementSvg(
           : element.verticalAlign === 'bottom'
             ? Math.max(0, height - blockHeight)
             : 0;
-      return `${paintDefs}<text x="${x}" y="${verticalOffset + element.baselineShift + element.fontSize}" fill="${paint.fill}" stroke="${element.strokeWidth > 0 ? escapeXml(element.strokeColor) : 'none'}" stroke-width="${element.strokeWidth}" paint-order="stroke fill" font-family="${escapeXml(element.fontFamily)}" font-size="${element.fontSize}" font-weight="${element.fontWeight}" letter-spacing="${element.letterSpacing}" text-anchor="${anchor}">${lines.map((line, index) => `<tspan x="${x}" dy="${index === 0 ? 0 : element.fontSize * element.lineHeight}">${escapeXml(line)}</tspan>`).join('')}</text>`;
+      return `${paintDefs}<text x="${x}" y="${verticalOffset + element.baselineShift + element.fontSize}" fill="${paint.fill}" stroke="${element.strokeWidth > 0 ? escapeXml(element.strokeColor) : 'none'}" stroke-width="${element.strokeWidth}" paint-order="stroke fill" font-family="${escapeXml(element.fontFamily)}" font-size="${element.fontSize}" font-weight="${element.fontWeight}" letter-spacing="${element.letterSpacing}" direction="${direction}" unicode-bidi="isolate" text-anchor="${anchor}">${lines.map((line, index) => `<tspan x="${x}" dy="${index === 0 ? 0 : element.fontSize * element.lineHeight}">${escapeXml(line)}</tspan>`).join('')}</text>`;
     }
     case 'image':
       return element.src
@@ -358,19 +376,29 @@ export function renderCompositionFrameSvg(
   const data = Object.fromEntries(
     composition.dataFields.map((field) => [field.key, field.defaultValue]),
   );
+  const timelineFrames = computeKeyframeFrames(composition).map((key, index) => ({
+    frame: key.frame,
+    role: composition.keyframes[index]!.role,
+  }));
   const expressionScope: ExpressionScope = {
     frame: normalizedFrame,
     time: normalizedFrame / composition.frameRate,
     'comp.width': composition.width,
     'comp.height': composition.height,
     ...expressionDataScope(data),
-    ...expressionTimelineScope(
-      computeKeyframeFrames(composition).map((key, index) => ({
-        frame: key.frame,
-        role: composition.keyframes[index]!.role,
-      })),
-      normalizedFrame,
-    ),
+    ...expressionTimelineScope(timelineFrames, normalizedFrame),
+  };
+  const sampleExpressionScope = (seconds: number): ExpressionScope => {
+    const frame = Math.max(
+      0,
+      Math.min(seconds * composition.frameRate, getTotalFrames(composition)),
+    );
+    return {
+      ...expressionScope,
+      frame,
+      time: frame / composition.frameRate,
+      ...expressionTimelineScope(timelineFrames, frame),
+    };
   };
   const expressionTransforms = resolveExpressionTransforms(
     composition.layers.flatMap((layer) => {
@@ -435,6 +463,19 @@ export function renderCompositionFrameSvg(
             isVisible: layer.isVisible,
             blendMode: layer.blendMode,
           },
+          sampleScriptVisualsAtTime: (seconds: number) => ({
+            element: sampleScriptElement(
+              resolvePatternElement(
+                resolveElementAssetReferences(boundElement, composition.assets),
+                composition.patterns,
+              ),
+              getResolvedLayerAnimationTracks(layer),
+              sampleFrame(seconds),
+            ),
+            effects,
+            isVisible: layer.isVisible,
+            blendMode: layer.blendMode,
+          }),
           sampleTransform,
           sourceRectAtTime: (seconds: number, includeExtents: boolean) => {
             let element = layer.bindings.reduce<Element>((resolved, binding) => {
@@ -464,6 +505,17 @@ export function renderCompositionFrameSvg(
               };
             return expressionSourceRect(element, sampleTransform(seconds), includeExtents);
           },
+          sourceRectAtTimeWithVisuals: (
+            seconds: number,
+            includeExtents: boolean,
+            visuals: ScriptLayerVisuals,
+            transform?: LayerTransform,
+          ) =>
+            expressionSourceRect(
+              visuals.element,
+              transform ?? sampleTransform(seconds),
+              includeExtents,
+            ),
         };
       };
       if (!collection) return [{ ...layer, transform, ...samplers() }];
@@ -484,19 +536,15 @@ export function renderCompositionFrameSvg(
     undefined,
     composition.expressionApiVersion,
     composition.scripting ? structuredClone(composition.scripting) : undefined,
+    sampleExpressionScope,
   );
   composition.layers = composition.layers.map((candidate) => {
     if (!candidate.expressions && !composition.scripting?.enabled) return candidate;
     const transform = expressionTransforms.get(candidate.id);
     if (!transform) return candidate;
-    const animationTracks = transform.scriptVisuals ? {} : { ...candidate.animationTracks };
+    const animationTracks = composition.scripting?.enabled ? {} : { ...candidate.animationTracks };
     for (const property of TRANSFORM_ANIMATION_PROPERTIES) {
-      if (
-        !composition.scripting?.enabled &&
-        (!candidate.expressions?.[property as (typeof EXPRESSION_PROPERTIES)[number]] ||
-          candidate.expressionsEnabled?.[property as (typeof EXPRESSION_PROPERTIES)[number]] ===
-            false)
-      )
+      if (!composition.scripting?.enabled && !hasActiveTransformExpression(candidate, property))
         continue;
       animationTracks[property] = [
         {

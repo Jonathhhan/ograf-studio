@@ -94,6 +94,24 @@ function descriptor(): CompiledGraphicDescriptor {
 }
 
 describe('runtime timeline boundary seeking', () => {
+  it('evaluates compiled vector fields with the same scalar transform result as the editor', () => {
+    const compiled = descriptor();
+    const layer = compiled.layers[0]!;
+    layer.expressions = {
+      position: '[30, 40]',
+      size: '[400, 200]',
+      transformOrigin: '[0.25, 0.25]',
+    };
+    const states = new Map([[layer.id, sampleCompiledLayerVisualState(layer, 0)]]);
+    expect(resolveFrameExpressions(compiled, states).get(layer.id)!.transform).toMatchObject({
+      x: 30,
+      y: 40,
+      width: 400,
+      height: 200,
+      transformOriginX: 0.25,
+      transformOriginY: 0.25,
+    });
+  });
   it('refreshes ordinary auto-size text after initial state and animation writes', () => {
     const compiled = descriptor();
     compiled.layers[0]!.element = { ...createTextElement(), autoFit: 'auto-size' };

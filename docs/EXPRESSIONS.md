@@ -10,7 +10,7 @@ the checkbox itself is activated; clicking the property name does not toggle it.
 Press **Ctrl+Space** for completion. Expressions and composition scripts suggest layer names/IDs,
 data fields, API members and statically declared helper exports. Direct layer references and
 unambiguous top-level `const title = layer('Title')` aliases provide type-specific members.
-Suggestions also cover the six names inside `property("...")`, its `valueAtTime` member, and
+Suggestions also cover scalar and vector names inside `property("...")`, its `valueAtTime` member, and
 `left`, `top`, `width`, `height` after direct `sourceRectAtTime(...)` calls with simple arguments.
 Suggestions show types, read-only access and enum choices. Helper modules retain ordinary local
 JavaScript completion; scene objects must be passed as arguments. Completion never executes
@@ -19,30 +19,99 @@ are not inferred). Errors from actual script evaluation appear below the editor.
 
 ## Property expressions
 
-Open **Scripts > Layer expressions** for a selected layer. An expression controls `x`, `y`,
-`width`, `height`, `rotation`, or `opacity` (0 to 1). Return a finite number, either as a
-formula or from a JavaScript statement body. All six property fields are always shown;
-their editors can be collapsed or expanded. Empty fields appear greyed out and remain editable. Transform origins and non-transform
-properties are not expression targets:
+Open **Scripts > Layer expressions** for a selected layer. The five transform fields are **Position**,
+**Size**, **Transform Origin**, **Rotation**, and **Opacity**. Position returns `[x, y]`, Size returns
+`[width, height]`, and Transform Origin returns normalized `[x, y]` values from `0` to `1`. Rotation returns degrees;
+Opacity returns a number from 0 to 1. Every result component must be finite. Use a formula or an
+explicit `return` in a JavaScript statement body. Empty fields use sampled animation values.
+All five editors can be collapsed or expanded. For example, a Position expression:
 
 ```js
-layer('Background').x + 20;
+[layer('Background').position[0] + 20, value[1]];
 ```
 
 ```js
 const target = layer('Background');
-return Math.max(target.width - thisLayer.width, 0) / 2;
+return [Math.max(target.size[0] - size[0], 0) / 2, value[1]];
 ```
 
 Empty or disabled expressions retain the sampled animation value. Errors appear beside the
 field and retain that property's sampled value; unrelated properties still evaluate.
 Layer dependencies resolve lazily, independently of layer order. Circular dependencies are errors.
 
-`value` is the current property's sampled value before its expression. The equivalent
+The scripting aliases `position`, `size`, and `transformOrigin` are two-component arrays. Index 0 is
+horizontal and index 1 is vertical. They work on `thisLayer`, `layer('Name')`, and `layerById(id)`;
+bare aliases in a property expression refer to the current layer's sampled transform:
+
+```js
+// A Position expression that follows another layer's right edge.
+[layer('Background').position[0] + layer('Background').size[0] + 20, value[1]];
+```
+
+`position` aliases `[x, y]`; `size` aliases `[width, height]`. `transformOrigin` is the normalized
+rendering pivot. For a centered
+layer it reads `[0.5, 0.5]`. Property expressions read these arrays and return a new pair;
+direct layer assignments belong in Composition code.
+
+Text layers also have a **Text** expression. It receives a detached `text` object and applies
+the complete text and style only when evaluation succeeds. Read fields use the existing OGraf
+names and units; setters return the same object for chaining. `content`, `fontFamily`, `fontSize`,
+`fontWeight`, `lineHeight`, `letterSpacing`, `direction`, `color`, `fill`, `strokeColor`,
+`strokePaint`, `strokeWidth`, alignment, transform, fitting and overflow fields are validated by
+the same text-property catalog used by composition scripts:
+
+```js
+text
+  .setText(data.headline)
+  .setFontFamily('Inter')
+  .setFontSize(64)
+  .setLineHeight(1.1)
+  .setLetterSpacing(1)
+  .setDirection('rtl')
+  .setColor('#ffffff')
+  .setFill({
+    type: 'linear',
+    angle: 0,
+    stops: [
+      { offset: 0, opacity: 1, color: '#ffffff' },
+      { offset: 1, opacity: 1, color: '#66ccff' },
+    ],
+  });
+```
+
+`text.fontSize` and `text.direction` (and the other fields) read the current detached value.
+`text.setText()` changes the text content together with the style. The runtime text object is never
+saved as a scene field; only the expression source is stored. Text expressions are available from
+the current expression API and are valid only on text layers.
+
+Like an AE Source Text expression, a text expression may also return a string directly:
+
+```js
+return data.headline;
+```
+
+Style mutations are retained when the final result is a string, so this is also valid:
+
+```js
+text.setFontFamily('Inter');
+return 'rerer';
+```
+
+Saved scalar geometry and scalar API access (`x`, `y`, `width`, `height`) remain supported for
+OGraf Studio compatibility. Existing scalar expression records still evaluate. The editor shows
+Position, Size, Transform Origin, Rotation, and Opacity, plus Text for text layers. Rewrite scalar
+expressions manually into one array expression per field;
+the editor never converts or removes expression code. A non-empty vector expression controls both
+axes and takes precedence over its scalar component records. Use `value` or `thisLayer` for the
+sampled current pair; referencing the same computed vector through `layer(...)` creates a dependency
+cycle.
+
+`value` is the current field's sampled value before its expression: a read-only pair for vector
+fields, or a number for Rotation and Opacity. The equivalent
 `thisProperty.value` is accompanied by `thisProperty.name` and `thisProperty.layerId`:
 
 ```js
-value + data.layout.padding;
+[value[0] + data.layout.padding, value[1]];
 ```
 
 `thisLayer.id/name` identify the expression's layer. `layer("Title").id/name` and
@@ -66,19 +135,37 @@ title.x += 20;
 layer('Background').width = title.width + 40;
 ```
 
+The same fields can be read or written through the vector aliases, by index or as a whole pair:
+
+```js
+const title = layer('Title');
+title.position[0] += 20;
+title.size = [400, 120];
+title.transformOrigin = [0.5, 0.5];
+```
+
+Aliases remain live when scalar fields change. `position` is Studio's top-left layout position and
+`transformOrigin` is a normalized rendering pivot. Whole pairs must contain exactly two finite
+numbers; transform-origin components must be in the `0..1` range. `size` changes the layout box,
+including text wrapping.
+
 Composition scripts can write transforms and rendered visual properties, including text,
 paint, effects and media settings. See the [complete property reference](SCRIPT_PROPERTIES.md). Reads observe earlier script assignments; property
 expressions are not rerun after writes. Each evaluation starts from a fresh animation pose,
 so assignments do not edit keyframes or accumulate between frames. If the script throws or
 writes an invalid value, all of its layer writes are discarded. Errors appear in Scripts.
 
-Use **Import .js files** or **New module** for reusable functions. For example, `helpers.js`:
+Use **Import .js / .json** or **New module** for reusable functions. For example, `helpers.js`:
 
 ```js
 export function spacing(index, gap) {
   return index * gap;
 }
 ```
+
+JSON files live in the same Scripts list. Read them with `json('settings.json')` from expressions
+or composition code, or `require('./settings.json')` from a JavaScript module. Loaded JSON values
+are read-only.
 
 Both property expressions and the composition script can call `helpers.spacing(3, 100)`.
 Module functions receive frame data and layer references through arguments; they do not inherit
@@ -103,7 +190,7 @@ export const offset = (index) => spacing(index, 40);
 ```
 
 The filename's basename is its namespace, also available as `modules.helpers`. Filenames must
-use a JavaScript identifier followed by `.js` or `.mjs`, and cannot conflict with API names or
+use a JavaScript identifier followed by `.js`, `.mjs`, or `.json`, and cannot conflict with API names or
 the fixed reserved list of standard JavaScript globals and `console`. Host-specific globals
 such as `window` and `process` do not affect filename validity; a matching module alias shadows
 that host global in expressions and composition scripts. The file list is flat; directory,
@@ -150,9 +237,8 @@ field names such as `data["home.score"]`. Helper functions receive the same read
 
 Booleans now remain JavaScript `true`/`false`, replacing the earlier draft's numeric flags.
 Use `data.visible === true` or `data.visible ? 1 : 0`; use `Number(data.visible)` when a numeric
-flag is needed. Expressions must still return a finite number. Existing strict checks against
-`1` or `0` should be updated. Array/object fields are available without adding new expression
-result types.
+flag is needed. Expressions must return the number or pair expected by their field. Existing
+strict checks against `1` or `0` should be updated. Array/object data remains available.
 
 The playhead follows OGraf Steps, holds, and Stop transitions; it is not wall-clock elapsed time.
 Scripts do not schedule actions. Existing OGraf lifecycle behavior remains unchanged.
@@ -170,20 +256,26 @@ valueAtTime(time - 0.2);
 
 Use `layer("Title").property("x").valueAtTime(time - 0.2)` for another property.
 `property(name).value` reads that reference's current value; `valueAtTime` always reads authored
-animation. The six supported transform properties are available. Sampling does not seek the
+animation. The six scalar transform properties and the three vector aliases are available.
+For example, `layer("Title").property("position").valueAtTime(time - 0.2)[0]` samples X.
+Sampling `transformOrigin` returns the normalized origin from the requested time. Sampling does not
+seek the
 playhead or replay OGraf lifecycle actions, held loops, or previous data updates.
 
 `layer("Title").sourceRectAtTime(seconds = time, includeExtents = false)` returns a read-only
-`{ left, top, width, height }` in local layer pixels, before position, rotation, expressions,
-masks and effects. In a property expression, `sourceRectAtTime()` and
+`{ left, top, width, height }` in local layer pixels at the requested time, before position,
+rotation, masks and effects. Text expressions are evaluated at the requested time before measuring
+the bounds. In a composition script, the call also sees visual and layout writes that occurred
+earlier in that same script; later writes do not change an already returned rectangle. In a property
+expression, `sourceRectAtTime()` and
 `thisLayer.sourceRectAtTime()` address the current layer.
 
 ```js
-layer('Title').sourceRectAtTime(time).width + 40;
+[layer('Title').sourceRectAtTime(time).width + 40, value[1]];
 ```
 
-Text uses the current bound content and browser font/wrapping/fitting code with the authored
-box at the requested time. Empty text has zero bounds. Editable paths use their path bounds;
+Text uses the bound content and browser font/wrapping/fitting code, including the evaluated text
+expression, with the authored box at the requested time. Empty text has zero bounds. Editable paths use their path bounds;
 other sources use their authored source box, not a pixel-alpha scan. `includeExtents` includes
 stroke expansion; it does not include shadows, filters or masks. These semantics are not a
 complete clone of AE's method.
@@ -199,19 +291,20 @@ Each evaluation starts from the current animation and bound data, resolves prope
 then runs the composition script, and finally renders the result. Composition-script writes take
 precedence over expression results for the same property. They do not change authored project values.
 
-| Read                                                    | State returned                                                                               |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Expression `value`, `thisProperty.value`, `thisLayer.x` | Current sampled value before expressions.                                                    |
-| Expression `layer('Title').x`                           | Referenced layer's expression result, resolved as a dependency.                              |
-| Composition-script `layer('Title').x`                   | Expression result plus earlier writes in this script.                                        |
-| `property('x').valueAtTime(t)`                          | Authored animation at `t`, before expressions and composition scripts.                       |
-| `sourceRectAtTime(t)`                                   | Authored source geometry at `t` with current bound content, before expression/script writes. |
+| Read                                                    | State returned                                                                          |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Expression `value`, `thisProperty.value`, `thisLayer.x` | Current sampled value before expressions.                                               |
+| Expression `layer('Title').x`                           | Referenced layer's expression result, resolved as a dependency.                         |
+| Composition-script `layer('Title').x`                   | Expression result plus earlier writes in this script.                                   |
+| `property('x').valueAtTime(t)`                          | Authored animation at `t`, before expressions and composition scripts.                  |
+| `sourceRectAtTime(t)`                                   | Source geometry at `t` after text expressions and earlier writes in the current script. |
 
 Time arguments are seconds. Time queries never run expressions, composition scripts, or module
 functions again. Repeated successful queries share samples within one evaluation; the next
 evaluation starts fresh, including when the timestamp is unchanged but data or fonts have changed.
-Changing text or its box in the composition script does not change `sourceRectAtTime()` in that
-script; its contract is explicitly the source before scripting.
+Changing text or its box in a composition script changes later `sourceRectAtTime()` calls in that
+script. Time queries do not run the script again, so writes that occur later in the script are not
+visible to an earlier measurement.
 
 Module variables persist within a playback instance. Seeking, changing playback direction and
 repeating the same timestamp do not reset them. A failed composition script rolls back its layer
@@ -249,8 +342,10 @@ their source changes, independently of the bounded cache used for standalone eva
 Source, enable flags, and modules survive `.ogs` reload and compiled `.ograf` export/import.
 The exported descriptor embeds module source; the original files are not needed at playback.
 [Sucrase](https://github.com/alangpierce/sucrase) handles module import/export syntax.
-The composition's `expressionApiVersion` defaults to v1; unsupported versions report errors
-and retain sampled values. This is Studio's API version, not a JavaScript language version.
+The current expression API is v1 and includes scalar and vector transforms, text expressions and
+JSON resources. Future incompatible expression changes will introduce a new API version.
+Unsupported versions report errors and retain sampled values. This is Studio's API version, not a
+JavaScript language version.
 
 The shared evaluator is used by Studio, SVG snapshots, and exported graphics. References use
 the renderer's sampled layer boxes; scripting does not change text auto-sizing behavior.

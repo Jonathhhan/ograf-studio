@@ -1,11 +1,31 @@
 import { scriptConsole, withScriptLogContext } from './scriptConsole';
+import {
+  defineScriptVectors,
+  isScriptVectorName,
+  readScriptVector,
+  SCRIPT_VECTOR_NAMES,
+} from './scriptVectors';
 import { easedProgress } from './layerAnimation';
-import type { EasingPreset, KeyframeRole } from './types';
+import type { EasingPreset, KeyframeRole, LayerTransform } from './types';
 
 export type ExpressionScope = Record<string, unknown>;
 export type ExpressionLayerResolver = (name: string, property: string) => number;
 export const EXPRESSION_API_VERSION = 1;
 export const EXPRESSION_PROPERTIES = ['x', 'y', 'width', 'height', 'rotation', 'opacity'] as const;
+export const EXPRESSION_FIELDS = [
+  'text',
+  'position',
+  'size',
+  'transformOrigin',
+  'rotation',
+  'opacity',
+] as const;
+export type ExpressionValue = number | readonly [number, number];
+export type ExpressionResult = ExpressionValue | object;
+export const SCRIPT_SAMPLED_PROPERTIES = [
+  ...EXPRESSION_PROPERTIES,
+  ...SCRIPT_VECTOR_NAMES,
+] as const;
 export interface ExpressionRect {
   left: number;
   top: number;
@@ -15,16 +35,19 @@ export interface ExpressionRect {
 export interface ExpressionLayerSampling {
   valueAtTime: (property: string, seconds: number) => number;
   sourceRectAtTime: (seconds: number, includeExtents: boolean) => ExpressionRect;
+  transformAtTime?: (seconds: number) => LayerTransform;
 }
 export interface ExpressionEvaluationOptions {
+  resultType?: 'number' | 'vector' | 'text';
   apiVersion?: number;
   resolveScriptLayer?: (reference: string, byId: boolean) => object;
   currentLayer?: { id: string; name: string };
-  currentProperty?: { name: string; value: number; layerId: string };
+  currentProperty?: { name: string; value: ExpressionResult; layerId: string };
   resolveLayerMetadata?: (reference: string, byId: boolean) => { id: string; name: string };
   currentSampling?: ExpressionLayerSampling;
   resolveLayerSampling?: (reference: string, byId: boolean) => ExpressionLayerSampling;
   modules?: Record<string, object>;
+  text?: object;
   /** Stable authored expression map; compiled entries live only as long as their owner. */
   expressionSources?: object;
   writeLayer?: (name: string, property: string, value: number) => void;
@@ -35,7 +58,7 @@ type CompiledExpression = (
   scope: ExpressionScope,
   resolveLayer?: ExpressionLayerResolver,
   options?: ExpressionEvaluationOptions,
-) => number;
+) => ExpressionResult;
 
 /** Authored timeline positions; playback speed and data fields do not move these boundaries. */
 export function expressionTimelineScope(
@@ -115,17 +138,22 @@ export function sampledProperty(
   resolve: (property: string) => number,
   property: string,
   sampling?: () => ExpressionLayerSampling,
+  _apiVersion = EXPRESSION_API_VERSION,
 ) {
-  if (!(EXPRESSION_PROPERTIES as readonly string[]).includes(property))
+  const supported = SCRIPT_SAMPLED_PROPERTIES;
+  if (!(supported as readonly string[]).includes(property))
     throw new Error('Unknown layer property: ' + property);
+  const read = (resolve: (property: string) => number) =>
+    isScriptVectorName(property) ? readScriptVector(property, resolve) : resolve(property);
   return Object.freeze({
     name: property,
     get value() {
-      return resolve(property);
+      return read(resolve);
     },
     valueAtTime: (seconds: number) => {
       if (!sampling) throw new Error('Time sampling is unavailable.');
-      return sampling().valueAtTime(property, sampleTime(seconds));
+      const time = sampleTime(seconds);
+      return read((component) => sampling().valueAtTime(component, time));
     },
   });
 }
@@ -143,8 +171,10 @@ function layerReference(
   metadata?: () => { id: string; name: string },
   sampling?: () => ExpressionLayerSampling,
   time = 0,
+  apiVersion = EXPRESSION_API_VERSION,
 ): Record<string, unknown> {
   const target = Object.create(null);
+  defineScriptVectors(target, resolve, write);
   for (const property of EXPRESSION_PROPERTIES)
     Object.defineProperty(target, property, {
       enumerable: true,
@@ -155,7 +185,7 @@ function layerReference(
     for (const key of ['id', 'name'] as const)
       Object.defineProperty(target, key, { get: () => metadata()[key] });
   Object.defineProperty(target, 'property', {
-    value: (name: string) => sampledProperty(resolve, name, sampling),
+    value: (name: string) => sampledProperty(resolve, name, sampling, apiVersion),
   });
   if (sampling)
     Object.defineProperty(target, 'sourceRectAtTime', { value: sourceRectMethod(sampling, time) });
@@ -195,29 +225,37 @@ function evaluationScope(
     const time = typeof scope.time === 'number' ? scope.time : 0;
     Object.defineProperty(thisLayer, 'property', {
       value: (name: string) =>
-        sampledProperty((property) => numeric(scope[property]), name, sampling),
+        sampledProperty(
+          (property) => numeric(scope[property]),
+          name,
+          sampling,
+          options.apiVersion ?? 1,
+        ),
     });
     Object.defineProperty(thisLayer, 'sourceRectAtTime', {
       value: sourceRectMethod(sampling, time),
     });
     Object.defineProperty(context, 'sourceRectAtTime', { value: sourceRectMethod(sampling, time) });
   }
+  defineScriptVectors(thisLayer, (property) => numeric(scope[property]));
+  defineScriptVectors(context, (property) => numeric(scope[property]));
   Object.freeze(thisLayer);
   Object.defineProperty(context, 'data', { value: context.data, writable: false });
   if (options.currentProperty) {
     Object.defineProperty(context, 'value', { value: options.currentProperty.value });
     const valueAtTime = (seconds: number) => {
       if (!options.currentSampling) throw new Error('Time sampling is unavailable.');
-      return options.currentSampling.valueAtTime(
-        options.currentProperty!.name,
-        sampleTime(seconds),
-      );
+      const name = options.currentProperty!.name;
+      const time = sampleTime(seconds);
+      const read = (property: string) => options.currentSampling!.valueAtTime(property, time);
+      return isScriptVectorName(name) ? readScriptVector(name, read) : read(name);
     };
     Object.defineProperty(context, 'valueAtTime', { value: valueAtTime });
     Object.defineProperty(context, 'thisProperty', {
       value: Object.freeze({ ...options.currentProperty, valueAtTime }),
     });
   }
+  if (options.text) Object.defineProperty(context, 'text', { value: options.text });
   const reference = (name: string, byId: boolean) => {
     const scriptReference = options.resolveScriptLayer?.(name, byId);
     if (scriptReference) return scriptReference;
@@ -235,6 +273,7 @@ function evaluationScope(
       options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(name, byId) : undefined,
       options.resolveLayerSampling ? () => options.resolveLayerSampling!(name, byId) : undefined,
       typeof scope.time === 'number' ? scope.time : 0,
+      options.apiVersion ?? 1,
     );
   };
   Object.assign(context, {
@@ -256,7 +295,6 @@ function evaluationScope(
   return context;
 }
 
-/** Trusted project JavaScript, compiled by the host engine; this is not a sandbox. */
 function compileExpression(source: string): CompiledExpression {
   const compile = (body: string) =>
     new Function(
@@ -267,7 +305,6 @@ function compileExpression(source: string): CompiledExpression {
   try {
     execute = compile('return (\n' + source + '\n);');
   } catch {
-    // Keep the existing single-formula syntax with an optional final semicolon/comments.
     const formula = source.replace(/;(\s*(?:\/\/[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/|\s)*)$/, '$1');
     try {
       execute = compile('return (\n' + formula + '\n);');
@@ -278,6 +315,27 @@ function compileExpression(source: string): CompiledExpression {
   return (scope, resolveLayer, options) => {
     const result = execute(evaluationScope(scope, resolveLayer, options));
     requireSynchronousResult(result, 'Expressions');
+    if (options?.resultType === 'text') {
+      if (typeof result === 'string') {
+        const setText = (options.text as { setText?: (value: string) => object } | undefined)
+          ?.setText;
+        if (setText) return setText(result);
+      }
+      if (result !== undefined && result !== options.text)
+        throw new Error(
+          'Text expressions must return a string, text, or leave the final value undefined.',
+        );
+      return options.text ?? Object.create(null);
+    }
+    if (options?.resultType === 'vector') {
+      const pair =
+        Array.isArray(result) && result.length === 2 ? [result[0], result[1]] : undefined;
+      if (!pair || !pair.every((value) => typeof value === 'number' && Number.isFinite(value)))
+        throw new Error(
+          'Expression result must be an array of two finite numbers, for example [100, 200].',
+        );
+      return Object.freeze(pair) as readonly [number, number];
+    }
     if (result === undefined)
       throw new Error(
         'Expression result must be a number. No value was returned; use return in a statement body.',
@@ -301,10 +359,10 @@ const ownedExpressions = new WeakMap<
   Map<string, { source: string; compilation: ExpressionCompilation }>
 >();
 function compiledExpression(source: string, owner?: object, property?: string): CompiledExpression {
-  // Retain the active layer's six properties independently of the bounded shared cache.
+  // Retain the active layer's expression fields independently of the bounded shared cache.
   // Compare sources as callers outside the editor may mutate an expression map in place.
   let owned: Map<string, { source: string; compilation: ExpressionCompilation }> | undefined;
-  if (owner && property && EXPRESSION_PROPERTIES.some((name) => name === property)) {
+  if (owner && property && SCRIPT_SAMPLED_PROPERTIES.some((name) => name === property)) {
     owned = ownedExpressions.get(owner);
     if (!owned) ownedExpressions.set(owner, (owned = new Map()));
   }
@@ -340,11 +398,29 @@ export function expressionSyntaxError(source: string): string | undefined {
 export function evaluateExpression(
   source: string,
   scope: ExpressionScope,
+  resolveLayer: ExpressionLayerResolver | undefined,
+  options: ExpressionEvaluationOptions & { resultType: 'vector' },
+): readonly [number, number];
+export function evaluateExpression(
+  source: string,
+  scope: ExpressionScope,
+  resolveLayer: ExpressionLayerResolver | undefined,
+  options: ExpressionEvaluationOptions & { resultType: 'text' },
+): object;
+export function evaluateExpression(
+  source: string,
+  scope: ExpressionScope,
+  resolveLayer?: ExpressionLayerResolver,
+  options?: ExpressionEvaluationOptions & { resultType?: 'number' },
+): number;
+export function evaluateExpression(
+  source: string,
+  scope: ExpressionScope,
   resolveLayer?: ExpressionLayerResolver,
   options: ExpressionEvaluationOptions = {},
-): number {
+): ExpressionResult {
   const version = options.apiVersion ?? 1;
-  if (version !== EXPRESSION_API_VERSION)
+  if (version < 1 || version > EXPRESSION_API_VERSION)
     throw new Error('Unsupported expression API version: ' + version);
   const label = options.currentLayer
     ? `${options.currentLayer.name || options.currentLayer.id}.${options.currentProperty?.name ?? 'expression'}`
@@ -397,7 +473,7 @@ export function evaluateCompositionScript(
   resolveLayer: ExpressionLayerResolver,
   options: ExpressionEvaluationOptions,
 ): void {
-  if ((options.apiVersion ?? 1) !== EXPRESSION_API_VERSION)
+  if ((options.apiVersion ?? 1) < 1 || (options.apiVersion ?? 1) > EXPRESSION_API_VERSION)
     throw new Error('Unsupported expression API version: ' + options.apiVersion);
   const result = withScriptLogContext('Composition', scope.frame, () =>
     compiledScript(source)(evaluationScope(scope, resolveLayer, options)),

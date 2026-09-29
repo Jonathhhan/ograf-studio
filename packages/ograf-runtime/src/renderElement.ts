@@ -619,6 +619,8 @@ export function renderElementContent(
         content.style.fontSize = `${element.fontSize}px`;
         content.style.fontWeight = String(element.fontWeight);
         content.style.textAlign = element.textAlign;
+        content.dir = element.direction ?? 'ltr';
+        content.style.unicodeBidi = 'isolate';
         content.style.letterSpacing = `${element.letterSpacing}px`;
         content.style.textTransform = element.textTransform;
         const squeeze = element.autoFit === 'squeeze';

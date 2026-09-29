@@ -47,9 +47,16 @@ export function JavaScriptEditor({
   const assistance = useRef(new Compartment());
   const draftHistory = useRef(new Compartment());
   const committed = useRef(value);
+  const composition = context?.composition;
+  const mode = context?.mode;
+  const layer = context?.layer;
+  const property = context?.property;
   const completion = useMemo(
-    () => (context ? createScriptCompletionSource(context) : null),
-    [context?.composition, context?.mode, context?.layer],
+    () =>
+      composition && mode
+        ? createScriptCompletionSource({ composition, mode, layer, property })
+        : null,
+    [composition, mode, layer, property],
   );
   useLayoutEffect(() => {
     callback.current = onChange;

@@ -66,6 +66,8 @@ export interface TextElement {
   fontSize: number;
   fontWeight: number;
   textAlign: 'left' | 'center' | 'right';
+  /** Missing retains legacy LTR direction. */
+  direction?: 'auto' | 'ltr' | 'rtl';
   /** Unitless line-height multiplier retained across font-size changes. */
   lineHeight: number;
   /** Additional tracking in authored composition pixels. */
@@ -565,6 +567,18 @@ export interface LayerMask {
   inverted: boolean;
 }
 
+export type LayerExpressionProperty =
+  | 'position'
+  | 'size'
+  | 'transformOrigin'
+  | 'text'
+  | 'x'
+  | 'y'
+  | 'width'
+  | 'height'
+  | 'rotation'
+  | 'opacity';
+
 export interface Layer {
   id: string;
   name: string;
@@ -606,11 +620,9 @@ export interface Layer {
   bindings: LayerBinding[];
   /** Preserved source from retired expression targets; never evaluated or exported as active code. */
   legacyExpressions?: Record<string, { source: string; enabled: boolean }>;
-  /** Optional trusted JavaScript expressions for numeric transform properties. */
-  expressions?: Partial<Record<'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity', string>>;
-  expressionsEnabled?: Partial<
-    Record<'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity', boolean>
-  >;
+  /** Vector fields return two numbers; rotation/opacity and legacy scalar fields return one. */
+  expressions?: Partial<Record<LayerExpressionProperty, string>>;
+  expressionsEnabled?: Partial<Record<LayerExpressionProperty, boolean>>;
 }
 
 export type KeyframeRole = 'start' | 'step' | 'end';

@@ -27,6 +27,29 @@ describe('migrateProject', () => {
       scripting,
     );
   });
+  it('keeps all current expression features on API v1', () => {
+    const scalarProject = createProject();
+    const scalarComposition = scalarProject.compositions[0]!;
+    scalarComposition.expressionApiVersion = 1;
+    const scalarLayer = createLayerOfKind('rectangle');
+    scalarLayer.expressions = { x: 'value + 10' };
+    scalarComposition.layers = [scalarLayer];
+    expect(
+      migrateProject(structuredClone(scalarProject)).compositions[0]!.expressionApiVersion,
+    ).toBe(1);
+
+    const vectorProject = structuredClone(scalarProject);
+    vectorProject.compositions[0]!.layers[0]!.expressions = { position: '[10, 20]' };
+    expect(migrateProject(vectorProject).compositions[0]!.expressionApiVersion).toBe(1);
+
+    const jsonProject = structuredClone(scalarProject);
+    jsonProject.compositions[0]!.scripting = {
+      enabled: true,
+      source: '',
+      modules: [{ fileName: 'settings.json', source: '{"gap": 12}' }],
+    };
+    expect(migrateProject(jsonProject).compositions[0]!.expressionApiVersion).toBe(1);
+  });
   it('never materializes unkeyed shader tracks during reload and preserves explicitly authored constant keys', () => {
     const project = createProject();
     const layer = createLayerOfKind('text');

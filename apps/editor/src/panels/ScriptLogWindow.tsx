@@ -30,20 +30,16 @@ export function ScriptLogWindow() {
           if (node) follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
         }}
       >
-        {entries.length === 0 ? (
-          <p>No script logs yet. Use console.log() in your code.</p>
-        ) : (
-          entries.map((entry) => (
-            <div key={entry.id} className={`scripts-log-row scripts-log-${entry.level}`}>
-              <small>
-                {entry.level} · {entry.source}
-                {entry.frame === undefined ? '' : ` · frame ${entry.frame}`}
-                {entry.count > 1 ? ` · ×${entry.count}` : ''}
-              </small>
-              <pre>{entry.message}</pre>
-            </div>
-          ))
-        )}
+        {entries.map((entry) => (
+          <div key={entry.id} className={`scripts-log-row scripts-log-${entry.level}`}>
+            <small>
+              {entry.level} · {entry.source}
+              {entry.frame === undefined ? '' : ` · frame ${Math.round(entry.frame)}`}
+              {entry.count > 1 ? ` · ×${entry.count}` : ''}
+            </small>
+            <pre>{entry.message}</pre>
+          </div>
+        ))}
       </div>
     </section>
   );

@@ -16,6 +16,7 @@ import type {
   LayerEffects,
   BlendMode,
   LayerTransform,
+  LayerExpressionProperty,
   LayerLoopClip,
   GradientPaint,
 } from '@ograf-editor/scene-model';
@@ -57,10 +58,8 @@ export interface CompiledLayer {
     | null;
   /** Ordered bindings; each target property may appear at most once. */
   bindings: CompiledLayerBinding[];
-  expressions?: Partial<Record<'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity', string>>;
-  expressionsEnabled?: Partial<
-    Record<'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity', boolean>
-  >;
+  expressions?: Partial<Record<LayerExpressionProperty, string>>;
+  expressionsEnabled?: Partial<Record<LayerExpressionProperty, boolean>>;
   /** Legacy editor-generated descriptors before document v11. */
   binding?: CompiledLayerBinding | null;
   /** Runtime-only clipping relation; general authoring parent metadata remains compiled away. */

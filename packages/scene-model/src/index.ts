@@ -48,6 +48,8 @@ export * from './stylePackColorLinks';
 export {
   EXPRESSION_API_VERSION,
   EXPRESSION_PROPERTIES,
+  EXPRESSION_FIELDS,
+  SCRIPT_SAMPLED_PROPERTIES,
   expressionTimelineScope,
   expressionDataScope,
   expressionSyntaxError,
@@ -55,6 +57,8 @@ export {
   compositionScriptSyntaxError,
   evaluateCompositionScript,
   type ExpressionScope,
+  type ExpressionValue,
+  type ExpressionResult,
   type ExpressionLayerResolver,
   type ExpressionRect,
   type ExpressionLayerSampling,
@@ -72,3 +76,5 @@ export * from './scriptingValidation';
 export * from './scriptLayerProperties';
 
 export * from './scriptPropertyCatalog';
+export * from './expressionFields';
+export * from './jsonResources';
