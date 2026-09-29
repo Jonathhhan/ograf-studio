@@ -202,20 +202,39 @@ export function scriptLayerReference(
     seconds: number | undefined,
     includeExtents: boolean | undefined,
     visuals: ScriptLayerVisuals | undefined,
+    applyVisualWrites: (sampledVisuals: ScriptLayerVisuals) => ScriptLayerVisuals,
   ) => unknown,
 ): { reference: object; finish: () => ScriptLayerVisuals | undefined } {
   let draft: ScriptLayerVisuals | undefined;
+  const visualWrites: Array<{ path: string[]; value: unknown }> = [];
+  const recordWrite = (path: string[], value: unknown) => {
+    visualWrites.push({ path, value: jsonCopy(value) });
+  };
+  const applyVisualWrites = (sampledVisuals: ScriptLayerVisuals): ScriptLayerVisuals => {
+    const sampled = jsonCopy(sampledVisuals);
+    for (const { path, value } of visualWrites) {
+      let target: any = sampled;
+      for (let index = 0; index < path.length - 1; index++) {
+        const key = path[index]!;
+        if (!target[key] || typeof target[key] !== 'object')
+          target[key] = /^\d+$/.test(path[index + 1]!) ? [] : {};
+        target = target[key];
+      }
+      target[path[path.length - 1]!] = jsonCopy(value);
+    }
+    return sampled;
+  };
   const getDraft = () => {
     if (!visuals) throw new Error('Visual properties are unavailable for this layer.');
     return (draft ??= jsonCopy(visuals));
   };
   const proxies = new WeakMap<object, object>();
-  const wrap = (value: any, path = ''): any => {
+  const wrap = (value: any, path: string[] = []): any => {
     if (!value || typeof value !== 'object') return value;
     let proxy = proxies.get(value);
     if (!proxy) {
       proxy = new Proxy(value, {
-        get: (target, key) => wrap(Reflect.get(target, key), path + '.' + String(key)),
+        get: (target, key) => wrap(Reflect.get(target, key), [...path, String(key)]),
         set: (target, key, next) => {
           assertActive();
           if (
@@ -230,13 +249,23 @@ export function scriptLayerReference(
             !Array.isArray(target) &&
             !Object.hasOwn(target, key) &&
             !(
-              path === 'element' && SCRIPT_ELEMENT_PROPERTIES[visuals!.element.type].includes(key)
+              path.join('.') === 'element' &&
+              SCRIPT_ELEMENT_PROPERTIES[visuals!.element.type].includes(key)
             ) &&
-            !(path === 'effects' && key === 'stack') &&
-            !(/^effects\.stack\.\d+$/.test(path) && ['blendMode', 'blendOpacity'].includes(key))
+            !(path.join('.') === 'effects' && key === 'stack') &&
+            !(
+              /^effects\.stack\.\d+$/.test(path.join('.')) &&
+              ['blendMode', 'blendOpacity'].includes(key)
+            )
           )
             throw new Error('Unknown nested property: ' + key);
-          return Reflect.set(target, key, jsonCopy(next));
+          const copied = jsonCopy(next);
+          const written = Reflect.set(target, key, copied);
+          // Retained references to a replaced object no longer belong to this draft.
+          let current: any = draft;
+          for (const component of path) current = current?.[component];
+          if (written && current === target) recordWrite([...path, key], copied);
+          return written;
         },
         deleteProperty: () => {
           throw new Error('Replace the property or array instead of deleting its members.');
@@ -287,17 +316,19 @@ export function scriptLayerReference(
     for (const key of elementFields.filter((key) => key !== 'name'))
       define(
         key,
-        () => wrap((getDraft().element as any)[key], key),
+        () => wrap((getDraft().element as any)[key], ['element', key]),
         (value) => {
           (getDraft().element as any)[key] = jsonCopy(value);
+          recordWrite(['element', key], value);
         },
       );
-    define('element', () => wrap(getDraft().element, 'element'));
+    define('element', () => wrap(getDraft().element, ['element']));
     define(
       'effects',
-      () => wrap(getDraft().effects, 'effects'),
+      () => wrap(getDraft().effects, ['effects']),
       (value) => {
         getDraft().effects = jsonCopy(value);
+        recordWrite(['effects'], value);
       },
     );
     define(
@@ -306,6 +337,7 @@ export function scriptLayerReference(
       (value) => {
         requireType(value, 'boolean', 'isVisible');
         getDraft().isVisible = value;
+        recordWrite(['isVisible'], value);
       },
     );
     define(
@@ -315,6 +347,7 @@ export function scriptLayerReference(
         if (!SCRIPT_VISUAL_CATALOG.blendMode!.values!.includes(value))
           throw new Error('Invalid blendMode.');
         getDraft().blendMode = value;
+        recordWrite(['blendMode'], value);
       },
     );
     define('type', () => visuals.element.type);
@@ -323,7 +356,7 @@ export function scriptLayerReference(
     Object.defineProperty(target, 'sourceRectAtTime', {
       value: (seconds?: number, includeExtents?: boolean) => {
         assertActive();
-        return measureSourceRect(seconds, includeExtents, draft ?? visuals);
+        return measureSourceRect(seconds, includeExtents, draft ?? visuals, applyVisualWrites);
       },
     });
   }

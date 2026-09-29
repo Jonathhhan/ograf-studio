@@ -99,8 +99,9 @@ return 'rerer';
 
 Saved scalar geometry and scalar API access (`x`, `y`, `width`, `height`) remain supported for
 OGraf Studio compatibility. Existing scalar expression records still evaluate. The editor shows
-Position, Size, Transform Origin, Rotation, and Opacity, plus Text for text layers. Rewrite scalar
-expressions manually into one array expression per field;
+Position, Size, Transform Origin, Rotation, and Opacity, plus Text for text layers. Populated legacy
+scalar fields appear below these controls, expanded so their source, enable switches, and errors
+remain accessible. Rewrite scalar expressions manually into one array expression per field;
 the editor never converts or removes expression code. A non-empty vector expression controls both
 axes and takes precedence over its scalar component records. Use `value` or `thisLayer` for the
 sampled current pair; referencing the same computed vector through `layer(...)` creates a dependency
@@ -166,6 +167,14 @@ export function spacing(index, gap) {
 JSON files live in the same Scripts list. Read them with `json('settings.json')` from expressions
 or composition code, or `require('./settings.json')` from a JavaScript module. Loaded JSON values
 are read-only.
+
+JSON imports are embedded snapshots saved with the composition. They replace the earlier Data
+panel's **Link JSON** / **Reload** workflow: changes to the original file are not reloaded, and saved
+browser file links are no longer restored. Existing object-field default values remain in the
+project. To refresh an embedded resource, edit its JSON source, or remove it and import the updated
+file with the same filename. To switch existing expressions from a data field to an embedded
+resource, import the file in Scripts and replace the corresponding `data` access with
+`json('settings.json')` access.
 
 Both property expressions and the composition script can call `helpers.spacing(3, 100)`.
 Module functions receive frame data and layer references through arguments; they do not inherit
@@ -269,6 +278,9 @@ the bounds. In a composition script, the call also sees visual and layout writes
 earlier in that same script; later writes do not change an already returned rectangle. In a property
 expression, `sourceRectAtTime()` and
 `thisLayer.sourceRectAtTime()` address the current layer.
+Within a Text expression, measuring that same layer returns its authored source bounds before
+the Text expression, avoiding a self-dependency. Bounds of other text layers include their Text
+expressions; circular dependencies report an error.
 
 ```js
 [layer('Title').sourceRectAtTime(time).width + 40, value[1]];
@@ -299,8 +311,9 @@ precedence over expression results for the same property. They do not change aut
 | `property('x').valueAtTime(t)`                          | Authored animation at `t`, before expressions and composition scripts.                  |
 | `sourceRectAtTime(t)`                                   | Source geometry at `t` after text expressions and earlier writes in the current script. |
 
-Time arguments are seconds. Time queries never run expressions, composition scripts, or module
-functions again. Repeated successful queries share samples within one evaluation; the next
+Time arguments are seconds. Animation sampling with `valueAtTime` does not rerun expressions.
+Bounds queries can evaluate text expressions at the requested time, including helpers they call;
+neither query reruns the composition script. Repeated successful queries share samples within one evaluation; the next
 evaluation starts fresh, including when the timestamp is unchanged but data or fonts have changed.
 Changing text or its box in a composition script changes later `sourceRectAtTime()` calls in that
 script. Time queries do not run the script again, so writes that occur later in the script are not

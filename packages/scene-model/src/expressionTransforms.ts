@@ -116,6 +116,34 @@ export function resolveExpressionTransforms(
     return target;
   };
   const metadata = (layer: ExpressionLayerState) => ({ id: layer.id, name: layer.name ?? '' });
+  const styledSamples = new Map<ExpressionLayerState, Map<number, ScriptLayerVisuals>>();
+  const styling = new Set<string>();
+  const sampledVisuals = (
+    layer: ExpressionLayerState,
+    seconds: number,
+  ): ScriptLayerVisuals | undefined => {
+    let samples = styledSamples.get(layer);
+    if (!samples) styledSamples.set(layer, (samples = new Map()));
+    const cached = samples.get(seconds);
+    if (cached) return cached;
+    const base =
+      seconds === currentTime
+        ? layer.scriptVisuals
+        : (layer.sampleScriptVisualsAtTime?.(seconds) ?? layer.scriptVisuals);
+    if (!base) return undefined;
+    const key = JSON.stringify([layer.id, seconds]);
+    if (styling.has(key))
+      throw new Error('Circular text expression dependency: ' + (layer.name ?? layer.id));
+    if (styling.size >= 128) throw new Error('Text expression dependency chain is too deep.');
+    styling.add(key);
+    try {
+      const result = styleTextVisuals(layer, base, seconds);
+      samples.set(seconds, result);
+      return result;
+    } finally {
+      styling.delete(key);
+    }
+  };
   // Share authored samples across expressions and the composition script, but never across
   // evaluations: data, fonts and authored values may have changed even at the same time.
   const samplers = new Map<ExpressionLayerState, ExpressionLayerSampling>();
@@ -124,7 +152,6 @@ export function resolveExpressionTransforms(
     if (existing) return existing;
     const transforms = new Map<number, LayerTransform>();
     const bounds = new Map<number, Map<boolean, ExpressionRect>>();
-    const styledSamples = new Map<number, ScriptLayerVisuals>();
     const sampler: ExpressionLayerSampling = {
       transformAtTime: (seconds) => {
         if (!layer.sampleTransform) throw new Error('Time sampling is unavailable for this layer.');
@@ -139,20 +166,17 @@ export function resolveExpressionTransforms(
         return sampler.transformAtTime!(seconds)[property as keyof LayerTransform];
       },
       sourceRectAtTime: (seconds, includeExtents) => {
-        const visuals = styledVisuals.get(layer.id);
+        const visuals =
+          layer.sourceRectAtTimeWithVisuals &&
+          layer.expressions?.text?.trim() &&
+          layer.expressionsEnabled?.text !== false
+            ? sampledVisuals(layer, seconds)
+            : undefined;
         if (visuals && layer.sourceRectAtTimeWithVisuals) {
-          let sampled = styledSamples.get(seconds);
-          if (!sampled) {
-            const base = layer.sampleScriptVisualsAtTime?.(seconds);
-            if (base) {
-              sampled = styleTextVisuals(layer, base, seconds);
-              styledSamples.set(seconds, sampled);
-            }
-          }
           return layer.sourceRectAtTimeWithVisuals(
             seconds,
             includeExtents,
-            sampled ?? visuals,
+            visuals,
             layer.sampleTransform ? sampler.transformAtTime?.(seconds) : undefined,
           );
         }
@@ -267,13 +291,38 @@ export function resolveExpressionTransforms(
     if (visuals.element.type !== 'text') throw new Error('Text expressions require a text layer.');
     const entry = textExpressionReference(visuals.element);
     const text = entry.text;
-    const sampledScope = sampleScopeAtTime?.(seconds) ?? { ...scope, time: seconds };
+    const sampledScope =
+      seconds === currentTime ? {} : (sampleScopeAtTime?.(seconds) ?? { time: seconds });
     const context = Object.assign(
       Object.create(null),
-      sampledScope,
+      scope,
       layer.scope,
+      sampledScope,
       layer.sampleTransform?.(seconds) ?? layer.transform,
     ) as ExpressionScope;
+    // A text expression can measure its own authored source without recursively evaluating itself.
+    const textSampling = (target: ExpressionLayerState): ExpressionLayerSampling => {
+      const sample = sampling(target);
+      if (target !== layer) return sample;
+      return {
+        ...sample,
+        sourceRectAtTime: (at, extents) => {
+          const base =
+            at === currentTime
+              ? target.scriptVisuals
+              : (target.sampleScriptVisualsAtTime?.(at) ?? target.scriptVisuals);
+          if (base && target.sourceRectAtTimeWithVisuals)
+            return target.sourceRectAtTimeWithVisuals(
+              at,
+              extents,
+              base,
+              target.sampleTransform ? sample.transformAtTime?.(at) : undefined,
+            );
+          if (target.sourceRectAtTime) return target.sourceRectAtTime(at, extents);
+          throw new Error('Content bounds are unavailable for this layer.');
+        },
+      };
+    };
     evaluateExpression(
       source,
       context,
@@ -283,6 +332,11 @@ export function resolveExpressionTransforms(
         modules,
         expressionSources: layer.expressions!,
         currentLayer: metadata(layer),
+        currentSampling: textSampling(layer),
+        resolveLayerSampling: (reference, byId) => textSampling(findLayer(layer, reference, byId)),
+        resolveLayerMetadata: (reference, byId) => metadata(findLayer(layer, reference, byId)),
+        resolveLayerById: (targetId, targetProperty) =>
+          readReference(findLayer(layer, targetId, true), targetProperty),
         currentProperty: { name: 'text', value: text, layerId: layer.id },
         text,
         resultType: 'text',
@@ -297,14 +351,7 @@ export function resolveExpressionTransforms(
     try {
       if (layer.scriptVisuals?.element.type !== 'text')
         throw new Error('Text expressions require a text layer.');
-      styledVisuals.set(
-        layer.id,
-        styleTextVisuals(
-          layer,
-          layer.scriptVisuals,
-          currentTime,
-        ),
-      );
+      styledVisuals.set(layer.id, sampledVisuals(layer, currentTime)!);
     } catch (error) {
       diagnostics?.push({
         layerId: layer.id,
@@ -398,13 +445,23 @@ export function resolveExpressionTransforms(
             ),
           sourceRectAtTime: sourceRectMethod(() => sample, currentTime),
         },
-        (seconds, includeExtents, visuals) => {
+        (seconds, includeExtents, visuals, applyVisualWrites) => {
           const at = seconds ?? currentTime;
           const extents = includeExtents ?? false;
           if (typeof at !== 'number' || !Number.isFinite(at))
             throw new Error('Sample time must be finite seconds.');
           if (typeof extents !== 'boolean') throw new Error('includeExtents must be a boolean.');
           const currentVisuals = styledVisuals.get(layer.id) ?? layer.scriptVisuals;
+          if (at !== currentTime && layer.sourceRectAtTimeWithVisuals) {
+            const sampled = sampledVisuals(layer, at);
+            if (sampled)
+              return layer.sourceRectAtTimeWithVisuals(
+                at,
+                extents,
+                applyVisualWrites ? applyVisualWrites(sampled) : sampled,
+                layer.sampleTransform ? sample.transformAtTime?.(at) : undefined,
+              );
+          }
           const pose =
             at === currentTime
               ? transform

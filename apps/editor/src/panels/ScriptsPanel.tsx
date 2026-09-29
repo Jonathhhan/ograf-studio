@@ -12,6 +12,7 @@ import {
 import { getActiveComposition, useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useExpressionDiagnosticsStore } from '../state/expressionDiagnosticsStore';
 import { LayerExpressionsEditor } from './LayerExpressionsEditor';
+import { nextScriptResourceName } from './scriptResourceNames';
 import './ScriptsPanel.css';
 
 const EMPTY: CompositionScripting = { source: '', enabled: false, modules: [] };
@@ -139,13 +140,16 @@ function ScriptEditor({ composition }: { composition: Composition }) {
         <button
           type="button"
           onClick={() => {
-            let index = 1;
-            while (scripting.modules.some((module) => module.fileName === `helpers${index}.js`))
-              index++;
             setSelected(scripting.modules.length);
             edit((current) => ({
               ...current,
-              modules: [...current.modules, { fileName: `helpers${index}.js`, source: '' }],
+              modules: [
+                ...current.modules,
+                {
+                  fileName: nextScriptResourceName(current.modules, 'helpers', 'js'),
+                  source: '',
+                },
+              ],
             }));
           }}
         >
@@ -154,13 +158,16 @@ function ScriptEditor({ composition }: { composition: Composition }) {
         <button
           type="button"
           onClick={() => {
-            let index = 1;
-            while (scripting.modules.some((module) => module.fileName === `data${index}.json`))
-              index++;
             setSelected(scripting.modules.length);
             edit((current) => ({
               ...current,
-              modules: [...current.modules, { fileName: `data${index}.json`, source: '{\n  \n}' }],
+              modules: [
+                ...current.modules,
+                {
+                  fileName: nextScriptResourceName(current.modules, 'data', 'json'),
+                  source: '{\n  \n}',
+                },
+              ],
             }));
           }}
         >

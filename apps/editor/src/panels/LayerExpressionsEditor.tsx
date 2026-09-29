@@ -12,7 +12,13 @@ const labels = {
   text: 'Text',
   rotation: 'Rotation',
   opacity: 'Opacity',
+  x: 'Legacy Position X',
+  y: 'Legacy Position Y',
+  width: 'Legacy Width',
+  height: 'Legacy Height',
 } as const;
+
+const legacyFields = ['x', 'y', 'width', 'height'] as const;
 
 export function LayerExpressionsEditor() {
   const composition = useActiveComposition();
@@ -23,74 +29,80 @@ export function LayerExpressionsEditor() {
   const setLayerExpressionEnabled = useProjectStore((s) => s.setLayerExpressionEnabled);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   if (!layer || layer.isGuide) return <p>Select a layer to edit its expressions.</p>;
+  const populatedLegacyFields = legacyFields.filter((key) => layer.expressions?.[key]?.trim());
   return (
     <section className="scripts-expressions">
       <h3>Expressions: {layer.name}</h3>
-      {EXPRESSION_FIELDS.filter((key) => key !== 'text' || layer.element.type === 'text').map(
-        (key) => {
-          const label = labels[key];
-          const source = layer.expressions?.[key] ?? '';
-          const enabled = layer.expressionsEnabled?.[key] !== false;
-          const runtimeError =
-            expressionDiagnostics.compositionId === composition.id && enabled
-              ? expressionDiagnostics.diagnostics.find(
-                  (entry) =>
-                    entry.layerId === layer.id && entry.property === key && entry.source === source,
-                )?.message
-              : undefined;
-          const error = runtimeError;
-          const identity = `${layer.id}:${key}`;
-          const bodyId = `expression-body-${identity}`;
-          const errorId = `expression-error-${identity}`;
-          const open = expanded[identity] ?? false;
-          return (
-            <section key={identity} className="scripts-expression-row" data-empty={!source.trim()}>
-              <div className="scripts-expression-header">
-                <input
-                  type="checkbox"
-                  aria-label={`${label} expression enabled`}
-                  checked={enabled}
-                  disabled={layer.isLocked}
-                  onChange={(event) =>
-                    setLayerExpressionEnabled(layer.id, key, event.target.checked)
+      {populatedLegacyFields.length > 0 && (
+        <p>
+          Legacy scalar expressions are shown below. A non-empty Position or Size expression
+          overrides its legacy components. Copy any needed code before clearing a legacy field.
+        </p>
+      )}
+      {[
+        ...EXPRESSION_FIELDS.filter((key) => key !== 'text' || layer.element.type === 'text'),
+        ...populatedLegacyFields,
+      ].map((key) => {
+        const label = labels[key];
+        const source = layer.expressions?.[key] ?? '';
+        const enabled = layer.expressionsEnabled?.[key] !== false;
+        const runtimeError =
+          expressionDiagnostics.compositionId === composition.id && enabled
+            ? expressionDiagnostics.diagnostics.find(
+                (entry) =>
+                  entry.layerId === layer.id && entry.property === key && entry.source === source,
+              )?.message
+            : undefined;
+        const error = runtimeError;
+        const identity = `${layer.id}:${key}`;
+        const bodyId = `expression-body-${identity}`;
+        const errorId = `expression-error-${identity}`;
+        const open = expanded[identity] ?? populatedLegacyFields.some((field) => field === key);
+        return (
+          <section key={identity} className="scripts-expression-row" data-empty={!source.trim()}>
+            <div className="scripts-expression-header">
+              <input
+                type="checkbox"
+                aria-label={`${label} expression enabled`}
+                checked={enabled}
+                disabled={layer.isLocked}
+                onChange={(event) => setLayerExpressionEnabled(layer.id, key, event.target.checked)}
+              />
+              <button
+                type="button"
+                className="scripts-expression-disclosure"
+                aria-expanded={open}
+                aria-controls={bodyId}
+                onClick={() => setExpanded((current) => ({ ...current, [identity]: !open }))}
+              >
+                {open ? '\u25be' : '\u25b8'} {label}
+                {error ? ' (error)' : ''}
+              </button>
+            </div>
+            <div id={bodyId} className="scripts-expression-value" hidden={!open}>
+              {open && (
+                <JavaScriptEditor
+                  key={layer.id}
+                  context={{ composition, mode: 'expression', layer, property: key }}
+                  invalid={Boolean(error)}
+                  describedBy={error ? errorId : undefined}
+                  label={`${label} expression`}
+                  value={source}
+                  readOnly={layer.isLocked}
+                  onChange={(expression) =>
+                    updateLayerExpressions(layer.id, { ...layer.expressions, [key]: expression })
                   }
                 />
-                <button
-                  type="button"
-                  className="scripts-expression-disclosure"
-                  aria-expanded={open}
-                  aria-controls={bodyId}
-                  onClick={() => setExpanded((current) => ({ ...current, [identity]: !open }))}
-                >
-                  {open ? '\u25be' : '\u25b8'} {label}
-                  {error ? ' (error)' : ''}
-                </button>
-              </div>
-              <div id={bodyId} className="scripts-expression-value" hidden={!open}>
-                {open && (
-                  <JavaScriptEditor
-                    key={layer.id}
-                    context={{ composition, mode: 'expression', layer, property: key }}
-                    invalid={Boolean(error)}
-                    describedBy={error ? errorId : undefined}
-                    label={`${label} expression`}
-                    value={source}
-                    readOnly={layer.isLocked}
-                    onChange={(expression) =>
-                      updateLayerExpressions(layer.id, { ...layer.expressions, [key]: expression })
-                    }
-                  />
-                )}
-                {error && (
-                  <p id={errorId} className="inspector-error">
-                    {error}
-                  </p>
-                )}
-              </div>
-            </section>
-          );
-        },
-      )}
+              )}
+              {error && (
+                <p id={errorId} className="inspector-error">
+                  {error}
+                </p>
+              )}
+            </div>
+          </section>
+        );
+      })}
     </section>
   );
 }

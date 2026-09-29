@@ -37,6 +37,94 @@ function run(layer: ExpressionLayerState, source: string, apiVersion = 1) {
   return { result: result.get(layer.id)!, diagnostics };
 }
 describe('composition script visual properties', () => {
+  it('overlays only explicit visual writes onto historical source-bound samples', () => {
+    const layer = fixture();
+    const current = layer.scriptVisuals!;
+    Object.assign(current.element, {
+      content: 'Current text',
+      fontSize: 72,
+      fill: {
+        type: 'linear',
+        angle: 30,
+        stops: [
+          { offset: 0, opacity: 1, color: '#ffffff' },
+          { offset: 1, opacity: 1, color: '#000000' },
+        ],
+      },
+    });
+    const sampled = structuredClone(current);
+    Object.assign(sampled.element, { content: 'Historical text', fontSize: 24 });
+    (sampled.element as any).fill.angle = 90;
+    (sampled.element as any).fill.stops[1].color = '#ff0000';
+    sampled.effects.blur = 8;
+    const before = structuredClone(sampled);
+    const reference = scriptLayerReference(
+      layer.transform,
+      current,
+      { id: layer.id, name: 'Title' },
+      () => undefined,
+      {},
+      (_seconds, _extents, _visuals, applyVisualWrites) => applyVisualWrites(sampled),
+    ).reference as any;
+
+    // Merely reading a field creates a draft but must not replace sampled styles.
+    expect(reference.fontSize).toBe(72);
+    expect(reference.sourceRectAtTime(0)).toEqual(sampled);
+    const unchangedContent = reference.content;
+    reference.content = unchangedContent;
+    reference.element.fontSize = 48;
+    reference.fill.stops[0].color = '#00ff00';
+    reference.element.fill.angle = 45;
+    reference.effects.blur = 4;
+    reference.isVisible = false;
+    reference.blendMode = 'multiply';
+
+    const result = reference.sourceRectAtTime(0);
+    expect(result).toMatchObject({
+      element: { content: 'Current text', fontSize: 48, fill: { angle: 45 } },
+      effects: { blur: 4 },
+      isVisible: false,
+      blendMode: 'multiply',
+    });
+    expect(result.element.fill.stops).toEqual([
+      { offset: 0, opacity: 1, color: '#00ff00' },
+      { offset: 1, opacity: 1, color: '#ff0000' },
+    ]);
+    expect(sampled).toEqual(before);
+    expect((current.element as any).fill.stops[0].color).toBe('#ffffff');
+  });
+
+  it('replays replacement and array writes in order and ignores detached references', () => {
+    const layer = fixture();
+    const current = layer.scriptVisuals!;
+    const sampled = structuredClone(current);
+    const reference = scriptLayerReference(
+      layer.transform,
+      current,
+      { id: layer.id, name: 'Title' },
+      () => undefined,
+      {},
+      (_seconds, _extents, _visuals, applyVisualWrites) => applyVisualWrites(sampled),
+    ).reference as any;
+    const retained = reference.effects;
+    reference.effects = { ...current.effects, blur: 5 };
+    retained.blur = 99;
+    reference.effects.blur = 6;
+    reference.fill = {
+      type: 'linear',
+      angle: 0,
+      stops: [
+        { offset: 0, opacity: 1, color: '#ffffff' },
+        { offset: 1, opacity: 1, color: '#000000' },
+      ],
+    };
+    reference.fill.stops.length = 1;
+    const result = reference.sourceRectAtTime(0);
+    expect(result.effects.blur).toBe(6);
+    expect(result.element.fill.stops).toHaveLength(1);
+    expect(sampled).toEqual(current);
+  });
+
   it('writes text, typography, effects and visibility after expressions without mutating authored data', () => {
     const layer = fixture();
     const before = structuredClone(layer);
