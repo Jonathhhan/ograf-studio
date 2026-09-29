@@ -123,6 +123,38 @@ layer('Smiley').x = bounds.width;`,
     expect(result.get('Smiley')).toMatchObject({ x: 100 });
   });
 
+  it('does not apply text expressions twice to sampled source bounds', () => {
+    const authoredText = createTextLayer();
+    const text = layer('Text', { text: "text.content + '!'" });
+    text.scriptVisuals = {
+      element: authoredText.element,
+      effects: authoredText.effects,
+      isVisible: true,
+      blendMode: 'normal',
+    };
+    text.sourceRectAtTimeWithVisuals = (_seconds, _includeExtents, visuals) => ({
+      left: 0,
+      top: 0,
+      width: visuals.element.type === 'text' ? visuals.element.content.length : 0,
+      height: 20,
+    });
+    text.sampleScriptVisualsAtTime = () => ({
+      element: authoredText.element,
+      effects: authoredText.effects,
+      isVisible: true,
+      blendMode: 'normal',
+    });
+    const follower = layer('Smiley', { x: 'layer("Text").sourceRectAtTime(0).width' });
+
+    const diagnostics: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms([text, follower], { time: 1 }, diagnostics, 1);
+
+    expect(diagnostics).toEqual([]);
+    const expectedWidth =
+      authoredText.element.type === 'text' ? authoredText.element.content.length + 1 : 0;
+    expect(result.get('Smiley')).toMatchObject({ x: expectedWidth });
+  });
+
   it.each([
     'layer("Title").property("fontSize").value',
     'layer("Title").property("x").valueAtTime(NaN)',

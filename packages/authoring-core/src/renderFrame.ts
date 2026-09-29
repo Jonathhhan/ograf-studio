@@ -417,7 +417,7 @@ export function renderCompositionFrameSvg(
             y: pose.y + (index === undefined ? 0 : collection!.offsetPerItem.y * index),
           };
         };
-        const boundElement = layer.bindings.reduce<Element>((resolved, binding) => {
+        const valueForBinding = (binding: (typeof layer.bindings)[number]) => {
           const field = composition.dataFields.find((entry) => entry.id === binding.fieldId);
           const root = field ? data[field.key] : undefined;
           const item =
@@ -425,29 +425,24 @@ export function renderCompositionFrameSvg(
               ? root[index]
               : root;
           const value = valueAtSourcePath(item, binding.sourcePath);
-          return value === undefined
-            ? resolved
-            : applyElementDataValue(
-                resolved,
-                binding.targetProperty,
-                binding.valueMap?.[String(value)] ?? value,
-              );
-        }, layer.element);
+          return value === undefined ? undefined : binding.valueMap?.[String(value)] ?? value;
+        };
+        const resolveBoundElement = () =>
+          layer.bindings.reduce<Element>((resolved, binding) => {
+            const value = valueForBinding(binding);
+            return value === undefined
+              ? resolved
+              : applyElementDataValue(resolved, binding.targetProperty, value);
+          }, layer.element);
+        const boundElement = resolveBoundElement();
         let effects = getLayerEffectsAtFrame(layer, normalizedFrame);
         for (const binding of layer.bindings) {
-          const field = composition.dataFields.find((entry) => entry.id === binding.fieldId);
-          const root = field ? data[field.key] : undefined;
-          const item =
-            index !== undefined && collection?.fieldId === field?.id && Array.isArray(root)
-              ? root[index]
-              : root;
-          const value = valueAtSourcePath(item, binding.sourcePath);
+          const value = valueForBinding(binding);
           if (value === undefined) continue;
-          const mapped = binding.valueMap?.[String(value)] ?? value;
           if (binding.targetProperty === 'dropShadowColor')
-            effects = { ...effects, dropShadowColor: String(mapped) };
+            effects = { ...effects, dropShadowColor: String(value) };
           else if (parseEffectProperty(binding.targetProperty))
-            effects = withEffectParameter(effects, binding.targetProperty, mapped);
+            effects = withEffectParameter(effects, binding.targetProperty, value);
         }
         return {
           scriptVisuals: {
@@ -478,22 +473,7 @@ export function renderCompositionFrameSvg(
           }),
           sampleTransform,
           sourceRectAtTime: (seconds: number, includeExtents: boolean) => {
-            let element = layer.bindings.reduce<Element>((resolved, binding) => {
-              const field = composition.dataFields.find((entry) => entry.id === binding.fieldId);
-              const root = field ? data[field.key] : undefined;
-              const item =
-                index !== undefined && collection?.fieldId === field?.id && Array.isArray(root)
-                  ? root[index]
-                  : root;
-              const value = valueAtSourcePath(item, binding.sourcePath);
-              return value === undefined
-                ? resolved
-                : applyElementDataValue(
-                    resolved,
-                    binding.targetProperty,
-                    binding.valueMap?.[String(value)] ?? value,
-                  );
-            }, layer.element);
+            let element = resolveBoundElement();
             if (element.type === 'text')
               element = {
                 ...element,
