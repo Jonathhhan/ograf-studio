@@ -54,7 +54,7 @@ const reservedNames = new Set([
 for (const name of SCRIPT_VECTOR_NAMES) reservedNames.add(name);
 
 /** Flat project files use their basename as the expression namespace. */
-export function scriptModuleName(fileName: string, _apiVersion = 1): string {
+export function scriptModuleName(fileName: string): string {
   const extension = '(?:m?js|json)';
   if (!new RegExp(`^[A-Za-z_$][\\w$]*\\.${extension}$`).test(fileName))
     throw new Error('Use a .js, .mjs or .json filename (letters, digits, _ or $).');
@@ -105,7 +105,7 @@ export function scriptModules(
   const files = new Map<string, string>();
   const names = new Set<string>();
   for (const file of settings.modules) {
-    const name = scriptModuleName(file.fileName, apiVersion);
+    const name = scriptModuleName(file.fileName);
     if (names.has(name)) throw new Error('Duplicate script resource name: ' + name);
     names.add(name);
     files.set(file.fileName, file.source);

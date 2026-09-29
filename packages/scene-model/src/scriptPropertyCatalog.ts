@@ -143,7 +143,6 @@ const sampling: Record<string, ScriptPropertyDefinition> = {
 export function scriptLayerPropertyCatalog(
   type: Element['type'],
   mode: 'expression' | 'composition',
-  _apiVersion = 1,
 ): Record<string, ScriptPropertyDefinition> {
   const properties: Record<string, ScriptPropertyDefinition> = {};
   for (const [key, spec] of Object.entries(SCRIPT_TRANSFORM_CATALOG)) {

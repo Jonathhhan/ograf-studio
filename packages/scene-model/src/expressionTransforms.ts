@@ -394,14 +394,12 @@ export function resolveExpressionTransforms(
               (name) => transform[name as ExpressionProperty],
               property,
               () => sample,
-              apiVersion,
             ),
           sourceRectAtTime: sourceRectMethod(
             () => sample,
             typeof scope.time === 'number' ? scope.time : 0,
           ),
         },
-        apiVersion,
         (seconds, includeExtents, visuals) => {
           const at = seconds ?? (typeof scope.time === 'number' ? scope.time : 0);
           const extents = includeExtents ?? false;

@@ -198,7 +198,6 @@ export function scriptLayerReference(
   metadata: { id: string; name: string },
   assertActive: () => void,
   methods: Record<string, unknown>,
-  _apiVersion = 1,
   measureSourceRect?: (
     seconds: number | undefined,
     includeExtents: boolean | undefined,
