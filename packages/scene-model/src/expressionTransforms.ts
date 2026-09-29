@@ -74,6 +74,7 @@ export function resolveExpressionTransforms(
       message: error instanceof Error ? error.message : String(error),
     });
   }
+  const currentTime = typeof scope.time === 'number' ? scope.time : 0;
   const byId = new Map(layers.map((layer) => [layer.id, layer]));
   const byName = new Map<string, ExpressionLayerState | null>();
   const byScope = new Map<string, Map<string, ExpressionLayerState | null>>();
@@ -151,7 +152,7 @@ export function resolveExpressionTransforms(
           return layer.sourceRectAtTimeWithVisuals(
             seconds,
             includeExtents,
-            sampled ? styleTextVisuals(layer, sampled, seconds) : visuals,
+            sampled ?? visuals,
             layer.sampleTransform ? sampler.transformAtTime?.(seconds) : undefined,
           );
         }
@@ -301,7 +302,7 @@ export function resolveExpressionTransforms(
         styleTextVisuals(
           layer,
           layer.scriptVisuals,
-          typeof scope.time === 'number' ? scope.time : 0,
+          currentTime,
         ),
       );
     } catch (error) {
@@ -395,20 +396,17 @@ export function resolveExpressionTransforms(
               property,
               () => sample,
             ),
-          sourceRectAtTime: sourceRectMethod(
-            () => sample,
-            typeof scope.time === 'number' ? scope.time : 0,
-          ),
+          sourceRectAtTime: sourceRectMethod(() => sample, currentTime),
         },
         (seconds, includeExtents, visuals) => {
-          const at = seconds ?? (typeof scope.time === 'number' ? scope.time : 0);
+          const at = seconds ?? currentTime;
           const extents = includeExtents ?? false;
           if (typeof at !== 'number' || !Number.isFinite(at))
             throw new Error('Sample time must be finite seconds.');
           if (typeof extents !== 'boolean') throw new Error('includeExtents must be a boolean.');
           const currentVisuals = styledVisuals.get(layer.id) ?? layer.scriptVisuals;
           const pose =
-            at === (typeof scope.time === 'number' ? scope.time : 0)
+            at === currentTime
               ? transform
               : layer.sampleTransform
                 ? sample.transformAtTime?.(at)
