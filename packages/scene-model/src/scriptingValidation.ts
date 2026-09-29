@@ -42,7 +42,7 @@ export function scriptingErrors(value: unknown, validateModuleNames = true): str
           }
           if (!validateModuleNames) continue;
           try {
-            const name = scriptModuleName(file.fileName, apiVersion);
+            const name = scriptModuleName(file.fileName);
             if (names.has(name)) errors.push('Duplicate module name: ' + name);
             names.add(name);
             if (file.fileName.endsWith('.json')) parseJsonResource(file.source);

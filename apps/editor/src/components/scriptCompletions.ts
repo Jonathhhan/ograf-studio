@@ -89,10 +89,7 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
         exports = moduleExportCompletions(module.source);
         exportCache.set(module, exports);
       }
-      modules.set(
-        scriptModuleName(module.fileName, config.composition.expressionApiVersion ?? 1),
-        exports,
-      );
+      modules.set(scriptModuleName(module.fileName), exports);
     } catch {
       /* Incomplete filenames remain editable, but are not executable namespaces. */
     }
@@ -258,13 +255,7 @@ export function createScriptCompletionSource(config: ScriptEditorContext) {
       let options: Completion[] | undefined;
       if (layer) {
         if (!path.length)
-          options = properties(
-            scriptLayerPropertyCatalog(
-              layer.element.type,
-              config.mode,
-              config.composition.expressionApiVersion ?? 1,
-            ),
-          );
+          options = properties(scriptLayerPropertyCatalog(layer.element.type, config.mode));
         else if (config.mode === 'composition' && path.join('.') === 'element')
           options = properties({
             ...SCRIPT_ELEMENT_CATALOG[layer.element.type],

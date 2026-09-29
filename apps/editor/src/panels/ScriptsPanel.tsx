@@ -92,7 +92,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
     try {
       const imported = await Promise.all(
         files.map(async (file) => {
-          scriptModuleName(file.name, 1);
+          scriptModuleName(file.name);
           if (file.size > 1024 * 1024) throw new Error(file.name + ' exceeds 1 MB.');
           const source = await file.text();
           return {

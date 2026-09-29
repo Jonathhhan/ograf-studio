@@ -138,7 +138,6 @@ export function sampledProperty(
   resolve: (property: string) => number,
   property: string,
   sampling?: () => ExpressionLayerSampling,
-  _apiVersion = EXPRESSION_API_VERSION,
 ) {
   const supported = SCRIPT_SAMPLED_PROPERTIES;
   if (!(supported as readonly string[]).includes(property))
@@ -171,7 +170,6 @@ function layerReference(
   metadata?: () => { id: string; name: string },
   sampling?: () => ExpressionLayerSampling,
   time = 0,
-  apiVersion = EXPRESSION_API_VERSION,
 ): Record<string, unknown> {
   const target = Object.create(null);
   defineScriptVectors(target, resolve, write);
@@ -185,7 +183,7 @@ function layerReference(
     for (const key of ['id', 'name'] as const)
       Object.defineProperty(target, key, { get: () => metadata()[key] });
   Object.defineProperty(target, 'property', {
-    value: (name: string) => sampledProperty(resolve, name, sampling, apiVersion),
+    value: (name: string) => sampledProperty(resolve, name, sampling),
   });
   if (sampling)
     Object.defineProperty(target, 'sourceRectAtTime', { value: sourceRectMethod(sampling, time) });
@@ -225,12 +223,7 @@ function evaluationScope(
     const time = typeof scope.time === 'number' ? scope.time : 0;
     Object.defineProperty(thisLayer, 'property', {
       value: (name: string) =>
-        sampledProperty(
-          (property) => numeric(scope[property]),
-          name,
-          sampling,
-          options.apiVersion ?? 1,
-        ),
+        sampledProperty((property) => numeric(scope[property]), name, sampling),
     });
     Object.defineProperty(thisLayer, 'sourceRectAtTime', {
       value: sourceRectMethod(sampling, time),
@@ -273,7 +266,6 @@ function evaluationScope(
       options.resolveLayerMetadata ? () => options.resolveLayerMetadata!(name, byId) : undefined,
       options.resolveLayerSampling ? () => options.resolveLayerSampling!(name, byId) : undefined,
       typeof scope.time === 'number' ? scope.time : 0,
-      options.apiVersion ?? 1,
     );
   };
   Object.assign(context, {

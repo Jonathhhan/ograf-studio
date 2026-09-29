@@ -110,15 +110,17 @@ describe('resolveExpressionTransforms', () => {
       blendMode: 'normal',
     });
     const follower = layer('Smiley');
-    const result = resolveExpressionTransforms([text, follower], { time: 1 }, [], 2, {
+    const result = resolveExpressionTransforms([text, follower], { time: 1 }, [], 1, {
       enabled: true,
       modules: [],
       source: `const title = layer('Text');
+if (title.content !== 'Longer text') throw Error('text expression was not applied');
+title.content = 'Later text';
 const bounds = title.sourceRectAtTime(0);
 layer('Smiley').x = bounds.width;`,
     });
-    expect(result.get('Text')?.scriptVisuals?.element).toMatchObject({ content: 'Longer text' });
-    expect(result.get('Smiley')).toMatchObject({ x: 10 });
+    expect(result.get('Text')?.scriptVisuals?.element).toMatchObject({ content: 'Later text' });
+    expect(result.get('Smiley')).toMatchObject({ x: 100 });
   });
 
   it.each([
