@@ -4,6 +4,7 @@ import {
   type ExpressionLayerState,
   type ExpressionDiagnostic,
 } from './expressionTransforms';
+import { createTextLayer } from './factory';
 
 function layer(
   id: string,
@@ -84,6 +85,40 @@ describe('resolveExpressionTransforms', () => {
     expect(sample).toHaveBeenCalledTimes(2);
     expect(rect).toHaveBeenCalledTimes(4);
     expect(errors).toEqual([]);
+  });
+
+  it('uses text-expression content when composition scripts read source bounds', () => {
+    const authoredText = createTextLayer();
+    const text = layer('Text', { text: "time < 0.5 ? 'A' : 'Longer text'" });
+    text.scriptVisuals = {
+      element: authoredText.element,
+      effects: authoredText.effects,
+      isVisible: true,
+      blendMode: 'normal',
+    };
+    text.sourceRectAtTime = () => ({ left: 0, top: 0, width: 30, height: 20 });
+    text.sourceRectAtTimeWithVisuals = (_seconds, _includeExtents, visuals) => ({
+      left: 0,
+      top: 0,
+      width: visuals.element.type === 'text' ? visuals.element.content.length * 10 : 0,
+      height: 20,
+    });
+    text.sampleScriptVisualsAtTime = () => ({
+      element: authoredText.element,
+      effects: authoredText.effects,
+      isVisible: true,
+      blendMode: 'normal',
+    });
+    const follower = layer('Smiley');
+    const result = resolveExpressionTransforms([text, follower], { time: 1 }, [], 2, {
+      enabled: true,
+      modules: [],
+      source: `const title = layer('Text');
+const bounds = title.sourceRectAtTime(0);
+layer('Smiley').x = bounds.width;`,
+    });
+    expect(result.get('Text')?.scriptVisuals?.element).toMatchObject({ content: 'Longer text' });
+    expect(result.get('Smiley')).toMatchObject({ x: 10 });
   });
 
   it.each([
@@ -213,9 +248,9 @@ describe('resolveExpressionTransforms', () => {
     const future = layer('future', { x: 'throw new Error("executed")' });
     const diagnostics: ExpressionDiagnostic[] = [];
     expect(resolveExpressionTransforms([legacy], {}).get('legacy')!.x).toBe(42);
-    const result = resolveExpressionTransforms([future], {}, diagnostics, 2);
+    const result = resolveExpressionTransforms([future], {}, diagnostics, 3);
     expect(result.get('future')!.x).toBe(10);
-    expect(diagnostics[0]!.message).toBe('Unsupported expression API version: 2');
+    expect(diagnostics[0]!.message).toBe('Unsupported expression API version: 3');
   });
 
   it('keeps ID references stable after renaming and resolves collection prototypes locally', () => {

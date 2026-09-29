@@ -1,5 +1,3 @@
-import { LinkedJsonFile } from './LinkedJsonFile';
-import { linkedJsonKey } from '../state/linkedJsonFiles';
 import { PropertyRow } from '../components/PropertyRow';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
@@ -73,7 +71,6 @@ function optionalNumber(value: string): number | undefined {
 
 export function DataPanel() {
   const composition = useActiveComposition();
-  const projectId = useProjectStore((s) => s.project.id);
   const addDataField = useProjectStore((s) => s.addDataField);
   const moveDataField = useProjectStore((s) => s.moveDataField);
   const removeDataField = useProjectStore((s) => s.removeDataField);
@@ -259,12 +256,6 @@ export function DataPanel() {
                         ) : (
                           <>
                             <FieldDetails field={field} update={updateDataField} />
-                            {field.type === 'object' && (
-                              <LinkedJsonFile
-                                key={linkedJsonKey(projectId, composition.id, field.id)}
-                                linkKey={linkedJsonKey(projectId, composition.id, field.id)}
-                              />
-                            )}
                           </>
                         )}
                       </td>

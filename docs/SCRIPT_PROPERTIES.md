@@ -1,6 +1,7 @@
 # Composition script properties
 
-Property expressions keep their six numeric transform fields. Composition scripts can read
+Property expressions expose Position, Size, and Transform Origin as array fields, with numeric
+Rotation and Opacity. Composition scripts can read
 and assign the rendered properties below using `layer('Name')` or `layerById('id')`.
 The Scripts tab's **Composition & modules → Script properties** list follows the selected layer.
 The shared property catalog drives this list, editor completion, writable element members and
@@ -30,11 +31,20 @@ rendering. Invalid writes or thrown errors roll back the entire script for that 
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `x`, `y`, `width`, `height`, `rotation`, `opacity` | Finite number; pixels, degrees, and 0–1 opacity                                                                                                    |
 | `transformOriginX`, `transformOriginY`             | Finite number; normalized origin                                                                                                                   |
+| `position`                                         | `[x, y]` in pixels; a live alias for the existing scalar fields.                                                                                   |
+| `size`                                             | `[width, height]` in pixels; changes the layout box, not visual scale.                                                                             |
+| `transformOrigin`                                  | Normalized pivot `[x, y]`, each component in the `0..1` range.                                                                                     |
 | `isVisible`                                        | Boolean                                                                                                                                            |
 | `blendMode`                                        | `normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`, `color-dodge`, `color-burn`, `hard-light`, `soft-light`, `difference`, `exclusion` |
 | `effects`                                          | Effect settings described below                                                                                                                    |
 | `element`                                          | Readable object with writable members for the current element type                                                                                 |
 | `id`, `name`, `type`                               | Read-only layer identity and element type                                                                                                          |
+
+Vector aliases support whole-pair assignments and indexed writes such as `title.position[0] = 100`.
+They accept finite numbers, retain two components, and are read-only in property expressions.
+`transformOrigin` writes require components in the `0..1` range. These aliases do not alter
+the saved scene format; scalar access remains supported. `properties()` lists the aliases while
+ordinary object enumeration keeps its existing scalar fields.
 
 Element properties have direct aliases: `title.fontSize` and `title.element.fontSize` refer
 to the same value. A legacy shader's resource name uses `element.name`; `name` always identifies
@@ -137,7 +147,8 @@ replace arrays to remove entries. Values assigned from another object are copied
 ## Sampling
 
 `property('x').valueAtTime(seconds)` and the other five expression properties retain their
-existing sampling API. `sourceRectAtTime(seconds, includeExtents)` measures the pre-script,
-data-bound layer. Visual assignments do not recursively run scripts or alter historical samples.
+existing sampling API. `sourceRectAtTime(seconds, includeExtents)` measures after text expressions
+and after any earlier visual or layout writes in the current composition script. Visual assignments
+do not recursively run scripts or alter historical samples.
 SVG diagnostic captures retain their existing shader/Lottie rendering limitations; browser
 preview and exported graphics use the shared media renderer.

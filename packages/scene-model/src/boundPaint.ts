@@ -15,6 +15,10 @@ const NUMERIC_TEXT_PROPERTIES = new Set([
 
 /** Immutable data overrides, shared by Studio, diagnostic capture and exported runtime. */
 export function applyElementDataValue(element: Element, property: string, value: unknown): Element {
+  if (element.type === 'text' && property === 'direction') {
+    if (value !== 'auto' && value !== 'ltr' && value !== 'rtl') return element;
+    return { ...element, direction: value };
+  }
   if (property === 'dropShadowColor' || property.startsWith('effects.')) return element;
   const shaderTarget = /^(?:(fill|strokePaint)\.)?parameters\.(.+)$/.exec(property);
   const slot = shaderTarget?.[1] === 'strokePaint' ? 'stroke' : 'fill';

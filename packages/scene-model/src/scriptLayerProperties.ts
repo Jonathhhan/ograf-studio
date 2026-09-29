@@ -7,12 +7,14 @@ import {
 } from './scriptPropertyCatalog';
 import { getPaintAtFrame, getTrackValueAtFrame } from './layerAnimation';
 import { EFFECT_CATALOG } from './effectStack';
+import { defineScriptVectors, SCRIPT_VECTOR_NAMES } from './scriptVectors';
 import { sampleShaderAnimationTracks } from './shaderAnimation';
 import type {
   Element,
   LayerAnimationTracks,
   LayerEffects,
   LayerTransform,
+  TextElement,
   BlendMode,
 } from './types';
 
@@ -109,7 +111,7 @@ function validateStructure(value: any, base: any, path: string): void {
       validateStructure(value[key], child, path + '.' + key);
     }
 }
-function validateElement(element: Element): void {
+export function validateScriptElement(element: Element): void {
   const values = element as unknown as Record<string, unknown>;
   for (const key of SCRIPT_ELEMENT_PROPERTIES[element.type]) {
     const value = values[key];
@@ -141,6 +143,54 @@ function validateElement(element: Element): void {
   if (element.type === 'shader') validatePaint(element);
 }
 
+const textSetterName = (property: string) => 'set' + property[0]!.toUpperCase() + property.slice(1);
+
+/** A detached, transactional text view used while evaluating a text expression. */
+export function textExpressionReference(
+  element: TextElement,
+  assertActive: () => void = () => undefined,
+): { text: object; finish: () => TextElement } {
+  let draft = jsonCopy(element) as TextElement;
+  const text = Object.create(null) as Record<string, unknown>;
+  const assign = (property: string, value: unknown) => {
+    assertActive();
+    const next = jsonCopy(draft) as TextElement;
+    (next as unknown as Record<string, unknown>)[property] = jsonCopy(value);
+    validateScriptElement(next);
+    draft = next;
+    return text;
+  };
+  for (const property of Object.keys(SCRIPT_ELEMENT_CATALOG.text)) {
+    Object.defineProperty(text, property, {
+      enumerable: true,
+      get: () => draft[property as keyof TextElement],
+      set: (value: unknown) => {
+        assign(property, value);
+      },
+    });
+    Object.defineProperty(text, textSetterName(property), {
+      enumerable: true,
+      value: (value: unknown) => assign(property, value),
+    });
+  }
+  Object.defineProperty(text, 'text', {
+    enumerable: true,
+    get: () => draft.content,
+  });
+  Object.defineProperty(text, 'setText', {
+    enumerable: true,
+    value: (value: unknown) => assign('content', value),
+  });
+  Object.preventExtensions(text);
+  return {
+    text,
+    finish: () => {
+      validateScriptElement(draft);
+      return draft;
+    },
+  };
+}
+
 /** Mutable detached views. Every setter checks the transaction lifetime, including nested/retained references. */
 export function scriptLayerReference(
   transform: LayerTransform,
@@ -148,6 +198,12 @@ export function scriptLayerReference(
   metadata: { id: string; name: string },
   assertActive: () => void,
   methods: Record<string, unknown>,
+  _apiVersion = 1,
+  measureSourceRect?: (
+    seconds: number | undefined,
+    includeExtents: boolean | undefined,
+    visuals: ScriptLayerVisuals | undefined,
+  ) => unknown,
 ): { reference: object; finish: () => ScriptLayerVisuals | undefined } {
   let draft: ScriptLayerVisuals | undefined;
   const getDraft = () => {
@@ -197,6 +253,14 @@ export function scriptLayerReference(
     return proxy;
   };
   const target = Object.create(null);
+  defineScriptVectors(
+    target,
+    (property) => transform[property as keyof LayerTransform],
+    (property, value) => {
+      assertActive();
+      transform[property as keyof LayerTransform] = value;
+    },
+  );
   const define = (key: string, get: () => unknown, set?: (value: any) => void) =>
     Object.defineProperty(target, key, {
       enumerable: true,
@@ -256,14 +320,25 @@ export function scriptLayerReference(
     );
     define('type', () => visuals.element.type);
   }
+  if (measureSourceRect) {
+    Object.defineProperty(target, 'sourceRectAtTime', {
+      value: (seconds?: number, includeExtents?: boolean) => {
+        assertActive();
+        return measureSourceRect(seconds, includeExtents, draft ?? visuals);
+      },
+    });
+  }
   for (const [key, value] of Object.entries({ ...metadata, ...methods }))
-    Object.defineProperty(target, key, { value });
-  Object.defineProperty(target, 'properties', { value: () => Object.keys(target) });
+    if (!(measureSourceRect && key === 'sourceRectAtTime'))
+      Object.defineProperty(target, key, { value });
+  Object.defineProperty(target, 'properties', {
+    value: () => [...Object.keys(target), ...SCRIPT_VECTOR_NAMES],
+  });
   return {
     reference: Object.preventExtensions(target),
     finish: () => {
       if (!draft || JSON.stringify(draft) === JSON.stringify(visuals)) return undefined;
-      validateElement(draft.element);
+      validateScriptElement(draft.element);
       for (const key of ['definition', 'inputImage'] as const) {
         const before = (visuals!.element as any)[key],
           after = (draft.element as any)[key];

@@ -25,13 +25,13 @@ function fixture(): ExpressionLayerState {
     },
   };
 }
-function run(layer: ExpressionLayerState, source: string) {
+function run(layer: ExpressionLayerState, source: string, apiVersion = 1) {
   const diagnostics: ExpressionDiagnostic[] = [];
   const result = resolveExpressionTransforms(
     [layer],
     expressionDataScope({ title: 'Arabic' }),
     diagnostics,
-    1,
+    apiVersion,
     { enabled: true, source, modules: [] },
   );
   return { result: result.get(layer.id)!, diagnostics };
@@ -105,6 +105,86 @@ describe('composition script visual properties', () => {
     const { result, diagnostics } = run(layer, '');
     expect(diagnostics).toHaveLength(1);
     expect(result.scriptVisuals).toBeUndefined();
+  });
+});
+
+describe('text expressions', () => {
+  it('applies chained detached setters and exposes readable OGraf fields', () => {
+    const layer = fixture();
+    layer.expressions = {
+      text: `
+        if (text.setFontSize(72) !== text) throw Error('setter did not chain');
+        text.setText(data.title).setFontFamily('Inter').setLineHeight(1.4)
+          .setLetterSpacing(2).setDirection('rtl').setColor('#f00').setFill('#0f0');
+        if (text.fontSize !== 72 || text.direction !== 'rtl') throw Error('stale text');
+        return text;
+      `,
+    };
+    const before = structuredClone(layer);
+    const { result, diagnostics } = run(layer, '');
+    expect(diagnostics).toEqual([]);
+    expect(result.scriptVisuals?.element).toMatchObject({
+      type: 'text',
+      content: 'Arabic',
+      fontFamily: 'Inter',
+      fontSize: 72,
+      lineHeight: 1.4,
+      letterSpacing: 2,
+      direction: 'rtl',
+      color: '#f00',
+      fill: '#0f0',
+    });
+    expect(layer).toEqual(before);
+  });
+
+  it('commits neither text nor typography when evaluation fails', () => {
+    const layer = fixture();
+    layer.expressions = { text: "text.setText('Changed').setDirection('sideways')" };
+    const { result, diagnostics } = run(layer, '');
+    expect(diagnostics).toHaveLength(1);
+    expect(result.scriptVisuals).toBeUndefined();
+  });
+
+  it('accepts a source-text string as the expression result', () => {
+    const layer = fixture();
+    layer.expressions = { text: "'Source text value'" };
+    const { result, diagnostics } = run(layer, '');
+    expect(diagnostics).toEqual([]);
+    expect(result.scriptVisuals?.element).toMatchObject({ content: 'Source text value' });
+  });
+
+  it('keeps detached style mutations when the final result is a source-text string', () => {
+    const layer = fixture();
+    layer.expressions = {
+      text: `text.setFontFamily('Inter');\nreturn 'rerer';`,
+    };
+    const { result, diagnostics } = run(layer, '');
+    expect(diagnostics).toEqual([]);
+    expect(result.scriptVisuals?.element).toMatchObject({
+      content: 'rerer',
+      fontFamily: 'Inter',
+    });
+  });
+
+  it('commits setter-only expressions without an explicit return', () => {
+    const layer = fixture();
+    layer.expressions = { text: `text.setFontFamily('Inter');` };
+    const { result, diagnostics } = run(layer, '');
+    expect(diagnostics).toEqual([]);
+    expect(result.scriptVisuals?.element).toMatchObject({
+      content: 'Text',
+      fontFamily: 'Inter',
+    });
+  });
+
+  it('supports text expressions in API v1 and rejects non-text layers', () => {
+    const text = fixture();
+    text.expressions = { text: 'text.setFontSize(72)' };
+    expect(run(text, '').diagnostics).toEqual([]);
+    const rectangle = { ...fixture(), scriptVisuals: { ...fixture().scriptVisuals! } };
+    rectangle.scriptVisuals!.element = createRectangleElement();
+    rectangle.expressions = { text: 'text.setFontSize(72)' };
+    expect(run(rectangle, '').diagnostics[0]?.message).toContain('text layer');
   });
 });
 

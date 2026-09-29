@@ -1076,6 +1076,11 @@ function validateComposition(composition: Composition, errors: string[], warning
       }
     } else if (layer.element.type === 'text') {
       if (
+        layer.element.direction !== undefined &&
+        !['auto', 'ltr', 'rtl'].includes(layer.element.direction)
+      )
+        errors.push(`${prefix}: text layer "${layer.name}" has an unsupported text direction.`);
+      if (
         !(['auto-size', 'shrink-to-fit', 'fit-to-width', 'squeeze', 'fixed'] as const).includes(
           layer.element.autoFit,
         )

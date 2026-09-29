@@ -61,6 +61,9 @@ describe('project JavaScript completion', () => {
       'height',
       'rotation',
       'opacity',
+      'position',
+      'size',
+      'transformOrigin',
     ]);
     expect(labels('layer("Title").property("x").')).toEqual(['name', 'value', 'valueAtTime']);
     expect(labels('const title = layer("Title"); title.property("x").')).toContain('valueAtTime');
@@ -83,6 +86,56 @@ describe('project JavaScript completion', () => {
     expect(labels('const title = layer("Title"); title.sourceRectAtTime().')).toContain('width');
     const result = complete('layer("Title").sourceRectAtTime().');
     expect(result?.options.every((entry) => entry.detail?.includes('read-only'))).toBe(true);
+  });
+  it('offers vector aliases while keeping the scalar API', () => {
+    for (const mode of ['expression', 'composition'] as const) {
+      const config = { ...fixture(), mode };
+      expect(labels('layer("Title").', config)).toEqual(
+        expect.arrayContaining([
+          'x',
+          'y',
+          'width',
+          'height',
+          'position',
+          'size',
+          'transformOrigin',
+        ]),
+      );
+      expect(labels('layer("Title").property("transformOrigin").', config)).toContain(
+        'valueAtTime',
+      );
+      expect(
+        complete('layer("Title").property("size").', config)?.options.find(
+          (item) => item.label === 'value',
+        )?.detail,
+      ).toContain('array');
+    }
+    expect(labels('', { ...fixture(), mode: 'expression', property: 'text' })).toEqual(
+      expect.arrayContaining(['position', 'size', 'transformOrigin', 'text']),
+    );
+    expect(labels('', fixture())).not.toContain('transformOrigin');
+    expect(
+      complete('thisLayer.', { ...fixture(), mode: 'expression' })?.options.find(
+        (item) => item.label === 'transformOrigin',
+      )?.detail,
+    ).toContain('read-only');
+    expect(labels('text.', { ...fixture(), mode: 'expression', property: 'text' })).toEqual(
+      expect.arrayContaining(['fontSize', 'fontFamily', 'direction', 'lineHeight', 'setText']),
+    );
+  });
+  it('offers current globals and vector members in v1 completion', () => {
+    const config = fixture();
+    config.composition.expressionApiVersion = 1;
+    expect(labels('', config)).toContain('json');
+    expect(labels('', { ...config, mode: 'expression' })).toEqual(
+      expect.arrayContaining(['position', 'size', 'transformOrigin']),
+    );
+    expect(labels('layer("Title").', config)).toEqual(
+      expect.arrayContaining(['position', 'size', 'transformOrigin']),
+    );
+    expect(labels('layer("Title").property("', config)).toEqual(
+      expect.arrayContaining(['position', 'size', 'transformOrigin']),
+    );
   });
   it('does not complete unsupported sampling properties or shadowed references', () => {
     expect(labels('layer("Title").property("fontSize").')).not.toContain('valueAtTime');

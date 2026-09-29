@@ -11,6 +11,65 @@ import {
 import { renderCompositionFrameSvg } from './renderFrame';
 
 describe('renderCompositionFrameSvg', () => {
+  it('preserves explicit and automatic text direction in SVG snapshots', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const layer = createLayerOfKind('text');
+    if (layer.element.type !== 'text') throw new Error('Expected a text layer.');
+    layer.element.content = '123 שלום';
+    layer.element.direction = 'auto';
+    layer.element.textAlign = 'left';
+    layer.keyframes = [createLayerKeyframe(0, createDefaultTransform({ opacity: 1 }))];
+    composition.layers = [layer];
+    expect(renderCompositionFrameSvg(project, composition.id, 0).svg).toContain(
+      'direction="rtl" unicode-bidi="isolate" text-anchor="end"',
+    );
+    layer.element.direction = 'ltr';
+    expect(renderCompositionFrameSvg(project, composition.id, 0).svg).toContain(
+      'direction="ltr" unicode-bidi="isolate" text-anchor="start"',
+    );
+    layer.element.direction = 'rtl';
+    layer.element.textAlign = 'right';
+    expect(renderCompositionFrameSvg(project, composition.id, 0).svg).toContain(
+      'direction="rtl" unicode-bidi="isolate" text-anchor="start"',
+    );
+  });
+
+  it('materializes vector expressions into snapshot position, dimensions, and pivot', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const layer = createLayerOfKind('rectangle');
+    layer.keyframes = [createLayerKeyframe(0, createDefaultTransform({ opacity: 1 }))];
+    layer.expressions = {
+      position: '[30, 40]',
+      size: '[300, 80]',
+      transformOrigin: '[0, 0]',
+      rotation: '45',
+    };
+    composition.layers = [layer];
+    const svg = renderCompositionFrameSvg(project, composition.id, 0).svg;
+    expect(svg).toContain('translate(30 40)');
+    expect(svg).toContain('rotate(45 0 0)');
+    expect(svg).toContain('H 300');
+    expect(svg).toContain('V 80');
+  });
+  it('renders text expressions without saving a runtime text field', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const layer = createLayerOfKind('text');
+    if (layer.element.type !== 'text') throw new Error('Expected a text layer.');
+    layer.keyframes = [createLayerKeyframe(0, createDefaultTransform({ opacity: 1 }))];
+    layer.expressions = {
+      text: "text.setText('Styled').setFontSize(72).setDirection('rtl').setColor('#f00')",
+    };
+    composition.layers = [layer];
+    const svg = renderCompositionFrameSvg(project, composition.id, 0).svg;
+    expect(svg).toContain('Styled');
+    expect(svg).toContain('font-size="72"');
+    expect(svg).toContain('direction="rtl"');
+    expect(layer).not.toHaveProperty('text');
+    expect(layer.element).toMatchObject({ content: 'Text', fontSize: 48 });
+  });
   it('supports time sampling and local shape bounds in SVG expressions', () => {
     const project = createProject();
     const comp = project.compositions[0]!;

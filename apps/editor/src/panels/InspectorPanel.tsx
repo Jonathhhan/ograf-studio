@@ -87,6 +87,11 @@ const NUMERIC_MAPPING_PROPERTIES = new Set([
 ]);
 
 const ENUM_MAPPING_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  direction: [
+    { value: 'auto', label: 'Automatic' },
+    { value: 'ltr', label: 'Left to right (LTR)' },
+    { value: 'rtl', label: 'Right to left (RTL)' },
+  ],
   textAlign: [
     { value: 'left', label: 'Left' },
     { value: 'center', label: 'Center' },
@@ -837,6 +842,23 @@ export function InspectorPanel() {
                   })
                 }
               />
+            </PropertyRow>
+            <PropertyRow
+              help="Base writing direction; alignment is set separately."
+              className="inspector-row"
+            >
+              <span>Direction</span>
+              <select
+                aria-label="Text direction"
+                value={layer.element.direction ?? 'ltr'}
+                onChange={(e) =>
+                  setTextElement({ direction: e.target.value as 'auto' | 'ltr' | 'rtl' })
+                }
+              >
+                <option value="auto">Automatic</option>
+                <option value="ltr">Left to right (LTR)</option>
+                <option value="rtl">Right to left (RTL)</option>
+              </select>
             </PropertyRow>
             <PropertyRow
               help={'Horizontal alignment of the text within its box: left, centered or right.'}

@@ -72,6 +72,53 @@ describe('shared JavaScript modules', () => {
       'bad.js: broken',
     );
   });
+  it('loads immutable JSON resources from expressions and JavaScript modules', () => {
+    const config = settings('', [
+      { fileName: 'settings.json', source: '{"gap": 12, "palette": ["#fff"]}' },
+      {
+        fileName: 'helpers.js',
+        source: "const settings = require('./settings.json'); export const gap = settings.gap;",
+      },
+    ]);
+    const modules = scriptModules(config);
+    expect(
+      evaluateExpression('json("settings.json").gap + helpers.gap', {}, undefined, { modules }),
+    ).toBe(24);
+    expect(() =>
+      evaluateExpression('json("settings.json").gap = 4', {}, undefined, { modules }),
+    ).toThrow();
+    expect(scriptModuleName('settings.json')).toBe('settings');
+  });
+  it('exposes vectors and JSON resources in API v1', () => {
+    const legacy = settings('', [
+      { fileName: 'helpers.js', source: 'export const offset = 5;' },
+      { fileName: 'values.json', source: '{"offset": 7}' },
+    ]);
+    const modules = scriptModules(legacy, 1);
+    expect(scriptModuleName('helpers.js', 1)).toBe('helpers');
+    expect(scriptModuleName('values.json', 1)).toBe('values');
+    expect(
+      evaluateExpression('helpers.offset + json("values.json").offset + x', { x: 10 }, undefined, {
+        apiVersion: 1,
+        modules,
+      }),
+    ).toBe(22);
+    expect(() => scriptModuleName('position.js', 1)).toThrow('Reserved module name');
+    expect(() => scriptModuleName('json.js', 1)).toThrow('Reserved module name');
+    expect(() => scriptModuleName('text.js', 1)).toThrow('Reserved module name');
+    expect(
+      evaluateExpression('layer("Title").position[0]', {}, () => 10, {
+        apiVersion: 1,
+        modules,
+      }),
+    ).toBe(10);
+    expect(
+      evaluateExpression('layer("Title").property("position").value[0]', {}, () => 10, {
+        apiVersion: 1,
+        modules,
+      }),
+    ).toBe(10);
+  });
   it.each([
     'Math.js',
     'layer.js',

@@ -3,6 +3,8 @@ import { ScriptLogWindow } from './ScriptLogWindow';
 import { JavaScriptEditor } from '../components/JavaScriptEditor';
 import { useRef, useState } from 'react';
 import {
+  formatJsonResource,
+  parseJsonResource,
   scriptModuleName,
   type Composition,
   type CompositionScripting,
@@ -52,9 +54,22 @@ function ScriptEditor({ composition }: { composition: Composition }) {
     const state = useProjectStore.getState();
     const active = getActiveComposition(state.project, state.activeCompositionId);
     if (active.id !== composition.id) return;
-    update({ scripting: change(active.scripting ?? EMPTY) });
+    const next = change(active.scripting ?? EMPTY);
+    update({
+      scripting: next,
+      expressionApiVersion: 1,
+    });
   };
   const file = scripting.modules[selected];
+  const jsonError = (() => {
+    if (!file?.fileName.endsWith('.json')) return '';
+    try {
+      parseJsonResource(file.source);
+      return '';
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  })();
   const runtimeErrors =
     diagnostics.compositionId === composition.id
       ? [
@@ -77,9 +92,13 @@ function ScriptEditor({ composition }: { composition: Composition }) {
     try {
       const imported = await Promise.all(
         files.map(async (file) => {
-          scriptModuleName(file.name);
+          scriptModuleName(file.name, 1);
           if (file.size > 1024 * 1024) throw new Error(file.name + ' exceeds 1 MB.');
-          return { fileName: file.name, source: await file.text() };
+          const source = await file.text();
+          return {
+            fileName: file.name,
+            source: file.name.endsWith('.json') ? formatJsonResource(source) : source,
+          };
         }),
       );
       edit((current) => ({ ...current, modules: [...current.modules, ...imported] }));
@@ -115,7 +134,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
       </label>
       <div className="scripts-toolbar">
         <button type="button" onClick={() => fileInput.current?.click()}>
-          Import .js files
+          Import .js / .json
         </button>
         <button
           type="button"
@@ -132,6 +151,21 @@ function ScriptEditor({ composition }: { composition: Composition }) {
         >
           New module
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            let index = 1;
+            while (scripting.modules.some((module) => module.fileName === `data${index}.json`))
+              index++;
+            setSelected(scripting.modules.length);
+            edit((current) => ({
+              ...current,
+              modules: [...current.modules, { fileName: `data${index}.json`, source: '{\n  \n}' }],
+            }));
+          }}
+        >
+          New JSON
+        </button>
         {file && (
           <button
             type="button"
@@ -143,7 +177,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
               setSelected(-1);
             }}
           >
-            Remove module
+            Remove file
           </button>
         )}
         <input
@@ -151,7 +185,7 @@ function ScriptEditor({ composition }: { composition: Composition }) {
           hidden
           type="file"
           multiple
-          accept=".js,.mjs"
+          accept=".js,.mjs,.json,application/json"
           onChange={(event) => {
             const files = Array.from(event.target.files ?? []);
             event.target.value = '';
@@ -169,15 +203,31 @@ function ScriptEditor({ composition }: { composition: Composition }) {
         </label>
       )}
       <JavaScriptEditor
-        context={{ composition, mode: file ? 'module' : 'composition' }}
+        context={
+          file?.fileName.endsWith('.json')
+            ? undefined
+            : { composition, mode: file ? 'module' : 'composition' }
+        }
         key={selected}
-        label={file ? 'Module source' : 'Composition script'}
+        label={
+          file?.fileName.endsWith('.json')
+            ? 'JSON source'
+            : file
+              ? 'Module source'
+              : 'Composition script'
+        }
+        invalid={Boolean(jsonError)}
         value={file?.source ?? scripting.source}
         onChange={(source) => {
           if (file) editFile({ source });
           else edit((current) => ({ ...current, source }));
         }}
       />
+      {jsonError && (
+        <p role="alert" className="inspector-error">
+          {jsonError}
+        </p>
+      )}
       {importError && (
         <p role="alert" className="inspector-error">
           {importError}

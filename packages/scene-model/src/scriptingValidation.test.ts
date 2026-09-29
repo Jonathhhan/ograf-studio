@@ -30,6 +30,7 @@ describe('serialized scripting validation', () => {
     { components: [{ layers: [{ expressions: { unsupported: '1' } }] }] },
     { layers: [{ expressions: { transformOriginX: '0.25' } }] },
     { layers: [{ expressions: { transformOriginY: '0.75' } }] },
+    { layers: [{ expressions: { text: 'text.setFontSize(72)' } }] },
     { layers: [{ expressions: { strokeWidth: '4' } }] },
     { layers: [{ expressions: { 'fill.stops.0.position': '0.5' } }] },
   ])('rejects malformed new fields: %j', (input) => {
@@ -42,6 +43,44 @@ describe('serialized scripting validation', () => {
     expect(
       scriptingErrors({ scripting: { enabled: false, source: 'invalid {', modules: [] } }),
     ).toEqual([]);
+  });
+
+  it('validates current expression fields and resources in API v1', () => {
+    expect(
+      scriptingErrors({ expressionApiVersion: 1, layers: [{ expressions: { x: '10' } }] }),
+    ).toEqual([]);
+    expect(
+      scriptingErrors({
+        expressionApiVersion: 1,
+        layers: [{ expressions: { position: '[10, 20]' } }],
+      }),
+    ).toEqual([]);
+    expect(
+      scriptingErrors({
+        expressionApiVersion: 1,
+        layers: [{ element: { type: 'text' }, expressions: { text: 'text.setFontSize(72)' } }],
+      }),
+    ).toEqual([]);
+    expect(
+      scriptingErrors({
+        expressionApiVersion: 1,
+        scripting: {
+          enabled: true,
+          source: '',
+          modules: [{ fileName: 'helpers.js', source: 'export const x = 1;' }],
+        },
+      }),
+    ).toEqual([]);
+    expect(
+      scriptingErrors({
+        expressionApiVersion: 1,
+        scripting: {
+          enabled: true,
+          source: '',
+          modules: [{ fileName: 'position.js', source: 'export const x = 1;' }],
+        },
+      })[0],
+    ).toContain('Reserved module name');
   });
 
   it('rejects malformed scripting before loading/migrating a project', () => {

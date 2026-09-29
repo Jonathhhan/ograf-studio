@@ -1,4 +1,5 @@
 import { previewBindingData } from '../state/dataBinding';
+import { hasActiveTransformExpression } from '@ograf-editor/scene-model';
 import { useTestDataStore } from '../state/testDataStore';
 import { publishExpressionDiagnostics } from '../state/expressionDiagnosticsStore';
 import {
@@ -444,9 +445,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
       for (const property of ['x', 'y', 'width', 'height', 'rotation'] as const) {
         if (
           patch[property] === undefined ||
-          (!composition.scripting?.enabled &&
-            (!layer.expressions?.[property]?.trim() ||
-              layer.expressionsEnabled?.[property] === false))
+          (!composition.scripting?.enabled && !hasActiveTransformExpression(layer, property))
         )
           continue;
         patch[property] = authoredPositionAfterDrag(

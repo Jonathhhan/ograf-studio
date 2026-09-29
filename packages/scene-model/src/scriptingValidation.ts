@@ -1,6 +1,7 @@
 import { scriptModuleName } from './scriptModules';
+import { parseJsonResource } from './jsonResources';
+import { EXPRESSION_FIELDS, EXPRESSION_PROPERTIES } from './expressions';
 
-const properties = new Set(['x', 'y', 'width', 'height', 'rotation', 'opacity']);
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -8,6 +9,11 @@ const record = (value: unknown): value is Record<string, unknown> =>
 export function scriptingErrors(value: unknown, validateModuleNames = true): string[] {
   if (!record(value)) return [];
   const errors: string[] = [];
+  const apiVersion =
+    typeof value.expressionApiVersion === 'number' && Number.isInteger(value.expressionApiVersion)
+      ? value.expressionApiVersion
+      : 1;
+  const properties = new Set<string>([...EXPRESSION_PROPERTIES, ...EXPRESSION_FIELDS]);
   if (
     value.expressionApiVersion !== undefined &&
     (typeof value.expressionApiVersion !== 'number' ||
@@ -36,9 +42,10 @@ export function scriptingErrors(value: unknown, validateModuleNames = true): str
           }
           if (!validateModuleNames) continue;
           try {
-            const name = scriptModuleName(file.fileName);
+            const name = scriptModuleName(file.fileName, apiVersion);
             if (names.has(name)) errors.push('Duplicate module name: ' + name);
             names.add(name);
+            if (file.fileName.endsWith('.json')) parseJsonResource(file.source);
           } catch (error) {
             errors.push(error instanceof Error ? error.message : String(error));
           }
@@ -71,7 +78,11 @@ export function scriptingErrors(value: unknown, validateModuleNames = true): str
       if (!record(entries)) errors.push('Layer ' + field + ' must be an object.');
       else
         for (const [property, entry] of Object.entries(entries)) {
-          if (!properties.has(property) || typeof entry !== type)
+          if (
+            !properties.has(property) ||
+            typeof entry !== type ||
+            (property === 'text' && (!record(layer.element) || layer.element.type !== 'text'))
+          )
             errors.push(
               'Layer ' +
                 field +
@@ -85,9 +96,19 @@ export function scriptingErrors(value: unknown, validateModuleNames = true): str
     }
   }
   for (const component of Array.isArray(value.components) ? value.components : [])
-    errors.push(...scriptingErrors(component, validateModuleNames));
+    errors.push(
+      ...scriptingErrors(
+        record(component) ? { ...component, expressionApiVersion: apiVersion } : component,
+        validateModuleNames,
+      ),
+    );
   for (const collection of Array.isArray(value.collections) ? value.collections : [])
     if (record(collection))
-      errors.push(...scriptingErrors({ layers: collection.prototypeLayers }, validateModuleNames));
+      errors.push(
+        ...scriptingErrors(
+          { expressionApiVersion: apiVersion, layers: collection.prototypeLayers },
+          validateModuleNames,
+        ),
+      );
   return errors;
 }

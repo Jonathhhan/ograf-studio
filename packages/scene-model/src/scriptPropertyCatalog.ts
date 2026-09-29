@@ -35,6 +35,7 @@ export const SCRIPT_ELEMENT_CATALOG: Record<
     fontSize: number,
     fontWeight: number,
     textAlign: choice('left', 'center', 'right'),
+    direction: choice('auto', 'ltr', 'rtl'),
     lineHeight: number,
     letterSpacing: number,
     textTransform: choice('none', 'uppercase', 'lowercase', 'capitalize'),
@@ -135,14 +136,15 @@ const sampling: Record<string, ScriptPropertyDefinition> = {
     type: 'function',
     readOnly: true,
     description:
-      'Local source bounds before expressions and composition-script writes, using current data.',
+      'Local source bounds at the requested time after text expressions and before composition-script writes.',
   },
 };
 
 export function scriptLayerPropertyCatalog(
   type: Element['type'],
   mode: 'expression' | 'composition',
-) {
+  _apiVersion = 1,
+): Record<string, ScriptPropertyDefinition> {
   const properties: Record<string, ScriptPropertyDefinition> = {};
   for (const [key, spec] of Object.entries(SCRIPT_TRANSFORM_CATALOG)) {
     if (mode === 'expression' && key.startsWith('transformOrigin')) continue;
@@ -159,8 +161,27 @@ export function scriptLayerPropertyCatalog(
       description: 'List available top-level properties.',
     };
   }
+  const vectors: Record<string, ScriptPropertyDefinition> = {};
+  Object.assign(vectors, {
+    position: {
+      type: 'array',
+      readOnly: mode === 'expression',
+      description: '[x, y] in pixels. Indices 0 and 1 alias x and y.',
+    },
+    size: {
+      type: 'array',
+      readOnly: mode === 'expression',
+      description: '[width, height] in pixels. Changes layout; this is not visual scaling.',
+    },
+    transformOrigin: {
+      type: 'array',
+      readOnly: mode === 'expression',
+      description: 'Normalized pivot in the layer bounds: [0, 1] for each axis.',
+    },
+  });
   return {
     ...properties,
+    ...vectors,
     id: { ...string, readOnly: true },
     name: { ...string, readOnly: true },
     ...sampling,

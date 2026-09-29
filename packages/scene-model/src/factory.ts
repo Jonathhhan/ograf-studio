@@ -75,6 +75,7 @@ export function createTextElement(overrides: Partial<TextElement> = {}): TextEle
     fontFamily: 'system-ui, sans-serif',
     fontWeight: 600,
     textAlign: 'left',
+    direction: 'auto',
     lineHeight: 1.2,
     letterSpacing: 0,
     textTransform: 'none',

@@ -208,6 +208,7 @@ interface ProjectActions {
         | 'updateTransitionFrames'
         | 'backgroundColor'
         | 'scripting'
+        | 'expressionApiVersion'
       >
     >,
   ) => void;
@@ -1934,7 +1935,9 @@ export const useProjectStore = create<ProjectStore>()(
               if (!Object.keys(layer.expressionsEnabled).length)
                 layer.expressionsEnabled = undefined;
             }
-            if (expressions) composition.expressionApiVersion ??= 1;
+            if (expressions) {
+              composition.expressionApiVersion = 1;
+            }
           }
         }),
 

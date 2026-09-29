@@ -10,6 +10,8 @@ import {
   expressionTimelineScope,
   type MaskRenderState,
   type ExpressionDiagnostic,
+  type LayerTransform,
+  type ScriptLayerVisuals,
 } from '@ograf-editor/scene-model';
 import type { CompiledGraphicDescriptor } from '@ograf-editor/ograf-types';
 
@@ -29,6 +31,17 @@ export function resolveFrameExpressions(
   const lastFrame = Math.max(0, ...descriptor.keyframes.map((key) => key.frame));
   const sampleFrame = (seconds: number) =>
     Math.max(0, Math.min(seconds * descriptor.frameRate, lastFrame));
+  const sampleExpressionScope = (seconds: number) => {
+    const sampledFrame = sampleFrame(seconds);
+    return {
+      frame: sampledFrame,
+      time: sampledFrame / descriptor.frameRate,
+      'comp.width': descriptor.width,
+      'comp.height': descriptor.height,
+      ...expressionDataScope(data),
+      ...expressionTimelineScope(descriptor.keyframes, sampledFrame),
+    };
+  };
   const transforms = resolveExpressionTransforms(
     descriptor.layers.flatMap((layer) => {
       const state = states.get(layer.id);
@@ -73,6 +86,24 @@ export function resolveFrameExpressions(
             isVisible: layer.isVisible,
             blendMode: layer.blendMode ?? 'normal',
           },
+          sampleScriptVisualsAtTime: (seconds: number) => {
+            const sampled = sampleCompiledLayerVisualState(
+              layer,
+              sampleFrame(seconds),
+              undefined,
+              data,
+            );
+            return {
+              element: sampleScriptElement(
+                resolveBoundElement(layer, data),
+                sampled.paintTracks,
+                sampled.paintFrame,
+              ),
+              effects: sampled.effects,
+              isVisible: layer.isVisible,
+              blendMode: layer.blendMode ?? 'normal',
+            };
+          },
           sampleTransform,
           sourceRectAtTime: (seconds: number, includeExtents: boolean) => {
             const at = sampleFrame(seconds);
@@ -98,6 +129,18 @@ export function resolveFrameExpressions(
             boundsCache.set(key, bounds);
             return bounds;
           },
+          sourceRectAtTimeWithVisuals: (
+            seconds: number,
+            includeExtents: boolean,
+            visuals: ScriptLayerVisuals,
+            transform?: LayerTransform,
+          ) =>
+            expressionSourceRect(
+              visuals.element,
+              transform ?? sampleTransform(seconds),
+              includeExtents,
+              measureExpressionText,
+            ),
           scope: {
             frame,
             time: frame / descriptor.frameRate,
@@ -125,6 +168,7 @@ export function resolveFrameExpressions(
     diagnostics,
     descriptor.expressionApiVersion,
     descriptor.scripting,
+    sampleExpressionScope,
   );
   return new Map(
     [...states].map(([id, state]) => [

@@ -1,12 +1,14 @@
 import { createScriptConsole } from './scriptConsole';
+import { parseFrozenJsonResource } from './jsonResources';
 import { transform } from 'sucrase';
 import type { CompositionScripting } from './types';
+import { SCRIPT_VECTOR_NAMES } from './scriptVectors';
 
 const factories = new Map<
   string,
   (exports: object, require: (path: string) => object, console: Console) => void
 >();
-const libraries = new WeakMap<CompositionScripting, Record<string, object>>();
+const libraries = new WeakMap<CompositionScripting, Map<number, Record<string, object>>>();
 const reservedNames = new Set([
   'data',
   'comp',
@@ -29,6 +31,11 @@ const reservedNames = new Set([
   'height',
   'rotation',
   'opacity',
+  'position',
+  'size',
+  'transformOrigin',
+  'json',
+  'text',
   'transformOriginX',
   'transformOriginY',
   'modules',
@@ -44,12 +51,14 @@ const reservedNames = new Set([
     'isFinite decodeURI decodeURIComponent encodeURI encodeURIComponent'
   ).split(' '),
 ]);
+for (const name of SCRIPT_VECTOR_NAMES) reservedNames.add(name);
 
 /** Flat project files use their basename as the expression namespace. */
-export function scriptModuleName(fileName: string): string {
-  if (!/^[A-Za-z_$][\w$]*\.(?:m?js)$/.test(fileName))
-    throw new Error('Use a JavaScript filename such as helpers.js (letters, digits, _ or $).');
-  const name = fileName.replace(/\.(?:m?js)$/, '');
+export function scriptModuleName(fileName: string, _apiVersion = 1): string {
+  const extension = '(?:m?js|json)';
+  if (!new RegExp(`^[A-Za-z_$][\\w$]*\\.${extension}$`).test(fileName))
+    throw new Error('Use a .js, .mjs or .json filename (letters, digits, _ or $).');
+  const name = fileName.replace(/\.(?:m?js|json)$/, '');
   if (reservedNames.has(name)) throw new Error('Reserved module name: ' + name);
   // Let the host reject reserved JavaScript words, rather than maintaining a keyword parser.
   new Function('"use strict"; const ' + name + ' = 0;');
@@ -83,17 +92,25 @@ export function scriptModuleSyntaxError(source: string): string | undefined {
 }
 
 /** Immutable project settings own library state; unrelated compositions never share exports. */
-export function scriptModules(settings?: CompositionScripting): Record<string, object> {
+export function scriptModules(
+  settings?: CompositionScripting,
+  apiVersion = 1,
+): Record<string, object> {
   if (!settings?.modules.length) return Object.create(null);
-  const cached = libraries.get(settings);
+  let byVersion = libraries.get(settings);
+  if (!byVersion) libraries.set(settings, (byVersion = new Map()));
+  const cached = byVersion.get(apiVersion);
   if (cached) return cached;
   const modules = Object.create(null) as Record<string, object>;
   const files = new Map<string, string>();
+  const names = new Set<string>();
   for (const file of settings.modules) {
-    const name = scriptModuleName(file.fileName);
-    if (Object.hasOwn(modules, name)) throw new Error('Duplicate module name: ' + name);
+    const name = scriptModuleName(file.fileName, apiVersion);
+    if (names.has(name)) throw new Error('Duplicate script resource name: ' + name);
+    names.add(name);
     files.set(file.fileName, file.source);
-    Object.defineProperty(modules, name, { enumerable: true, get: () => load(file.fileName) });
+    if (!file.fileName.endsWith('.json'))
+      Object.defineProperty(modules, name, { enumerable: true, get: () => load(file.fileName) });
   }
   const loaded = new Map<string, object>();
   const failures = new Map<string, Error>();
@@ -108,11 +125,16 @@ export function scriptModules(settings?: CompositionScripting): Record<string, o
       throw new Error('Module is not included in this composition: ' + fileName);
     loading.add(fileName);
     try {
+      if (fileName.endsWith('.json')) {
+        const resource = parseFrozenJsonResource(source);
+        loaded.set(fileName, resource);
+        return resource;
+      }
       const exports = Object.create(null);
       factory(source)(
         exports,
         (path) => {
-          if (!/^\.\/[A-Za-z_$][\w$]*\.(?:m?js)$/.test(path))
+          if (!/^\.\/[A-Za-z_$][\w$]*\.(?:m?js|json)$/.test(path))
             throw new Error('Import a bundled file with a relative path, such as ./helpers.js.');
           return load(path.slice(2));
         },
@@ -135,7 +157,15 @@ export function scriptModules(settings?: CompositionScripting): Record<string, o
       loading.delete(fileName);
     }
   };
+  Object.defineProperty(modules, 'json', {
+    enumerable: true,
+    value: (fileName: string) => {
+      if (typeof fileName !== 'string' || !fileName.endsWith('.json'))
+        throw new Error('json() expects an included .json filename.');
+      return load(fileName);
+    },
+  });
   Object.freeze(modules);
-  libraries.set(settings, modules);
+  byVersion.set(apiVersion, modules);
   return modules;
 }

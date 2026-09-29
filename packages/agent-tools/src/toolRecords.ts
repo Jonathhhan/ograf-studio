@@ -1725,6 +1725,7 @@ export function createOGrafToolRecords(
             fontFamily: { type: 'string', default: 'system-ui, sans-serif' },
             fontSize: { type: 'number', default: 48, exclusiveMinimum: 0 },
             fontWeight: { type: 'number', default: 600 },
+            direction: { type: 'enum', values: ['auto', 'ltr', 'rtl'], default: 'auto' },
             textAlign: {
               type: 'enum',
               values: ['left', 'center', 'right'],
