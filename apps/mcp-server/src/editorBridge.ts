@@ -151,7 +151,13 @@ export interface ProposalDecisionResult {
 
 type EditorInbound =
   | { type: 'editor.hello'; project: Project }
-  | { type: 'editor.project'; project: Project; reason?: string }
+  | {
+      type: 'editor.project';
+      project: Project;
+      reason?: string;
+      expectedRevision: number;
+      updateId?: string;
+    }
   | { type: 'heartbeat.result'; requestId: string }
   | { type: 'certification.result'; requestId: string; result: CompatibilityResult }
   | {
@@ -221,6 +227,32 @@ function isLocalRequest(request: IncomingMessage): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+function isTrustedEditorRequest(request: IncomingMessage): boolean {
+  if (!isLocalRequest(request)) return false;
+  const origin = request.headers.origin;
+  const host = request.headers.host;
+  if (!origin || !host) return false;
+  try {
+    const target = new URL('http://' + host);
+    const source = new URL(origin);
+    const serverPort = String(request.socket.localPort);
+    // Validate Host too: a browser may reach loopback through a DNS rebinding hostname.
+    return (
+      target.host === host &&
+      LOOPBACK_HOSTS.has(target.hostname) &&
+      (target.port || '80') === serverPort &&
+      source.origin === origin &&
+      source.protocol === 'http:' &&
+      LOOPBACK_HOSTS.has(source.hostname) &&
+      ((source.port || '80') === serverPort || source.port === '5173')
+    );
+  } catch {
+    return false;
+  }
+}
+
 export class EditorBridge {
   #socket: WebSocket | null = null;
   #pendingCertifications = new Map<string, PendingCertification>();
@@ -246,7 +278,7 @@ export class EditorBridge {
     const wss = new WebSocketServer({ noServer: true });
     server.on('upgrade', (request, socket, head) => {
       const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-      if (url.pathname !== '/editor' || !isLocalRequest(request)) {
+      if (url.pathname !== '/editor' || !isTrustedEditorRequest(request)) {
         socket.destroy();
         return;
       }
@@ -429,10 +461,25 @@ export class EditorBridge {
       return;
     }
     if (message.type === 'editor.project') {
+      const session = this.workspace.get('editor');
+      if (message.expectedRevision !== session.revision) {
+        const snapshot = session.snapshot();
+        this.#send({
+          type: 'editor.conflict',
+          revision: snapshot.revision,
+          project: snapshot.project,
+          updateId: message.updateId,
+        });
+        return;
+      }
       this.workspace.setEditorProject(message.project, message.reason ?? message.type);
       this.#editorBaselineInitialized = true;
       this.#editorSyncError = null;
-      this.#send({ type: 'editor.ack', revision: this.workspace.get('editor').revision });
+      this.#send({
+        type: 'editor.ack',
+        revision: this.workspace.get('editor').revision,
+        updateId: message.updateId,
+      });
       this.#editorReady = true;
       this.#requestHeartbeat();
       return;

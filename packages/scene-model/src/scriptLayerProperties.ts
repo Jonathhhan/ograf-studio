@@ -203,9 +203,15 @@ export function scriptLayerReference(
     includeExtents: boolean | undefined,
     visuals: ScriptLayerVisuals | undefined,
     applyVisualWrites: (sampledVisuals: ScriptLayerVisuals) => ScriptLayerVisuals,
+    applyTransformWrites: (sampledTransform: LayerTransform) => LayerTransform,
   ) => unknown,
 ): { reference: object; finish: () => ScriptLayerVisuals | undefined } {
   let draft: ScriptLayerVisuals | undefined;
+  const transformWrites: Partial<LayerTransform> = {};
+  const applyTransformWrites = (sampledTransform: LayerTransform): LayerTransform => ({
+    ...sampledTransform,
+    ...transformWrites,
+  });
   const visualWrites: Array<{ path: string[]; value: unknown }> = [];
   const recordWrite = (path: string[], value: unknown) => {
     visualWrites.push({ path, value: jsonCopy(value) });
@@ -287,6 +293,7 @@ export function scriptLayerReference(
     (property, value) => {
       assertActive();
       transform[property as keyof LayerTransform] = value;
+      transformWrites[property as keyof LayerTransform] = value;
     },
   );
   const define = (key: string, get: () => unknown, set?: (value: any) => void) =>
@@ -309,6 +316,7 @@ export function scriptLayerReference(
       (value) => {
         requireType(value, 'number', key);
         transform[key] = value;
+        transformWrites[key] = value;
       },
     );
   if (visuals) {
@@ -356,7 +364,13 @@ export function scriptLayerReference(
     Object.defineProperty(target, 'sourceRectAtTime', {
       value: (seconds?: number, includeExtents?: boolean) => {
         assertActive();
-        return measureSourceRect(seconds, includeExtents, draft ?? visuals, applyVisualWrites);
+        return measureSourceRect(
+          seconds,
+          includeExtents,
+          draft ?? visuals,
+          applyVisualWrites,
+          applyTransformWrites,
+        );
       },
     });
   }

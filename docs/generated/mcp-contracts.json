@@ -3361,8 +3361,8 @@
     },
     {
       "name": "ograf_save_project",
-      "title": "Save OGraf project and PNG",
-      "description": "Certify/save .ogs + thumbnail.",
+      "title": "Save editable OGraf project",
+      "description": "Save .ogs source; attempt an optional thumbnail. No export certification required.",
       "inputSchema": {
         "type": "object",
         "properties": {

@@ -25,6 +25,13 @@ import { selectableLayerIds } from '../state/selectAllLayers';
 import './Menubar.css';
 import { useDetachedWindows } from '../layout/detachedWindowContext';
 import { duplicateSelectedLayers } from '../state/editorShortcuts';
+import {
+  listAutosaveSnapshots,
+  saveAutosave,
+  useAutosaveStatus,
+  type AutosaveSnapshot,
+} from '../state/autosaveStorage';
+import { scriptsDisabledAtStartup, withoutProjectScripts } from '../state/safeStart';
 
 const historyTime = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString([], {
@@ -52,6 +59,9 @@ export function Menubar({
   const selectMany = useSelectionStore((s) => s.selectMany);
   const selectedLayerIds = useSelectionStore((s) => s.selectedLayerIds);
   const [status, setStatus] = useState('');
+  const autosave = useAutosaveStatus();
+  const [recoverySnapshots, setRecoverySnapshots] = useState<AutosaveSnapshot[]>([]);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [importReport, setImportReport] = useState<OgrafImportResult | null>(null);
   const [remoteDialogOpen, setRemoteDialogOpen] = useState(false);
@@ -132,7 +142,7 @@ export function Menubar({
     try {
       const opened = await openProjectFromFile();
       if (opened) {
-        loadProject(opened);
+        loadProject(scriptsDisabledAtStartup() ? withoutProjectScripts(opened) : opened);
         resetHistory();
         select(null);
         setStatus(`Opened "${opened.name}"`);
@@ -156,7 +166,9 @@ export function Menubar({
         setStatus('Import cancelled');
         return;
       }
-      loadProject(imported.project);
+      loadProject(
+        scriptsDisabledAtStartup() ? withoutProjectScripts(imported.project) : imported.project,
+      );
       resetHistory();
       select(null);
       setImportReport(imported);
@@ -187,7 +199,7 @@ export function Menubar({
         setStatus('Remote project open cancelled');
         return;
       }
-      loadProject(opened);
+      loadProject(scriptsDisabledAtStartup() ? withoutProjectScripts(opened) : opened);
       resetHistory();
       select(null);
       setRemoteDialogOpen(false);
@@ -216,9 +228,7 @@ export function Menubar({
               current.setProjectMeta({ thumbnailFrame: frame, name });
             setSaveDialogOpen(false);
             setStatus(
-              mode === 'saved'
-                ? 'Template + PNG saved (certified)'
-                : 'Template + PNG ZIP downloaded',
+              mode === 'saved' ? 'Editable project saved' : 'Editable project ZIP downloaded',
             );
           }}
         />
@@ -235,6 +245,68 @@ export function Menubar({
         <button type="button" onClick={handleOpen}>
           Open
         </button>
+        <div className="menubar-edit-control">
+          <button
+            type="button"
+            aria-expanded={recoveryOpen}
+            onClick={() => {
+              setRecoveryOpen(!recoveryOpen);
+              void listAutosaveSnapshots().then(setRecoverySnapshots);
+            }}
+          >
+            Recover
+          </button>
+          {recoveryOpen && (
+            <div className="menubar-edit-menu" aria-label="Recovery snapshots">
+              {!recoverySnapshots.length && <p>No recovery snapshots available.</p>}
+              {recoverySnapshots.map((snapshot) => (
+                <button
+                  type="button"
+                  key={snapshot.id}
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        'Restore this snapshot? The current project will be backed up first unless safe start is active.',
+                      )
+                    )
+                      return;
+                    void (async () => {
+                      try {
+                        if (!scriptsDisabledAtStartup()) {
+                          await saveAutosave(useProjectStore.getState().project);
+                          if (useAutosaveStatus.getState().state === 'error') {
+                            setStatus(
+                              'Recovery cancelled because the current project could not be backed up. Save Project first.',
+                            );
+                            return;
+                          }
+                        }
+                        loadProject(
+                          scriptsDisabledAtStartup()
+                            ? withoutProjectScripts(snapshot.project)
+                            : snapshot.project,
+                        );
+                        resetHistory();
+                        select(null);
+                        setRecoveryOpen(false);
+                        setStatus(`Recovered "${snapshot.project.name}"`);
+                      } catch (error) {
+                        setStatus(
+                          error instanceof Error ? error.message : 'Could not restore snapshot.',
+                        );
+                      }
+                    })();
+                  }}
+                >
+                  {snapshot.project.name} ·{' '}
+                  {snapshot.savedAt
+                    ? new Date(snapshot.savedAt).toLocaleString()
+                    : 'Legacy autosave'}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button type="button" onClick={() => setRemoteDialogOpen(true)}>
           Open URL
         </button>
@@ -248,7 +320,7 @@ export function Menubar({
         <button
           type="button"
           onClick={handleSave}
-          title="Save editable .ogs source with a transparent PNG thumbnail."
+          title="Save editable .ogs source, with an optional transparent PNG thumbnail."
         >
           Save Project
         </button>
@@ -384,6 +456,15 @@ export function Menubar({
         {agentActivity}
       </span>
       {status && <span className="menubar-status">{status}</span>}
+      {autosave.message && (
+        <span
+          className="menubar-status"
+          role={autosave.state === 'error' ? 'alert' : 'status'}
+          title={autosave.message}
+        >
+          {autosave.message}
+        </span>
+      )}
       {remoteDialogOpen && (
         <section
           className="ograf-import-report remote-project-dialog"

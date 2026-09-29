@@ -2299,7 +2299,8 @@ export function createOGrafToolRecords(
           dryRun: 'ograf_apply_operations mode=dry-run',
           visualDryRun: 'ograf_apply_operations mode=preview',
           humanReview: 'ograf_apply_operations mode=propose',
-          outputGate: 'Save/export requires exact-artifact browser OGraf certification.',
+          outputGate:
+            'Package export requires exact-artifact browser OGraf certification. Editable source saves do not require certification or a connected editor.',
           fileScope: workspace.root,
         },
         assets: {
@@ -3923,8 +3924,9 @@ export function createOGrafToolRecords(
   server.registerTool(
     'ograf_save_project',
     {
-      title: 'Save OGraf project and PNG',
-      description: 'Certify/save .ogs + thumbnail.',
+      title: 'Save editable OGraf project',
+      description:
+        'Save .ogs source; attempt an optional thumbnail. No export certification required.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         path: z.string(),
@@ -3940,50 +3942,50 @@ export function createOGrafToolRecords(
       const target = workspace.resolveAllowedPath(path);
       const snapshot = workspace.get(sessionId).snapshot();
       const project = snapshot.project;
-      const thumbnailPath = workspace.resolveAllowedPath(
-        join(dirname(target), templateThumbnailName(project)),
-      );
       if (thumbnailFrame !== undefined) {
         if (thumbnailFrame !== null && thumbnailFrame > getTotalFrames(mainComposition(project)))
           throw new Error('Thumbnail frame is beyond the end of the template.');
         project.thumbnailFrame = thumbnailFrame;
       }
       const frame = projectThumbnailFrame(project);
-      const artifacts = buildExportArtifactsWithRuntime(
-        project,
-        mainComposition(project),
-        await runtimeSource(),
-      );
-      const errors = [...artifacts.errors, ...validatePackageLayout(artifacts)];
-      if (errors.length) throw new Error(`OGraf certification failed:\n${errors.join('\n')}`);
-      const certification = await bridge.certify(artifacts);
-      if (!certification.valid)
-        throw new Error(`OGraf certification failed:\n${certification.errors.join('\n')}`);
-      const thumbnail = await bridge.capture({
-        target: 'composition',
-        project: thumbnailRenderProject(project),
-        compositionId: project.mainCompositionId,
-        frame,
-        maxDimension: THUMBNAIL_MAX_DIMENSION,
-        matte: 'transparent',
-      });
       await writeTemplateFiles(
-        [
-          { path: target, data: `${JSON.stringify(project, null, 2)}\n` },
-          { path: thumbnailPath, data: Buffer.from(thumbnail.data, 'base64') },
-        ],
+        [{ path: target, data: `${JSON.stringify(project, null, 2)}\n` }],
         overwrite,
       );
+      const warnings: string[] = [];
+      let thumbnailPath: string | undefined;
+      try {
+        const sidecar = workspace.resolveAllowedPath(
+          join(dirname(target), templateThumbnailName(project)),
+        );
+        const thumbnail = await bridge.capture({
+          target: 'composition',
+          project: thumbnailRenderProject(project),
+          compositionId: project.mainCompositionId,
+          frame,
+          maxDimension: THUMBNAIL_MAX_DIMENSION,
+          matte: 'transparent',
+        });
+        await writeTemplateFiles(
+          [{ path: sidecar, data: Buffer.from(thumbnail.data, 'base64') }],
+          overwrite,
+        );
+        thumbnailPath = sidecar;
+      } catch (error) {
+        warnings.push(
+          `Project source saved; optional thumbnail unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       return textResult(
         {
           sessionId,
           path: target,
-          thumbnailPath,
+          ...(thumbnailPath ? { thumbnailPath } : {}),
           thumbnailFrame: frame,
           revision: snapshot.revision,
-          certification,
+          warnings,
         },
-        `Certified and saved ${target} with ${thumbnailPath} (frame ${frame})`,
+        `Saved ${target}${thumbnailPath ? ` with ${thumbnailPath} (frame ${frame})` : '. Optional thumbnail unavailable.'}`,
       );
     },
   );

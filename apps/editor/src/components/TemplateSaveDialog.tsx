@@ -32,6 +32,8 @@ export function TemplateSaveDialog({
   const [error, setError] = useState('');
   const [rendering, setRendering] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [previewRequested, setPreviewRequested] = useState(Boolean(exportOptions));
+  const thumbnailRef = useRef<Blob | undefined>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const snapshot = useMemo(() => ({ ...project, thumbnailFrame: frame }), [project, frame]);
@@ -43,16 +45,22 @@ export function TemplateSaveDialog({
     inputRef.current?.focus();
   }, []);
   useEffect(() => {
+    if (!previewRequested) {
+      setRendering(false);
+      return;
+    }
     let active = true;
     let url: string | undefined;
     setRendering(true);
     setPreview('');
+    thumbnailRef.current = undefined;
     setError('');
     void import('../state/templateThumbnail')
       .then(({ createTemplateThumbnail }) => createTemplateThumbnail(snapshot))
       .then((blob) => {
         if (!active) return;
         url = URL.createObjectURL(blob);
+        thumbnailRef.current = blob;
         setPreview(url);
         setRendering(false);
       })
@@ -66,15 +74,19 @@ export function TemplateSaveDialog({
       active = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [snapshot]);
+  }, [snapshot, previewRequested]);
   const save = async (downloadOnly = false) => {
-    if (saving || rendering || !preview || !name.trim()) return;
+    if (saving || (exportOptions && (rendering || !preview)) || !name.trim()) return;
     setSaving(true);
     setError('');
     try {
       const result = exportOptions
         ? await exportOptions.save(snapshot)
-        : await saveProjectToFile(snapshot, { baseName, downloadOnly });
+        : await saveProjectToFile(snapshot, {
+            baseName,
+            downloadOnly,
+            thumbnail: thumbnailRef.current,
+          });
       if (result !== 'cancelled') onSaved(result, frame, exportOptions ? snapshot.name : baseName);
     } catch (cause) {
       setError(
@@ -118,6 +130,11 @@ export function TemplateSaveDialog({
         }}
       >
         <h2>{exportOptions ? 'Export OGraf' : 'Save template'}</h2>
+        {!exportOptions && !previewRequested && (
+          <button type="button" onClick={() => setPreviewRequested(true)}>
+            Generate optional thumbnail
+          </button>
+        )}
         {!exportOptions && (
           <label>
             File name
@@ -209,8 +226,8 @@ export function TemplateSaveDialog({
           {exportOptions
             ? 'Choose the thumbnail frame to include in the OGraf package.'
             : window.showDirectoryPicker
-              ? 'Choose a folder to save both files together.'
-              : 'Download a ZIP containing the editable template and its PNG thumbnail.'}
+              ? 'Save the editable source to a folder. A generated thumbnail is included when available.'
+              : 'Download the editable source as a ZIP, with a thumbnail when available.'}
         </p>
         {error ? (
           <div role="alert" className="template-save-error">
@@ -222,17 +239,13 @@ export function TemplateSaveDialog({
             Cancel
           </button>
           {!exportOptions && window.showDirectoryPicker ? (
-            <button
-              type="button"
-              disabled={saving || rendering || !preview || !name.trim()}
-              onClick={() => void save(true)}
-            >
+            <button type="button" disabled={saving || !name.trim()} onClick={() => void save(true)}>
               Download ZIP
             </button>
           ) : null}
           <button
             type="button"
-            disabled={saving || rendering || !preview || !name.trim()}
+            disabled={saving || Boolean(exportOptions && (rendering || !preview)) || !name.trim()}
             onClick={() => void save()}
           >
             {exportOptions

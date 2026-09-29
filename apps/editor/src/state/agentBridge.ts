@@ -3,6 +3,7 @@ export { useAgentReviewStore, type AgentAuthoringProposal } from './agentReviewS
 import { useEffect } from 'react';
 import type { AgentAreaReference } from '@ograf-editor/agent-tools/chat-references';
 import { resolveAgentBridgeUrl } from './agentBridgeUrl';
+import { EditorSync } from './editorSync';
 import { getTotalFrames, type Project } from '@ograf-editor/scene-model';
 import type { ExportArtifacts } from '@ograf-editor/codegen';
 import { create } from 'zustand';
@@ -36,6 +37,12 @@ export const useAgentBridgeStatus = create<AgentBridgeStatus>((set) => ({
   activity: 'Agent bridge offline',
   setStatus: (patch) => set(patch),
 }));
+
+export const useEditorSyncConflict = create<{ active: boolean }>(() => ({ active: false }));
+let resolveSyncConflict: ((choice: 'local' | 'remote') => void) | null = null;
+export function resolveEditorSyncConflict(choice: 'local' | 'remote') {
+  resolveSyncConflict?.(choice);
+}
 
 export interface ChatUsage {
   input: number;
@@ -325,7 +332,8 @@ export function finishAgentChatTurn(
 }
 
 type BridgeMessage =
-  | { type: 'editor.ack'; revision: number }
+  | { type: 'editor.ack'; revision: number; updateId?: string }
+  | { type: 'editor.conflict'; revision: number; project: Project }
   | { type: 'editor.error'; message: string }
   | { type: 'heartbeat.request'; requestId: string }
   | {
@@ -385,12 +393,25 @@ const BRIDGE_URL = resolveAgentBridgeUrl(
 /** Keeps the live browser document and the local MCP authoring session synchronized. */
 export function useAgentBridge(): void {
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('scripts') === 'off') {
+      useAgentBridgeStatus.setState({
+        connected: false,
+        activity: 'Agent bridge paused for safe recovery',
+      });
+      return;
+    }
     let socket: WebSocket | null = null;
     let reconnectTimer: number | undefined;
     let syncTimer: number | undefined;
     let stopped = false;
     let applyingRemote = false;
     let replaced = false;
+    const sync = new EditorSync(useProjectStore.getState().project);
+    const flushLocal = () => {
+      if (socket?.readyState !== WebSocket.OPEN || replaced) return;
+      const update = sync.nextUpdate(crypto.randomUUID());
+      if (update) send(update);
+    };
     // Certification, raster capture, frame strips, and text measurement all exercise the same
     // browser renderer/font resources. Serialize them so a heavy strip cannot overlap a save gate
     // or leave shared renderer state half-disposed for the next request.
@@ -411,11 +432,37 @@ export function useAgentBridge(): void {
     const send = (payload: unknown) => {
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
     };
+    const applySyncedProject = (message: import('./editorSync').RemoteProject) => {
+      applyingRemote = true;
+      try {
+        applyRemoteProjectUpdate(message.project, message);
+      } finally {
+        applyingRemote = false;
+      }
+    };
+    const publishConflict = () => {
+      useEditorSyncConflict.setState({ active: sync.conflict !== null });
+      if (sync.conflict)
+        status({
+          authoritative: false,
+          activity: 'Sync conflict: local edits preserved. Choose which version to continue with.',
+        });
+    };
+    const resolveConflict = (choice: 'local' | 'remote') => {
+      if (!sync.conflict) return;
+      const remote = sync.resolve(choice);
+      if (remote) applySyncedProject(remote);
+      publishConflict();
+      status({ authoritative: true, revision: sync.revision, activity: 'Sync conflict resolved' });
+      flushLocal();
+    };
+    resolveSyncConflict = resolveConflict;
     sendProposalDecision = send;
     sendChatPayload = send;
 
     const unsubscribe = useProjectStore.subscribe((state, previous) => {
       if (state.project === previous.project || applyingRemote) return;
+      sync.changed(state.project);
       useAgentReviewStore
         .getState()
         .invalidate('The template changed. Ask the assistant to regenerate this proposal.');
@@ -425,11 +472,7 @@ export function useAgentBridge(): void {
       window.clearTimeout(syncTimer);
       syncTimer = window.setTimeout(() => {
         syncTimer = undefined;
-        send({
-          type: 'editor.project',
-          project: useProjectStore.getState().project,
-          reason: 'UI edit',
-        });
+        flushLocal();
       }, 150);
     });
 
@@ -442,6 +485,7 @@ export function useAgentBridge(): void {
           return;
         }
         status({ connected: true, authoritative: true, activity: 'Agent connected' });
+        sync.beginConnection();
         send({ type: 'editor.hello', project: useProjectStore.getState().project });
       });
       socket.addEventListener('message', async (event) => {
@@ -452,6 +496,9 @@ export function useAgentBridge(): void {
           return;
         }
         if (message.type === 'editor.ack') {
+          sync.acknowledge(message.revision, message.updateId);
+          if (sync.revision !== message.revision) return;
+          flushLocal();
           useAgentReviewStore
             .getState()
             .invalidate(
@@ -467,7 +514,17 @@ export function useAgentBridge(): void {
           });
           return;
         }
+        if (message.type === 'editor.conflict') {
+          sync.receive({
+            ...message,
+            source: 'system',
+            reason: 'Concurrent editor and server changes',
+          });
+          publishConflict();
+          return;
+        }
         if (message.type === 'editor.error') {
+          sync.rejected();
           status({ activity: message.message });
           return;
         }
@@ -557,12 +614,10 @@ export function useAgentBridge(): void {
               'The template changed. Ask the assistant to regenerate this proposal.',
               message.revision,
             );
-          applyingRemote = true;
-          try {
-            applyRemoteProjectUpdate(message.project, message);
-          } finally {
-            applyingRemote = false;
-          }
+          const accepted = sync.receive(message);
+          publishConflict();
+          if (!accepted) return;
+          applySyncedProject(message);
           const count = message.summary?.operationCount;
           const detail = message.reason || message.summary?.operationTypes?.join(', ');
           const sourceLabel =
@@ -581,6 +636,8 @@ export function useAgentBridge(): void {
         }
         if (message.type === 'proposal.present') {
           const stale =
+            sync.dirty ||
+            sync.conflict !== null ||
             syncTimer !== undefined ||
             message.proposal.baseRevision !== useAgentBridgeStatus.getState().revision;
           useTimelineStore.getState().controller?.pause();
@@ -747,6 +804,8 @@ export function useAgentBridge(): void {
       if (sendProposalDecision === send) sendProposalDecision = null;
       if (sendChatPayload === send) sendChatPayload = null;
       if (proposalCapture === queuedProposalCapture) proposalCapture = directProposalCapture;
+      if (resolveSyncConflict === resolveConflict) resolveSyncConflict = null;
+      useEditorSyncConflict.setState({ active: false });
       socket?.close();
     };
   }, []);

@@ -445,13 +445,19 @@ export function resolveExpressionTransforms(
             ),
           sourceRectAtTime: sourceRectMethod(() => sample, currentTime),
         },
-        (seconds, includeExtents, visuals, applyVisualWrites) => {
+        (seconds, includeExtents, visuals, applyVisualWrites, applyTransformWrites) => {
           const at = seconds ?? currentTime;
           const extents = includeExtents ?? false;
           if (typeof at !== 'number' || !Number.isFinite(at))
             throw new Error('Sample time must be finite seconds.');
           if (typeof extents !== 'boolean') throw new Error('includeExtents must be a boolean.');
           const currentVisuals = styledVisuals.get(layer.id) ?? layer.scriptVisuals;
+          const pose =
+            at === currentTime
+              ? transform
+              : applyTransformWrites(
+                  layer.sampleTransform ? sample.transformAtTime!(at) : layer.transform,
+                );
           if (at !== currentTime && layer.sourceRectAtTimeWithVisuals) {
             const sampled = sampledVisuals(layer, at);
             if (sampled)
@@ -459,15 +465,9 @@ export function resolveExpressionTransforms(
                 at,
                 extents,
                 applyVisualWrites ? applyVisualWrites(sampled) : sampled,
-                layer.sampleTransform ? sample.transformAtTime?.(at) : undefined,
+                pose,
               );
           }
-          const pose =
-            at === currentTime
-              ? transform
-              : layer.sampleTransform
-                ? sample.transformAtTime?.(at)
-                : undefined;
           if (visuals && layer.sourceRectAtTimeWithVisuals)
             return layer.sourceRectAtTimeWithVisuals(at, extents, visuals, pose);
           if (currentVisuals && layer.sourceRectAtTimeWithVisuals)

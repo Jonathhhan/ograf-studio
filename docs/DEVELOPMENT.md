@@ -41,6 +41,17 @@ Endpoints:
 - Editor bridge: `ws://127.0.0.1:4318/editor`
 - Health: `http://127.0.0.1:4318/health`
 
+Editor WebSocket upgrades require a loopback `Host` and an HTTP `Origin` on `localhost`,
+`127.0.0.1`, or `[::1]`. The Origin port must match the MCP listener (standalone editor)
+or be `5173` (Vite development editor). Missing, null, and foreign Origins are rejected;
+the browser supplies this header automatically. Node WebSocket clients must provide it:
+
+```js
+const socket = new WebSocket('ws://127.0.0.1:4318/editor', {
+  origin: 'http://127.0.0.1:4318',
+});
+```
+
 To start the editor and MCP server together as hidden background processes, run:
 
 ```powershell

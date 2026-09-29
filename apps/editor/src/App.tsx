@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect } from 'react';
 import { AppShell } from './layout/AppShell';
 import { useAutosave } from './state/useAutosave';
 import { useAgentBridge } from './state/agentBridge';
+import { EditorSyncConflict } from './components/EditorSyncConflict';
 
 function App() {
   useAutosave();
@@ -13,7 +14,12 @@ function App() {
 
   useAgentBridge();
 
-  return <AppShell />;
+  return (
+    <>
+      <AppShell />
+      <EditorSyncConflict />
+    </>
+  );
 }
 
 export default App;

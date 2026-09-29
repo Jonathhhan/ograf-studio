@@ -4,10 +4,8 @@ import {
   templateThumbnailName,
   type Project,
 } from '@ograf-editor/scene-model';
-import { certifyProject } from './ografCompatibility';
 import JSZip from 'jszip';
-
-const AUTOSAVE_KEY = 'ograf-editor:autosave-project';
+export { saveAutosave, loadAutosave, clearAutosave } from './autosaveStorage';
 const OPEN_FILE_TYPES: FilePickerAcceptType[] = [
   {
     description: 'OGS project files',
@@ -27,31 +25,6 @@ export const MAX_REMOTE_PROJECT_BYTES = 32 * 1024 * 1024;
 
 export type ProjectFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-export function saveAutosave(project: Project): void {
-  try {
-    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(project));
-  } catch {
-    // Autosave is a convenience, not the source of truth — ignore quota/availability errors.
-  }
-}
-
-export function loadAutosave(): Project | null {
-  try {
-    const raw = localStorage.getItem(AUTOSAVE_KEY);
-    return raw ? (JSON.parse(raw) as Project) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function clearAutosave(): void {
-  try {
-    localStorage.removeItem(AUTOSAVE_KEY);
-  } catch {
-    // ignore
-  }
-}
-
 function downloadBlob(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -66,12 +39,12 @@ function isAbort(err: unknown): boolean {
 }
 
 /**
- * Saves an editable project snapshot only after that exact snapshot passes the same OGraf
- * compatibility gate used by package export. This source file is not itself a playout manifest.
+ * Save editable work independently of export validation. Thumbnail rendering is optional;
+ * the source is committed first so rendering or PNG I/O cannot prevent saving the project.
  */
 export async function saveProjectToFile(
   project: Project,
-  options: { baseName?: string; downloadOnly?: boolean } = {},
+  options: { baseName?: string; downloadOnly?: boolean; thumbnail?: Blob } = {},
 ): Promise<'saved' | 'cancelled' | 'downloaded'> {
   const snapshot = JSON.parse(JSON.stringify(project)) as Project;
   const baseName = templateBaseName(options.baseName ?? snapshot.name);
@@ -85,18 +58,11 @@ export async function saveProjectToFile(
       throw error;
     }
   }
-  const { createTemplateThumbnail } = await import('./templateThumbnail');
-  const thumbnail = await createTemplateThumbnail(snapshot);
-  const compatibility = await certifyProject(snapshot);
-  if (!compatibility.valid) {
-    throw new Error(`Save blocked by OGraf compatibility gate: ${compatibility.errors.join(' ')}`);
-  }
   const files = [
     {
       name: `${baseName}${PROJECT_SOURCE_EXTENSION}`,
       data: new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }),
     },
-    { name: templateThumbnailName(snapshot), data: thumbnail },
   ];
   if (directory) {
     const existing: string[] = [];
@@ -122,11 +88,40 @@ export async function saveProjectToFile(
     } catch (error) {
       await Promise.allSettled(streams.map((stream) => stream.abort()));
       throw new Error(
-        `Could not finish saving both template files. Check the selected folder. ${error instanceof Error ? error.message : ''}`,
+        `Could not save the project source. Check the selected folder. ${error instanceof Error ? error.message : ''}`,
       );
+    }
+    // Never roll back or report failure for the already-saved source because of its preview.
+    try {
+      const thumbnail = options.thumbnail;
+      if (!thumbnail) return 'saved';
+      const thumbnailName = templateThumbnailName(snapshot);
+      let exists = false;
+      try {
+        await directory.getFileHandle(thumbnailName);
+        exists = true;
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error;
+      }
+      if (!exists || window.confirm(`Replace the existing thumbnail?\n${thumbnailName}`)) {
+        const stream = await (
+          await directory.getFileHandle(thumbnailName, { create: true })
+        ).createWritable();
+        try {
+          await stream.write(thumbnail);
+          await stream.close();
+        } catch (error) {
+          await stream.abort().catch(() => {});
+          throw error;
+        }
+      }
+    } catch {
+      // Thumbnails are best effort; source saving has succeeded.
     }
     return 'saved';
   }
+  if (options.thumbnail)
+    files.push({ name: templateThumbnailName(snapshot), data: options.thumbnail });
   const zip = new JSZip();
   for (const file of files) zip.file(file.name, await file.data.arrayBuffer());
   downloadBlob(

@@ -1,6 +1,6 @@
 import type { Composition, Layer, Project } from '@ograf-editor/scene-model';
+import { documentEqual as same } from './documentEqual';
 
-const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 const quoted = (value: string) => `“${value}”`;
 
 function describeLayerChange(before: Layer, after: Layer): string {

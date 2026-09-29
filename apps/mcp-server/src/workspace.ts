@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { lstatSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AuthoringSession } from '@ograf-editor/authoring-core';
 import {
@@ -73,10 +74,35 @@ export class AuthoringWorkspace {
     const rel = relative(this.root, target);
     if (rel === '' || rel === '.')
       throw new Error('The workspace root itself is not a file target.');
-    if (rel.startsWith('..') || isAbsolute(rel)) {
+    if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) {
       throw new Error(`Path must remain inside the configured workspace root: ${this.root}`);
     }
-    return target;
+    // Resolve the closest existing ancestor for new write targets as well as existing reads.
+    // lstat deliberately distinguishes a missing path from a dangling symbolic link.
+    let ancestor = target;
+    for (;;) {
+      try {
+        lstatSync(ancestor);
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        const parent = dirname(ancestor);
+        if (parent === ancestor) throw error;
+        ancestor = parent;
+      }
+    }
+    const physicalRoot = realpathSync(this.root);
+    const physicalTarget = resolve(realpathSync(ancestor), relative(ancestor, target));
+    const physicalRelative = relative(physicalRoot, physicalTarget);
+    if (
+      !physicalRelative ||
+      physicalRelative === '..' ||
+      physicalRelative.startsWith('..' + sep) ||
+      isAbsolute(physicalRelative)
+    ) {
+      throw new Error(`Path must remain inside the configured workspace root: ${this.root}`);
+    }
+    return physicalTarget;
   }
 
   async open(sessionId: string, inputPath: string): Promise<AuthoringSession> {

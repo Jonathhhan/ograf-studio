@@ -9,6 +9,68 @@ import {
 import { AuthoringSession, RevisionConflictError } from './session';
 
 describe('AuthoringSession', () => {
+  it('bounds combined undo/redo depth across apply, reset and divergent edits', () => {
+    const session = new AuthoringSession(createProject(), 'bounded', { maxEntries: 2 });
+    const rename = (name: string) =>
+      session.apply({
+        expectedRevision: session.revision,
+        operations: [{ type: 'set_project_metadata', name }],
+      });
+    rename('one');
+    rename('two');
+    const reset = session.snapshot().project;
+    reset.name = 'three';
+    session.reset(reset, session.revision);
+    expect(session.undo(session.revision).project.name).toBe('two');
+    expect(session.undo(session.revision).project.name).toBe('one');
+    expect(() => session.undo(session.revision)).toThrow('Nothing to undo');
+    expect(session.redo(session.revision).project.name).toBe('two');
+    expect(session.redo(session.revision).project.name).toBe('three');
+    session.undo(session.revision);
+    rename('four');
+    expect(() => session.redo(session.revision)).toThrow('Nothing to redo');
+    expect(session.undo(session.revision).project.name).toBe('two');
+    expect(session.undo(session.revision).project.name).toBe('one');
+    expect(() => session.undo(session.revision)).toThrow('Nothing to undo');
+  });
+
+  it('evicts snapshots by estimated bytes before reaching the count limit', () => {
+    const project = createProject();
+    project.name = 'a'.repeat(12000);
+    const session = new AuthoringSession(project, 'byte-budget', {
+      maxEntries: 100,
+      maxBytes: 40000,
+    });
+    for (const letter of ['b', 'c', 'd'])
+      session.apply({
+        expectedRevision: session.revision,
+        operations: [{ type: 'set_project_metadata', name: letter.repeat(12000) }],
+      });
+    expect(session.undo(session.revision).project.name).toBe('c'.repeat(12000));
+    expect(() => session.undo(session.revision)).toThrow('Nothing to undo');
+    expect(session.redo(session.revision).project.name).toBe('d'.repeat(12000));
+    expect(() => session.redo(session.revision)).toThrow('Nothing to redo');
+  });
+
+  it('treats oversized snapshots as history barriers and bounds redo too', () => {
+    const session = new AuthoringSession(createProject(), 'oversized', { maxBytes: 40000 });
+    const rename = (name: string) =>
+      session.apply({
+        expectedRevision: session.revision,
+        operations: [{ type: 'set_project_metadata', name }],
+      });
+    rename('small');
+    rename('x'.repeat(50000));
+    expect(session.undo(session.revision).project.name).toBe('small');
+    expect(() => session.redo(session.revision)).toThrow('Nothing to redo');
+    rename('x'.repeat(50000));
+    const result = rename('small again');
+    expect(result.undoToken).toBeUndefined();
+    expect(() => session.undo(session.revision)).toThrow('Nothing to undo');
+    rename('latest');
+    expect(session.undo(session.revision).project.name).toBe('small again');
+  });
+
   it('persists thumbnail frame preferences through metadata edits and undo', () => {
     const session = new AuthoringSession(createProject(), 'thumbnail');
     expect(

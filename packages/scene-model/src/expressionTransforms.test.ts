@@ -123,6 +123,52 @@ layer('Smiley').x = bounds.width;`,
     expect(result.get('Smiley')).toMatchObject({ x: 100 });
   });
 
+  it.each(['title.width = 350;', 'title.size[0] = 350;', 'title.size = [350, 60];'])(
+    'applies earlier box writes when measuring historical text: %s',
+    (write) => {
+      const authored = createTextLayer();
+      const text = layer('Text');
+      text.transform.width = 350;
+      text.scriptVisuals = {
+        element: authored.element,
+        effects: authored.effects,
+        isVisible: true,
+        blendMode: 'normal',
+      };
+      const sampled = { ...text.transform, width: 100, height: 40 };
+      text.sampleTransform = () => sampled;
+      text.sampleScriptVisualsAtTime = () => text.scriptVisuals!;
+      text.sourceRectAtTimeWithVisuals = (_seconds, _extents, _visuals, pose) => ({
+        left: 0,
+        top: 0,
+        width: pose!.width,
+        height: pose!.height,
+      });
+      const diagnostics: ExpressionDiagnostic[] = [];
+      const result = resolveExpressionTransforms(
+        [text, layer('Follower')],
+        { time: 1 },
+        diagnostics,
+        1,
+        {
+          enabled: true,
+          modules: [],
+          source: `const title = layer('Text');
+          if (title.sourceRectAtTime(0).width !== 100) throw Error('unsampled width');
+          ${write}
+          layer('Follower').x = title.sourceRectAtTime(0).width;
+          layer('Follower').y = title.sourceRectAtTime(0).height;`,
+        },
+      );
+      expect(diagnostics).toEqual([]);
+      expect(result.get('Follower')).toMatchObject({
+        x: 350,
+        y: write.includes('[350, 60]') ? 60 : 40,
+      });
+      expect(sampled).toMatchObject({ width: 100, height: 40 });
+    },
+  );
+
   it('does not apply text expressions twice to sampled source bounds', () => {
     const authoredText = createTextLayer();
     const text = layer('Text', { text: "text.content + '!'" });

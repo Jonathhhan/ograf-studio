@@ -28,9 +28,15 @@ interface HistoryEntry {
   token: string;
   project: Project;
   summary?: AuthoringChangeSummary;
+  estimatedBytes: number;
 }
 
 const CHANGE_HISTORY_LIMIT = 100;
+export interface AuthoringHistoryLimits {
+  maxEntries?: number;
+  /** Estimated UTF-16 serialized payload bytes, shared by undo and redo snapshots. */
+  maxBytes?: number;
+}
 
 function changedLayerIds(previous: Project, next: Project): string[] {
   const previousLayers = new Map(
@@ -56,10 +62,43 @@ export class AuthoringSession {
   #redo: HistoryEntry[] = [];
   #listeners = new Set<(change: AuthoringSessionChange) => void>();
   #changes: AuthoringChangeRecord[] = [];
+  #historyLimits: Required<AuthoringHistoryLimits>;
 
-  constructor(project: Project, id = createId('session')) {
+  constructor(
+    project: Project,
+    id = createId('session'),
+    historyLimits: AuthoringHistoryLimits = {},
+  ) {
+    this.#historyLimits = {
+      maxEntries: historyLimits.maxEntries ?? 100,
+      maxBytes: historyLimits.maxBytes ?? 64 * 1024 * 1024,
+    };
+    for (const limit of Object.values(this.#historyLimits))
+      if (!Number.isSafeInteger(limit) || limit < 0)
+        throw new Error('History limits must be non-negative safe integers.');
     this.id = id;
     this.#project = migrateProject(clone(project));
+  }
+
+  #pushHistory(stack: HistoryEntry[], entry: Omit<HistoryEntry, 'estimatedBytes'>): boolean {
+    // Estimate before cloning so an oversized project never becomes a retained snapshot.
+    const estimatedBytes = JSON.stringify(entry).length * 2;
+    if (this.#historyLimits.maxEntries === 0 || estimatedBytes > this.#historyLimits.maxBytes) {
+      // A missing intermediate snapshot is a history barrier: do not skip it on undo/redo.
+      stack.length = 0;
+      return false;
+    }
+    stack.push({ ...clone(entry), estimatedBytes });
+    const other = stack === this.#undo ? this.#redo : this.#undo;
+    const bytes = () => [...stack, ...other].reduce((sum, item) => sum + item.estimatedBytes, 0);
+    while (
+      stack.length + other.length > this.#historyLimits.maxEntries ||
+      bytes() > this.#historyLimits.maxBytes
+    ) {
+      // Discard the most distant states, retaining the newly recorded transition.
+      (other.length ? other : stack).shift();
+    }
+    return true;
   }
 
   get revision(): number {
@@ -178,8 +217,12 @@ export class AuthoringSession {
       repeaters: [],
     };
     const undoToken = createId('undo');
-    this.#undo.push({ token: undoToken, project: clone(this.#project), summary });
     this.#redo = [];
+    const retainedUndo = this.#pushHistory(this.#undo, {
+      token: undoToken,
+      project: this.#project,
+      summary,
+    });
     this.#project = next;
     this.#revision++;
     const validation = validateProject(this.#project);
@@ -196,7 +239,7 @@ export class AuthoringSession {
       revision: this.#revision,
       previousRevision,
       dryRun: false,
-      undoToken,
+      ...(retainedUndo ? { undoToken } : {}),
       summary,
       validation,
       project: clone(this.#project),
@@ -222,8 +265,12 @@ export class AuthoringSession {
       };
     }
     const undoToken = createId('undo');
-    this.#undo.push({ token: undoToken, project: clone(this.#project), summary });
     this.#redo = [];
+    const retainedUndo = this.#pushHistory(this.#undo, {
+      token: undoToken,
+      project: this.#project,
+      summary,
+    });
     this.#project = project;
     this.#revision++;
     this.#emit({
@@ -239,7 +286,7 @@ export class AuthoringSession {
       revision: this.#revision,
       previousRevision,
       dryRun: false,
-      undoToken,
+      ...(retainedUndo ? { undoToken } : {}),
       summary,
       validation,
       project: clone(this.#project),
@@ -252,9 +299,9 @@ export class AuthoringSession {
     }
     const previous = this.#undo.pop();
     if (!previous) throw new Error('Nothing to undo.');
-    this.#redo.push({
+    this.#pushHistory(this.#redo, {
       token: previous.token,
-      project: clone(this.#project),
+      project: this.#project,
       ...(previous.summary ? { summary: previous.summary } : {}),
     });
     this.#project = previous.project;
@@ -275,9 +322,9 @@ export class AuthoringSession {
     }
     const next = this.#redo.pop();
     if (!next) throw new Error('Nothing to redo.');
-    this.#undo.push({
+    this.#pushHistory(this.#undo, {
       token: next.token,
-      project: clone(this.#project),
+      project: this.#project,
       ...(next.summary ? { summary: next.summary } : {}),
     });
     this.#project = next.project;

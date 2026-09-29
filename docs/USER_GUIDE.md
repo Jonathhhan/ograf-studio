@@ -24,7 +24,10 @@ browser downloads, picker saves, reference templates, and MCP saves use `.ogs` e
 
 ### Template thumbnails
 
-**Save Project** includes a thumbnail preview and frame selector. By default it uses the first
+**Save Project** always saves editable source, including unfinished scripts and projects that do
+not yet pass export validation. Source saving does not execute project scripts. Click **Generate
+optional thumbnail** to render a preview; source saving still works without a preview or if PNG
+generation fails. The frame selector defaults to the first
 OGraf step of the main composition, or frame 0 when there are no steps. Enter another frame to
 override it, or use the previous/next-frame buttons; the choice is stored in the `.ogs` file.
 The preview keeps a fixed size while changing frames.
@@ -36,13 +39,30 @@ and keeps the composition's proportions at up to 320 pixels on its longest edge 
 Authored background
 layers remain visible.
 
-**Download ZIP** packages the same two files together. Browsers without folder access use this
+**Download ZIP** packages the source and any generated thumbnail together. Browsers without folder access use this
 option automatically; extract the archive before opening the `.ogs` source.
 
 **Export .ograf.zip** opens a thumbnail preview and frame selector before exporting. Enter a frame,
 use previous/next-frame buttons, or select **First OGraf step**. A successful export remembers the
 choice for the template; cancelling leaves it unchanged. The ZIP includes `<id>_thumb.png` and
 references it in the OGraf manifest's `thumbnails` list.
+
+### Autosave and recovery
+
+Edits are saved after a short pause. The menu bar reports autosave failures, including full or
+unavailable browser storage. Use **Save Project** for a separate file backup if an error appears.
+Studio keeps the ten most recent recovery snapshots in IndexedDB, with browser local storage as
+a fallback. **Recover** lists these snapshots by project and time; restoring one first backs up
+the current project. Startup restores the latest saved snapshot and still recognizes autosaves
+from earlier Studio versions. Recovery history is local to this browser and origin; browser data
+clearing removes it. The retention limit is shared across projects.
+
+If a project script prevents startup, add `?scripts=off` to the Studio URL (or `&scripts=off` if
+it already has query parameters). This opens a recovery copy with composition scripts and layer
+expressions disabled, while preserving their source for editing. Automatic saving is paused in
+this mode so the original recovery snapshots remain unchanged. Use **Save Project** to keep the
+repaired copy, then remove the query option to return to normal startup. Explicitly generating a
+thumbnail is optional; leave scripts disabled while diagnosing a loop.
 
 ### Remote project URLs
 

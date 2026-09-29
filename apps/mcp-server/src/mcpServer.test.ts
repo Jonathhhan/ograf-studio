@@ -1139,7 +1139,9 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(amount); }`,
 
   it('adds a capture URL to apply review and never fails the mutation when capture fails', async () => {
     const port = (host.httpServer.address() as AddressInfo).port;
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`, {
+      origin: `http://127.0.0.1:${port}`,
+    });
     testEditorSocket = socket;
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve);
@@ -2717,7 +2719,9 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(amount); }`,
 
   it('distinguishes an open but unresponsive editor and returns actionable timeout details', async () => {
     const port = (host.httpServer.address() as AddressInfo).port;
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`, {
+      origin: `http://127.0.0.1:${port}`,
+    });
     testEditorSocket = socket;
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve);
@@ -2758,7 +2762,9 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(amount); }`,
 
   it('keeps editor hello revision-neutral and surfaces divergent tab state as a conflict', async () => {
     const port = (host.httpServer.address() as AddressInfo).port;
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`, {
+      origin: `http://127.0.0.1:${port}`,
+    });
     testEditorSocket = socket;
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve);
@@ -2793,7 +2799,9 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(amount); }`,
 
   it('rejects malformed gradient edits without crashing or discarding the last valid project', async () => {
     const port = (host.httpServer.address() as AddressInfo).port;
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`, {
+      origin: `http://127.0.0.1:${port}`,
+    });
     testEditorSocket = socket;
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve);
@@ -2825,12 +2833,24 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(amount); }`,
     broken.animationTracks['fill.stops[1].offset'] = [createLayerPropertyKeyframe(0, 0.5)];
     invalid.compositions[0]!.layers.push(broken);
     reply = message('editor.error');
-    socket.send(JSON.stringify({ type: 'editor.project', project: invalid }));
+    socket.send(
+      JSON.stringify({
+        type: 'editor.project',
+        project: invalid,
+        expectedRevision: before.revision,
+      }),
+    );
     expect((await reply).message).toContain('gradient stop');
     expect(host.workspace.get('editor').snapshot()).toEqual(before);
     expect(host.bridge.health.certificationReady).toBe(false);
     reply = message('editor.ack');
-    socket.send(JSON.stringify({ type: 'editor.project', project: before.project }));
+    socket.send(
+      JSON.stringify({
+        type: 'editor.project',
+        project: before.project,
+        expectedRevision: before.revision,
+      }),
+    );
     await reply;
     expect(socket.readyState).toBe(WebSocket.OPEN);
     expect(host.workspace.get('editor').snapshot()).toEqual(before);
@@ -2877,23 +2897,24 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(amount); }`,
     expect(JSON.stringify(result.content)).toContain('Project path must end in .ogs');
   });
 
-  it('keeps certified save and export closed when the editor is disconnected', async () => {
-    for (const [name, path] of [
-      ['ograf_save_project', 'fixtures/disconnected-gate.ogs'],
-      ['ograf_export_package', 'fixtures/disconnected-gate.ograf.zip'],
-    ] as const) {
-      const result = await client.callTool({
-        name,
-        arguments: { sessionId: 'editor', path, confirm: true },
-      });
-      expect(result.isError).toBe(true);
-      expect(JSON.stringify(result.content)).toContain('requires OGraf Studio to be open');
-    }
+  it('keeps certified export closed when the editor is disconnected', async () => {
+    const result = await client.callTool({
+      name: 'ograf_export_package',
+      arguments: {
+        sessionId: 'editor',
+        path: 'fixtures/disconnected-gate.ograf.zip',
+        confirm: true,
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('requires OGraf Studio to be open');
   });
 
   it('reports certification readiness and certifies twice in one editor page session', async () => {
     const port = (host.httpServer.address() as AddressInfo).port;
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`, {
+      origin: `http://127.0.0.1:${port}`,
+    });
     testEditorSocket = socket;
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve);
@@ -2940,7 +2961,9 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(amount); }`,
 
   it('returns a short-lived PNG URL and optional inline image without mutating revision', async () => {
     const port = (host.httpServer.address() as AddressInfo).port;
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/editor`, {
+      origin: `http://127.0.0.1:${port}`,
+    });
     testEditorSocket = socket;
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve);

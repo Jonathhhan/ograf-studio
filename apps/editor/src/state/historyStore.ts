@@ -1,4 +1,5 @@
 import type { Project } from '@ograf-editor/scene-model';
+import { documentEqual } from './documentEqual';
 import { getActiveComposition, useProjectStore } from './projectStore';
 import { describeProjectChange } from './historyLabels';
 import { useSelectionStore } from './selectionStore';
@@ -114,7 +115,7 @@ export function remoteHistoryLabel(update: RemoteHistoryUpdate): string {
 /** Keep accepted batches in the same undo stack as direct editing, without echoing a server undo. */
 export function applyRemoteProjectUpdate(project: Project, update: RemoteHistoryUpdate): void {
   const current = useProjectStore.getState().project;
-  if (JSON.stringify(current) === JSON.stringify(project)) return;
+  if (documentEqual(current, project)) return;
   if (current.id !== project.id) {
     useProjectStore.getState().loadProject(project);
     useSelectionStore.getState().select(null);
@@ -124,7 +125,7 @@ export function applyRemoteProjectUpdate(project: Project, update: RemoteHistory
   window.clearTimeout(debounceTimer);
   flushPending();
   const stack = update.source === 'undo' ? past : update.source === 'redo' ? future : [];
-  if (stack.length && JSON.stringify(stack.at(-1)!.project) === JSON.stringify(project)) {
+  if (stack.length && documentEqual(stack.at(-1)!.project, project)) {
     if (update.source === 'undo') undo();
     else redo();
     return;
