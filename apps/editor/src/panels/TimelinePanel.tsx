@@ -996,14 +996,14 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
           >
             <label
               className="timeline-step-playback-toggle"
-              title="Pause playback at each pausable OGraf Step; press Play again to continue"
+              title="Stop playback at each Step, the way playout waits for the operator; press Play to continue"
             >
               <input
                 type="checkbox"
                 checked={pauseAtOgrafSteps}
                 onChange={(event) => setPauseAtOgrafSteps(event.target.checked)}
               />
-              <span>Pause at Steps</span>
+              <span>Stop at Steps</span>
             </label>
 
             <label
@@ -1057,10 +1057,10 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
             role="group"
             aria-label="Retime animation phase"
           >
-            <span className="timeline-toolbar-section-label">Retime</span>
+            <span className="timeline-toolbar-section-label">Length</span>
             <div className="timeline-retime-controls">
               <select
-                aria-label="Animation phase to retime"
+                aria-label="Part of the animation to set the length of"
                 value={retimePhase}
                 onChange={(event) => {
                   const phase = event.target.value as typeof retimePhase;
@@ -1070,17 +1070,17 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
                   );
                 }}
               >
-                <option value="in">IN</option>
+                <option value="in">In</option>
                 <option value="on-air">On air</option>
-                <option value="out">OUT</option>
-                <option value="entire">Entire</option>
+                <option value="out">Out</option>
+                <option value="entire">Whole graphic</option>
               </select>
               <input
-                aria-label="Target phase frames"
+                aria-label="New length in frames"
                 type="number"
                 min={retimePhaseRange.retimable ? retimePhaseRange.transitionCount : 0}
                 value={retimeTargetFrames}
-                title={`Current ${retimePhase} duration: ${retimePhaseRange.durationFrames} frames. Enter the target duration, then choose Fit phase.`}
+                title={`Now ${retimePhaseRange.durationFrames} frames. Enter a new length, then choose Set length; keys inside stretch to fit.`}
                 onChange={(event) =>
                   setRetimeTargetFrames(
                     Math.max(
@@ -1098,14 +1098,14 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
                 disabled={!retimePhaseRange.retimable}
                 title={
                   retimePhaseRange.retimable
-                    ? `Fit ${retimePhase} from ${retimePhaseRange.durationFrames} to ${retimeTargetFrames} frames`
-                    : `The ${retimePhase} phase has no retimable lifecycle range`
+                    ? `Stretch this part from ${retimePhaseRange.durationFrames} to ${retimeTargetFrames} frames`
+                    : 'This part has no length to change yet'
                 }
                 onClick={() => {
                   try {
                     const result = retimeAnimationPhase(retimePhase, retimeTargetFrames);
                     setLifecycleRetimeNotice({
-                      message: `${retimePhase.toUpperCase()} fit to ${retimeTargetFrames} frames · ${result.retimedKeys} keys retimed`,
+                      message: `Length set to ${retimeTargetFrames} frames · ${result.retimedKeys} keys moved`,
                       warnings: [],
                     });
                   } catch (cause) {
@@ -1116,7 +1116,7 @@ export function TimelinePanel({ style }: { style?: CSSProperties }) {
                   }
                 }}
               >
-                Fit phase
+                Set length
               </button>
             </div>
           </div>

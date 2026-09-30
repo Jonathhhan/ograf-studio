@@ -45,9 +45,9 @@ describe('authoring factory defaults', () => {
     expect(defaultTransformFor('audio')).toMatchObject({ width: 400, height: 120 });
   });
 
-  it('starts new compositions on black with the 20% gray outside-canvas fill enabled', () => {
+  it('starts new compositions transparent, for overlays, with the 20% gray outside-canvas fill', () => {
     const composition = createComposition();
-    expect(composition.backgroundColor).toBe('#000000');
+    expect(composition.backgroundColor).toBe('transparent');
     expect(composition.layout.dimOutsideCanvas).toBe(true);
     expect(composition.layout.presentationBackground).toBe('none');
     expect(composition.layout.presentationBackgroundImageSource).toBe('');

@@ -30,10 +30,12 @@ import {
   waitForElementContentReady,
 } from '@ograf-editor/ograf-runtime';
 import {
+  editorVisualRuleEffects,
   resolveEffectiveElement,
   resolveEffectiveEffects,
   resolveEffectiveVisibility,
 } from '../state/dataBinding';
+import { useActiveComposition } from '../state/projectStore';
 import { useTestDataStore } from '../state/testDataStore';
 import { useTimelineStore } from '../state/timelineStore';
 import type { ShaderPreviewClock } from './shaderPreviewClock';
@@ -104,7 +106,15 @@ export function LayerNode({
   onPreviewInlineText,
 }: LayerNodeProps) {
   const testValues = useTestDataStore((s) => s.values);
-  const visualRuleStateOverride = useTestDataStore((s) => s.visualRuleStateOverrides[layer.id]);
+  const ruleOverrides = useTestDataStore((s) => s.visualRuleStateOverrides);
+  const compositionLayers = useActiveComposition().layers;
+  // Rules on any layer may drive this one; one shared evaluation serves every canvas node.
+  const ruleEffect = editorVisualRuleEffects(
+    compositionLayers,
+    dataFields,
+    testValues,
+    ruleOverrides,
+  ).get(layer.id);
   const contentRef = useRef<HTMLDivElement>(null);
   const readinessGeneration = useRef(0);
   const [contentError, setContentError] = useState<string | null>(null);
@@ -121,7 +131,7 @@ export function LayerNode({
         assets,
         dataFields,
         patterns,
-        visualRuleStateOverride,
+        ruleEffect,
       );
       lastEffectiveElement.current = next;
       return { element: next, error: null };
@@ -131,14 +141,9 @@ export function LayerNode({
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }, [assets, dataFields, layer, testValues, patterns, visualRuleStateOverride]);
+  }, [assets, dataFields, layer, testValues, patterns, ruleEffect]);
   const element = resolvedContent.element;
-  const effectiveVisible = resolveEffectiveVisibility(
-    layer,
-    testValues,
-    dataFields,
-    visualRuleStateOverride,
-  );
+  const effectiveVisible = resolveEffectiveVisibility(layer, testValues, dataFields, ruleEffect);
   const hasShaderPaint = hasElementShaderPaint(element);
   const hasMediaPaint = hasElementMediaPaint(element);
   const lottieBackingSize = useMemo(() => lottieBackingSizeForLayer(layer), [layer]);
@@ -388,6 +393,7 @@ export function LayerNode({
       getLayerEffectsAtFrame(layer, useTimelineStore.getState().currentFrame),
       testValues,
       dataFields,
+      ruleEffect,
     );
     const shaderEffect = getEffectStack(effects).some(
       (effect) => effect.type === 'shader' && effectEnabled(effect, effects),
@@ -416,6 +422,7 @@ export function LayerNode({
     layer,
     testValues,
     dataFields,
+    ruleEffect,
     transform.width,
     transform.height,
     shaderPreviewClock,

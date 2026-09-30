@@ -8,6 +8,7 @@ import {
   computeKeyframeFrames,
   getEffectStack,
   getLayerTransformAtFrame,
+  getLayerPropertyValueAtFrame,
   createLayerOfKind,
   createLayerKeyframe,
   createDefaultTransform,
@@ -26,6 +27,64 @@ describe('OGraf MCP authoring host', () => {
   const host = createOGrafAuthoringHost();
   const client = new Client({ name: 'ograf-mcp-test', version: '1.0.0' });
   let testEditorSocket: WebSocket | null = null;
+  it('bakes and clears Animate In motion through MCP without a runtime-only preset', async () => {
+    const sessionId = 'mcp-layer-motion';
+    host.workspace.create(sessionId);
+    const applied = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 0,
+        operations: [
+          { type: 'add_layer', kind: 'rectangle', name: 'Moving panel' },
+          {
+            type: 'set_layer_motion',
+            layerName: 'Moving panel',
+            side: 'in',
+            spec: { style: 'fade', durationFrames: 8, easing: 'cubic-out' },
+          },
+        ],
+      },
+    });
+    expect(applied.isError, JSON.stringify(applied.content)).not.toBe(true);
+    const composition = host.workspace.get(sessionId).snapshot().project.compositions[0]!;
+    const layer = composition.layers[0]!;
+    expect(layer.motion?.in).toMatchObject({ style: 'fade', durationFrames: 8 });
+    expect(getLayerPropertyValueAtFrame(layer, 'opacity', 0)).toBe(0);
+
+    const cleared = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 1,
+        operations: [
+          { type: 'set_layer_motion', layerName: 'Moving panel', side: 'in', spec: null },
+        ],
+      },
+    });
+    expect(cleared.isError, JSON.stringify(cleared.content)).not.toBe(true);
+    const settled = host.workspace.get(sessionId).snapshot().project.compositions[0]!.layers[0]!;
+    expect(settled.motion?.in).toBeNull();
+    expect(getLayerPropertyValueAtFrame(settled, 'opacity', 0)).toBe(1);
+
+    const tooLong = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 2,
+        operations: [
+          {
+            type: 'set_layer_motion',
+            layerName: 'Moving panel',
+            side: 'in',
+            spec: { style: 'fade', durationFrames: 1000 },
+          },
+        ],
+      },
+    });
+    expect(tooLong.isError).toBe(true);
+    expect(host.workspace.get(sessionId).revision).toBe(2);
+  });
   it('authors a pointer rule without a Data field through the advertised MCP contract', async () => {
     const sessionId = 'pointer-visual-rule';
     host.workspace.create(sessionId);
@@ -819,7 +878,7 @@ describe('OGraf MCP authoring host', () => {
         'ograf_export_package',
       ]),
     );
-    expect(providerToolWireBytes(records)).toBeLessThanOrEqual(74_000);
+    expect(providerToolWireBytes(records)).toBeLessThanOrEqual(75_000);
   });
 
   it('explicitly deletes temporary sessions without allowing live-editor deletion', async () => {
@@ -1236,12 +1295,14 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(amount); }`,
       'protocolVersion',
       'defaultSessionId',
       'easingPresets',
+      'layerMotion',
       'bindings',
     ]);
     expect(result.structuredContent).toMatchObject({
       protocolVersion: 1,
       defaultSessionId: 'editor',
       easingPresets: expect.arrayContaining(['linear', 'cubic-in', 'cubic-out']),
+      layerMotion: { operation: 'set_layer_motion', styles: ['fade', 'slide', 'fly', 'focus'] },
       bindings: { fieldTypes: expect.arrayContaining(['text', 'object', 'array']) },
     });
     expect(result.structuredContent).not.toHaveProperty('elementSchemas');

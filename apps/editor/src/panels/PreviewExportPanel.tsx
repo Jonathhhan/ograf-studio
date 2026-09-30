@@ -641,32 +641,40 @@ export function PreviewExportPanel() {
                 Fullscreen
               </button>
               <select
+                aria-label="Playback mode"
+                title="Live plays like a playout server. Rendered steps through time exactly, like a video renderer."
                 value={renderType}
                 onChange={(e) => setRenderType(e.target.value as RenderType)}
               >
-                <option value="realtime">realtime</option>
+                <option value="realtime">Live</option>
                 <option value="non-realtime" disabled={usesMediaPaint}>
-                  non-realtime
+                  Rendered
                 </option>
               </select>
               <button
                 type="button"
                 onClick={() => handlePlayAction({ delta: -1 })}
-                disabled={!isPreviewLoaded}
+                disabled={!isPreviewLoaded || currentStep === undefined}
+                title="Go back one step"
               >
-                {'⏮ Prev step'}
+                {'⏮ Back'}
               </button>
               <span className="preview-step-indicator">
                 {currentStep === undefined
-                  ? 'off-step'
-                  : `step ${currentStep + 1} / ${descriptor.stepCount}`}
+                  ? 'Off air'
+                  : `On air · step ${currentStep + 1} of ${descriptor.stepCount}`}
               </span>
               <button
                 type="button"
                 onClick={() => handlePlayAction({ delta: 1 })}
                 disabled={!isPreviewLoaded}
+                title={
+                  currentStep === undefined
+                    ? 'Play the graphic in'
+                    : 'Continue to the next step, or out after the last one'
+                }
               >
-                {'Next step ⏭'}
+                {currentStep === undefined ? 'Take In ▶' : 'Next ⏭'}
               </button>
               <button type="button" onClick={handleStop} disabled={!isPreviewLoaded}>
                 Take Out
@@ -674,68 +682,71 @@ export function PreviewExportPanel() {
             </div>
 
             {renderType === 'non-realtime' && (
-              <div className="preview-schedule">
-                <div className="preview-controls-row">
-                  <span className="preview-step-indicator">goToTime</span>
-                  <input
-                    type="number"
-                    className="preview-schedule-timestamp"
-                    value={scrubTimestamp}
-                    onChange={(e) => setScrubTimestamp(Number(e.target.value))}
-                  />
-                  <span className="preview-step-indicator">ms</span>
-                  <button type="button" onClick={handleGoToTime}>
-                    Go to time
-                  </button>
-                </div>
-
-                {scheduleRows.map((row) => (
-                  <div key={row.id} className="preview-schedule-row">
+              <details className="preview-developer">
+                <summary>Developer · scheduled actions</summary>
+                <div className="preview-schedule">
+                  <div className="preview-controls-row">
+                    <span className="preview-step-indicator">goToTime</span>
                     <input
                       type="number"
                       className="preview-schedule-timestamp"
-                      value={row.timestamp}
-                      onChange={(e) =>
-                        updateScheduleRow(row.id, { timestamp: Number(e.target.value) })
-                      }
+                      value={scrubTimestamp}
+                      onChange={(e) => setScrubTimestamp(Number(e.target.value))}
                     />
                     <span className="preview-step-indicator">ms</span>
-                    <select
-                      value={row.actionType}
-                      onChange={(e) => {
-                        const actionType = e.target.value as ScheduledAction['action']['type'];
-                        updateScheduleRow(row.id, {
-                          actionType,
-                          paramsJson: DEFAULT_SCHEDULE_PARAMS_JSON[actionType],
-                        });
-                      }}
-                    >
-                      <option value="updateAction">updateAction</option>
-                      <option value="playAction">playAction</option>
-                      <option value="stopAction">stopAction</option>
-                      <option value="customAction">customAction</option>
-                    </select>
-                    <input
-                      type="text"
-                      className="preview-schedule-params"
-                      value={row.paramsJson}
-                      onChange={(e) => updateScheduleRow(row.id, { paramsJson: e.target.value })}
-                    />
-                    <button type="button" onClick={() => removeScheduleRow(row.id)}>
-                      ✕
+                    <button type="button" onClick={handleGoToTime}>
+                      Go to time
                     </button>
                   </div>
-                ))}
 
-                <div className="preview-controls-row">
-                  <button type="button" onClick={addScheduleRow}>
-                    + Schedule row
-                  </button>
-                  <button type="button" onClick={handleSendSchedule}>
-                    Send setActionsSchedule
-                  </button>
+                  {scheduleRows.map((row) => (
+                    <div key={row.id} className="preview-schedule-row">
+                      <input
+                        type="number"
+                        className="preview-schedule-timestamp"
+                        value={row.timestamp}
+                        onChange={(e) =>
+                          updateScheduleRow(row.id, { timestamp: Number(e.target.value) })
+                        }
+                      />
+                      <span className="preview-step-indicator">ms</span>
+                      <select
+                        value={row.actionType}
+                        onChange={(e) => {
+                          const actionType = e.target.value as ScheduledAction['action']['type'];
+                          updateScheduleRow(row.id, {
+                            actionType,
+                            paramsJson: DEFAULT_SCHEDULE_PARAMS_JSON[actionType],
+                          });
+                        }}
+                      >
+                        <option value="updateAction">updateAction</option>
+                        <option value="playAction">playAction</option>
+                        <option value="stopAction">stopAction</option>
+                        <option value="customAction">customAction</option>
+                      </select>
+                      <input
+                        type="text"
+                        className="preview-schedule-params"
+                        value={row.paramsJson}
+                        onChange={(e) => updateScheduleRow(row.id, { paramsJson: e.target.value })}
+                      />
+                      <button type="button" onClick={() => removeScheduleRow(row.id)}>
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+
+                  <div className="preview-controls-row">
+                    <button type="button" onClick={addScheduleRow}>
+                      + Schedule row
+                    </button>
+                    <button type="button" onClick={handleSendSchedule}>
+                      Send setActionsSchedule
+                    </button>
+                  </div>
                 </div>
-              </div>
+              </details>
             )}
 
             {composition.dataFields.length > 0 && (
@@ -774,24 +785,32 @@ export function PreviewExportPanel() {
               </div>
             )}
 
-            <div className="preview-log">
-              {log.length === 0 ? (
-                <p className="panel-placeholder">
-                  Call a lifecycle method above to see results here.
-                </p>
-              ) : (
-                log.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className={`preview-log-entry${entry.isError ? ' error' : ''}`}
-                  >
-                    <span className="preview-log-method">{entry.method}</span>
-                    <span className="preview-log-params">{entry.paramsSummary}</span>
-                    <span className="preview-log-result">{entry.resultSummary}</span>
-                  </div>
-                ))
-              )}
-            </div>
+            <details className="preview-developer">
+              <summary>
+                Developer · call log
+                {log.some((entry) => entry.isError) ? (
+                  <span className="preview-developer-error"> · error</span>
+                ) : null}
+              </summary>
+              <div className="preview-log">
+                {log.length === 0 ? (
+                  <p className="panel-placeholder">
+                    OGraf calls from the buttons above, with their data and results, appear here.
+                  </p>
+                ) : (
+                  log.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className={`preview-log-entry${entry.isError ? ' error' : ''}`}
+                    >
+                      <span className="preview-log-method">{entry.method}</span>
+                      <span className="preview-log-params">{entry.paramsSummary}</span>
+                      <span className="preview-log-result">{entry.resultSummary}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </details>
           </div>
         </CollapsibleSection>
 

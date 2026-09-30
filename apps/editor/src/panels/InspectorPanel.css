@@ -535,3 +535,41 @@
   box-sizing: border-box;
   padding: 1px 6px;
 }
+
+.inspector-rule-summary {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 2px;
+  list-style: none;
+}
+
+.inspector-rule-summary li {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.inspector-rule-summary li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-rule-summary small {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.inspector-rule-summary li.is-disabled {
+  opacity: 0.5;
+}
+
+.inspector-advanced > .collapsible-section-content {
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
+}

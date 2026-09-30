@@ -1,6 +1,6 @@
 ---
 name: ograf-authoring
-description: Create, inspect, animate, review, validate, certify, save, and export editable EBU OGraf-compatible broadcast graphics through OGraf Studio MCP. Use for lower thirds, scoreboards, tickers, Lottie layers, shader and Media paints, exposed shader animation, procedural pattern presets, composable effects stacks, semantic scene authoring, Brand Kits, finite repeaters, runtime GDD collections, reusable components, HTML5 broadcast templates, .ogs source, .ograf.zip packages, per-property animation, data binding, interactive visual rules, and OGraf compliance work.
+description: Create, inspect, animate, review, validate, certify, save, and export editable EBU OGraf-compatible broadcast graphics through OGraf Studio MCP. Use for lower thirds, scoreboards, tickers, Lottie layers, shader and Media paints, exposed shader animation, procedural pattern presets, composable effects stacks, semantic scene authoring, Brand Kits, finite repeaters, runtime GDD collections, reusable components, HTML5 broadcast templates, .ogs source, .ograf.zip packages, per-property animation, Animate In/Out motion, data binding, interactive visual rules, and OGraf compliance work.
 ---
 
 # OGraf Authoring
@@ -304,16 +304,12 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
   animated rectangular mask for direct children. Constraint and ordinary parent translation edits
   still bake their visual results into regular property tracks. `dimOutsideCanvas` adds the Studio
   viewport's solid 20% gray surround outside the composition only. `presentationBackground` can
-  use the bundled video or an editor-only still-image URL; local still-image embedding is available
-  in Canvas Layout. Never recreate these authoring aids as exported layers or backgrounds.
-- `set_layer_visual_rules` replaces a layer's ordered rules. Data rules require an existing
-  `fieldId` in MCP; Studio **+ Add Rule** creates the first field automatically. Pointer triggers
-  `click`, `double-click`, `pointer-enter`, and `pointer-leave` need no field and run only in
-  interactive real-time HTML. Actions can change visibility/properties or trigger custom actions,
-  shader animation, sound, or media. Pair enter/leave for hover styling; use a custom action for
-  remote or deterministic non-real-time playout. Later matching state actions win, and hidden
-  results collapse from Auto layout when `collapseHidden` is enabled. See
-  [rule workflows](./references/tool-workflows.md) for condition semantics.
+  use the bundled video, an editor-only still image, or a permissioned local webcam; none exports.
+- `set_layer_visual_rules` replaces a layer's ordered rules; Studio **+ Add Rule** creates the
+  first field automatically. Rules combine conditions, compare fields, drive other layers
+  (`targetLayerId`), and fire from data, hover/pointer, or playout (`play`, `step`, `stop`,
+  `custom-action`). Later matching state actions win; hidden results collapse from Auto layout when
+  `collapseHidden` is enabled. See [visual rules](./references/visual-rules.md).
 - Data Connections are UI-authored preview adapters for JSON/CSV URLs or imported text. They map
   into Test Data only and never add a proprietary connector dependency to exported OGraf output.
 - Author designed data changes with `set_composition.updateTransitionFrames/updateInterruption` and
@@ -408,3 +404,7 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
   Claude Desktop configuration, or workspace confinement.
 - Read [references/media-paints.md](./references/media-paints.md) for packaged clips, live tags,
   realtime limits, fallbacks, and renderer requirements.
+- Read [references/visual-rules.md](./references/visual-rules.md) before authoring rules: triggers,
+  conditions, cross-layer targets, delays, and transitions.
+- Read [references/layer-motion.md](./references/layer-motion.md) for Animate In/Out presets and
+  their ordinary-keyframe MCP operation.

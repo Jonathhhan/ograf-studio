@@ -31,7 +31,6 @@ import {
   waitForElementContentReady,
 } from './renderElement';
 import {
-  applyElementDataValue,
   getElementShaderPaints,
   effectEnabled,
   getEffectStack,
@@ -43,7 +42,6 @@ import {
   hasElementShaderPaint,
   resolveShaderParameters,
   type VisualRuleAction,
-  type VisualRuleTrigger,
 } from '@ograf-editor/scene-model';
 import { shaderStrokePaddingForLayer } from './shaderPaintRendering';
 import {
@@ -72,14 +70,17 @@ import { applyCompiledAutoLayout } from './autoLayoutRendering';
 import { applyCompiledMotionPaths } from './motionPathRendering';
 import {
   layerHasRuntimeVisualInputs,
-  pointerVisualRuleActions,
-  triggeredVisualRuleActions,
-  updateVisualRuleStateOverride,
+  pointerVisualRuleTriggers,
+  RuntimeVisualRules,
+  visualRuleEffectFor,
   visualRuleLayerVisible,
-  type VisualRuleStateOverride,
+  type FiredRuntimeVisualRule,
 } from './runtimeVisualRules';
 import { MediaCueRuntime } from './mediaCueRuntime';
 import { renderTextAnimationAtFrame } from './textAnimationRendering';
+
+/** How deep rule -> custom action -> rule chains may go before rules stop answering. */
+const MAX_RULE_CUSTOM_ACTION_DEPTH = 4;
 
 function errorPayload(err: unknown): ReturnPayload {
   return {
@@ -194,8 +195,12 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
   /** Index into `descriptor.stepKeyframeIds` — the OGraf "current step", not a keyframe index. */
   #currentStep: number | undefined;
   #lastData: Record<string, unknown> = {};
-  /** Last paint/visibility values emitted by edge-based visual rules, keyed by layer. */
-  #visualRuleStateOverrides = new Map<string, VisualRuleStateOverride>();
+  /** Visual rule state: event overrides, hover, delays and transitions. */
+  #rules: RuntimeVisualRules | null = null;
+  #ruleTimers = new Set<ReturnType<typeof setTimeout>>();
+  #ruleTransitionFrame: number | null = null;
+  /** Layers whose content opacity a rule visibility fade currently owns. */
+  #ruleFadingLayers = new Set<string>();
   #clickTimers = new Map<string, ReturnType<typeof setTimeout>>();
   #schedule: ScheduledAction[] = [];
   /** Snapshot of `#lastData` taken when `setActionsSchedule` is called — the baseline `goToTime`
@@ -227,18 +232,95 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
   }
 
   #resolveLayerElement(layer: CompiledGraphicDescriptor['layers'][number], data = this.#lastData) {
-    let element = resolveBoundElement(layer, data);
-    const override = this.#visualRuleStateOverrides.get(layer.id);
-    if (!override) return element;
-    for (const [property, value] of Object.entries(override.properties))
-      element = applyElementDataValue(element, property, value);
-    return element;
+    return resolveBoundElement(layer, data);
   }
 
   #visualRuleVisible(layer: CompiledGraphicDescriptor['layers'][number]): boolean {
-    return (
-      this.#visualRuleStateOverrides.get(layer.id)?.visibility ??
-      visualRuleLayerVisible(layer, this.#lastData)
+    return visualRuleLayerVisible(layer, this.#lastData);
+  }
+
+  #ruleClock(): number {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+
+  #clearRuleTimers(): void {
+    for (const timer of this.#ruleTimers) clearTimeout(timer);
+    this.#ruleTimers.clear();
+    if (this.#ruleTransitionFrame !== null && typeof cancelAnimationFrame !== 'undefined')
+      this.#cancelFrame(this.#ruleTransitionFrame);
+    this.#ruleTransitionFrame = null;
+  }
+
+  /**
+   * Re-derives rule output from current data, then redraws what it changed. Rule transitions run
+   * on the page clock in real time; outside schedule replay, non-real-time output lands at once.
+   */
+  #refreshRuleOutput(): void {
+    const rules = this.#rules;
+    if (rules) {
+      const now = this.#ruleClock();
+      rules.update(this.#lastData, now);
+      const running = rules.publish(
+        this.#renderType === 'realtime' ? now : Number.POSITIVE_INFINITY,
+      );
+      if (running) this.#ensureRuleTransitionRendering();
+    }
+    this.#refreshBoundLayers();
+    this.#renderLoopSnapshot(this.#ruleClock());
+  }
+
+  #ensureRuleTransitionRendering(): void {
+    if (
+      this.#renderType !== 'realtime' ||
+      this.#ruleTransitionFrame !== null ||
+      typeof requestAnimationFrame === 'undefined'
+    )
+      return;
+    const render = (now: number) => {
+      this.#ruleTransitionFrame = null;
+      if (!this.#rules || this.#renderType !== 'realtime') return;
+      const running = this.#rules.publish(now);
+      this.#refreshBoundLayers();
+      this.#renderLoopSnapshot(now);
+      if (running) this.#ruleTransitionFrame = this.#requestFrame(render);
+    };
+    this.#ruleTransitionFrame = this.#requestFrame(render);
+  }
+
+  /**
+   * Runs fired rules: visibility and property actions change rule state, the rest (sounds, media,
+   * custom actions) run afterwards. Delayed rules wait on a timer in real time only; `depth` stops
+   * a rule that runs a custom action that fires the same rule from looping forever.
+   */
+  #runRules(fired: FiredRuntimeVisualRule[], depth = 0, delayed = false): void {
+    const rules = this.#rules;
+    if (!rules) return;
+    const sideEffects: VisualRuleAction[] = [];
+    for (const entry of fired) {
+      const delay = delayed ? 0 : rules.delayMs(entry);
+      if (delay > 0 && this.#renderType === 'realtime') {
+        const timer = setTimeout(() => {
+          this.#ruleTimers.delete(timer);
+          if (this.#rules === rules) this.#runRules([entry], depth, true);
+        }, delay);
+        this.#ruleTimers.add(timer);
+        continue;
+      }
+      sideEffects.push(...rules.run(entry));
+    }
+    this.#refreshRuleOutput();
+    this.#runVisualRuleEventActions(sideEffects, depth);
+  }
+
+  #fireLifecycleRules(
+    trigger: 'play' | 'step' | 'stop' | 'custom-action',
+    eventId?: string,
+    depth = 0,
+  ): void {
+    if (!this.#rules) return;
+    this.#runRules(
+      this.#rules.eventFired(trigger, this.#lastData, eventId === undefined ? {} : { eventId }),
+      depth,
     );
   }
 
@@ -273,6 +355,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#cancelUpdateAnimations();
       for (const timer of this.#clickTimers.values()) clearTimeout(timer);
       this.#clickTimers.clear();
+      this.#clearRuleTimers();
       for (const element of this.#layerEls.values()) disposeElementContent(element);
       this.#mediaCueRuntime?.dispose();
       this.#mediaCueRuntime = null;
@@ -376,9 +459,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
             (binding) => binding.dataKey,
           ),
           ...(layer.collectionItem ? [layer.collectionItem.dataKey] : []),
-          ...(layer.visualRules ?? [])
-            .filter((rule) => !rule.trigger || rule.trigger === 'data')
-            .map((rule) => rule.dataKey),
+          ...(this.#rules?.dataKeysFor(layer.id) ?? []),
         ])
         .filter((key): key is string => key !== undefined && Object.hasOwn(patch, key)),
     );
@@ -401,9 +482,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       const bindings = layer.bindings ?? (layer.binding ? [layer.binding] : []);
       if (
         !bindings.some((binding) => dataKeys.has(binding.dataKey)) &&
-        !(layer.visualRules ?? []).some(
-          (rule) => (!rule.trigger || rule.trigger === 'data') && dataKeys.has(rule.dataKey),
-        ) &&
+        ![...(this.#rules?.dataKeysFor(layer.id) ?? [])].some((key) => dataKeys.has(key)) &&
         !dataKeys.has(layer.collectionItem?.dataKey ?? '')
       )
         continue;
@@ -419,9 +498,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       const bindings = layer.bindings ?? (layer.binding ? [layer.binding] : []);
       if (
         !bindings.some((binding) => dataKeys.has(binding.dataKey)) &&
-        !(layer.visualRules ?? []).some(
-          (rule) => (!rule.trigger || rule.trigger === 'data') && dataKeys.has(rule.dataKey),
-        ) &&
+        ![...(this.#rules?.dataKeysFor(layer.id) ?? [])].some((key) => dataKeys.has(key)) &&
         !dataKeys.has(layer.collectionItem?.dataKey ?? '')
       ) {
         continue;
@@ -740,8 +817,19 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     if (!shadow) return;
     const descriptor = this.descriptor;
     this.#documentFontsReady = registerDocumentFonts(this.ownerDocument, descriptor.fonts ?? []);
-    this.#renderDescriptor = expandRuntimeCollections(descriptor);
+    const expanded = expandRuntimeCollections(descriptor);
+    // This instance's own layer copies: rule output is published per layer object, and several
+    // instances of one graphic may share the static descriptor.
+    this.#renderDescriptor = {
+      ...expanded,
+      layers: expanded.layers.map((layer) => ({ ...layer })),
+    };
     const renderDescriptor = this.activeDescriptor;
+    this.#clearRuleTimers();
+    this.#ruleFadingLayers.clear();
+    this.#rules = new RuntimeVisualRules(renderDescriptor.layers, descriptor.frameRate);
+    this.#rules.update(this.#lastData, Number.NEGATIVE_INFINITY);
+    this.#rules.publish(Number.POSITIVE_INFINITY);
     for (const timer of this.#clickTimers.values()) clearTimeout(timer);
     this.#clickTimers.clear();
     for (const element of this.#layerEls.values()) disposeElementContent(element);
@@ -791,22 +879,20 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       el.style.top = '0';
       el.style.boxSizing = 'border-box';
       el.style.display = this.#visualRuleVisible(layer) ? '' : 'none';
-      const pointerRules = (layer.visualRules ?? []).filter(
-        (rule) => rule.enabled && rule.trigger && rule.trigger !== 'data',
-      );
-      el.style.pointerEvents = pointerRules.length > 0 ? 'auto' : 'none';
-      if (pointerRules.some((rule) => rule.trigger === 'click' || rule.trigger === 'double-click'))
+      const pointerTriggers = pointerVisualRuleTriggers(layer);
+      el.style.pointerEvents = pointerTriggers.size > 0 ? 'auto' : 'none';
+      if (pointerTriggers.has('click') || pointerTriggers.has('double-click'))
         el.style.cursor = 'pointer';
-      if (pointerRules.length > 0) {
+      if (pointerTriggers.size > 0) {
         el.addEventListener('pointerenter', (event) => {
-          if (event.pointerType !== 'touch') this.#triggerPointerRule(layer, 'pointer-enter');
+          if (event.pointerType !== 'touch') this.#pointerHover(layer, true);
         });
         el.addEventListener('pointerleave', (event) => {
-          if (event.pointerType !== 'touch') this.#triggerPointerRule(layer, 'pointer-leave');
+          if (event.pointerType !== 'touch') this.#pointerHover(layer, false);
         });
         el.addEventListener('click', (event) => {
           if (event.detail > 1) return;
-          if (pointerRules.some((rule) => rule.trigger === 'double-click')) {
+          if (pointerTriggers.has('double-click')) {
             const pending = this.#clickTimers.get(layer.id);
             if (pending) clearTimeout(pending);
             this.#clickTimers.set(
@@ -1057,7 +1143,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
 
   #refreshBoundLayers(): void {
     for (const layer of this.activeDescriptor.layers) {
-      if (!layerHasRuntimeVisualInputs(layer)) continue;
+      if (!layerHasRuntimeVisualInputs(layer) && !this.#rules?.targeted.has(layer.id)) continue;
       const el = this.#layerEls.get(layer.id);
       if (el) {
         const element = this.#resolveLayerElement(layer);
@@ -1111,6 +1197,13 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       if (!el) continue;
       const active = isRuntimeCollectionLayerActive(layer, this.#lastData);
       el.style.display = this.#visualRuleVisible(layer) && active ? '' : 'none';
+      const fade = visualRuleEffectFor(layer, this.#lastData)?.contentOpacity;
+      const fadeContent = el.firstElementChild as HTMLElement | null;
+      if (fade !== undefined) {
+        if (fadeContent) fadeContent.style.opacity = String(fade);
+        this.#ruleFadingLayers.add(layer.id);
+      } else if (this.#ruleFadingLayers.delete(layer.id) && fadeContent)
+        fadeContent.style.opacity = '';
       if (!layer.collectionItem || !active) {
         delete el.dataset.ografCollectionKey;
         continue;
@@ -1137,65 +1230,40 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     }
   }
 
-  #applyData(data: unknown): void {
+  #applyData(data: unknown, depth = 0): void {
     if (!data || typeof data !== 'object') return;
     const previousData = this.#lastData;
     const nextData = { ...this.#lastData, ...(data as Record<string, unknown>) };
-    for (const layer of this.activeDescriptor.layers) {
-      const override = updateVisualRuleStateOverride(
-        layer,
-        nextData,
-        previousData,
-        this.#visualRuleStateOverrides.get(layer.id),
-      );
-      if (override) this.#visualRuleStateOverrides.set(layer.id, override);
-    }
+    const fired = this.#rules?.dataChanged(previousData, nextData) ?? [];
     this.#lastData = nextData;
-    this.#refreshBoundLayers();
-    this.#renderLoopSnapshot(typeof performance !== 'undefined' ? performance.now() : Date.now());
-    const triggered = this.activeDescriptor.layers.flatMap((layer) =>
-      triggeredVisualRuleActions(layer, nextData, previousData),
-    );
-    this.#runVisualRuleEventActions(triggered);
+    this.#runRules(fired, depth);
+  }
+
+  #pointerHover(layer: CompiledGraphicDescriptor['layers'][number], hovered: boolean): void {
+    if (this.#renderType !== 'realtime' || !this.#rules) return;
+    this.#rules.hoverChanged(layer.id, hovered, this.#lastData);
+    this.#triggerPointerRule(layer, hovered ? 'pointer-enter' : 'pointer-leave');
   }
 
   #triggerPointerRule(
     layer: CompiledGraphicDescriptor['layers'][number],
-    trigger: Exclude<VisualRuleTrigger, 'data'>,
+    trigger: 'click' | 'double-click' | 'pointer-enter' | 'pointer-leave',
   ): void {
-    if (this.#renderType !== 'realtime') return;
-    const actions = pointerVisualRuleActions(layer, trigger);
-    if (actions.length === 0) return;
-    let override = this.#visualRuleStateOverrides.get(layer.id);
-    let changed = false;
-    for (const action of actions) {
-      if (action.type === 'property') {
-        override = {
-          properties: { ...override?.properties, [action.targetProperty]: action.value },
-          ...(override?.visibility === undefined ? {} : { visibility: override.visibility }),
-        };
-        changed = true;
-      } else if (action.type === 'visibility') {
-        override = { properties: { ...override?.properties }, visibility: action.visible };
-        changed = true;
-      }
-    }
-    if (changed && override) {
-      this.#visualRuleStateOverrides.set(layer.id, override);
-      this.#refreshBoundLayers();
-      this.#renderLoopSnapshot(typeof performance !== 'undefined' ? performance.now() : Date.now());
-    }
-    this.#runVisualRuleEventActions(actions);
+    if (this.#renderType !== 'realtime' || !this.#rules) return;
+    this.#runRules(this.#rules.eventFired(trigger, this.#lastData, { hostLayerId: layer.id }));
   }
 
-  #runVisualRuleEventActions(triggered: VisualRuleAction[]): void {
+  #runVisualRuleEventActions(triggered: VisualRuleAction[], depth = 0): void {
     const eventKeys = new Set<string>();
     for (const action of triggered) {
       const eventKey = JSON.stringify(action);
       if (eventKeys.has(eventKey)) continue;
       eventKeys.add(eventKey);
       if (action.type === 'custom-action' || action.type === 'shader-animation') {
-        void this.#customActionUnlocked({ id: action.actionId, payload: {}, skipAnimation: false });
+        void this.#customActionUnlocked(
+          { id: action.actionId, payload: {}, skipAnimation: false },
+          depth + 1,
+        );
         continue;
       }
       if (action.type !== 'play-sound' && action.type !== 'take-media') continue;
@@ -1213,8 +1281,11 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     const nextData =
       data && typeof data === 'object' ? { ...(data as Record<string, unknown>) } : {};
     this.#validateShaderData(nextData);
-    this.#visualRuleStateOverrides.clear();
+    this.#clearRuleTimers();
+    this.#rules?.reset();
     this.#lastData = nextData;
+    this.#rules?.update(nextData, Number.NEGATIVE_INFINITY);
+    this.#rules?.publish(Number.POSITIVE_INFINITY);
     this.#refreshBoundLayers();
   }
 
@@ -1277,6 +1348,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     try {
       for (const timer of this.#clickTimers.values()) clearTimeout(timer);
       this.#clickTimers.clear();
+      this.#clearRuleTimers();
       this.#cancelUpdateAnimations();
       this.#stopLoopRendering();
       this.#clearContentAnimationFrames();
@@ -1323,6 +1395,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#directLifecycleTransition = null;
       for (const timer of this.#clickTimers.values()) clearTimeout(timer);
       this.#clickTimers.clear();
+      this.#clearRuleTimers();
       for (const element of this.#layerEls.values()) disposeElementContent(element);
       this.#layerEls.clear();
       this.#mediaCueRuntime?.dispose();
@@ -1436,7 +1509,10 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         );
       }
       this.#deactivateStepLoops();
-      if (target.currentStep === undefined) this.#deactivateAllLoops();
+      if (target.currentStep === undefined) {
+        this.#deactivateAllLoops();
+        this.#fireLifecycleRules('stop');
+      }
       const exitDurationSeconds = exitsToEnd
         ? (this.descriptor.transitions.find(
             (transition) => transition.toKeyframeId === this.descriptor.endKeyframeId,
@@ -1451,6 +1527,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           typeof performance !== 'undefined' ? performance.now() : Date.now(),
           previousStep === undefined,
         );
+        if (previousStep === undefined) this.#fireLifecycleRules('play');
+        this.#fireLifecycleRules('step', this.descriptor.stepKeyframeIds[this.#currentStep]);
       }
       return {
         statusCode: 200,
@@ -1479,6 +1557,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         typeof performance !== 'undefined' ? performance.now() : Date.now(),
       );
       this.#deactivateAllLoops();
+      this.#fireLifecycleRules('stop');
       const durationSeconds =
         (this.descriptor.transitions.find(
           (transition) => transition.toKeyframeId === this.descriptor.endKeyframeId,
@@ -1500,7 +1579,10 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     return this.#serializeOperation(() => this.#customActionUnlocked(params));
   }
 
-  async #customActionUnlocked(params: CustomActionParams): Promise<ReturnPayload | undefined> {
+  async #customActionUnlocked(
+    params: CustomActionParams,
+    ruleDepth = 0,
+  ): Promise<ReturnPayload | undefined> {
     try {
       const action = this.descriptor.customActions.find((candidate) => candidate.id === params.id);
       if (!action) {
@@ -1512,9 +1594,12 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           ...this.#lastData,
           ...(params.payload as Record<string, unknown>),
         });
-        this.#applyData(params.payload);
+        this.#applyData(params.payload, ruleDepth);
         await this.#awaitContentReady();
       }
+      // A rule that runs this custom action may be answered by rules again, but not endlessly.
+      if (ruleDepth < MAX_RULE_CUSTOM_ACTION_DEPTH)
+        this.#fireLifecycleRules('custom-action', params.id, ruleDepth);
 
       const layers = this.activeDescriptor.layers.filter(
         (layer) =>
@@ -1609,6 +1694,53 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     const customActionEpochs = new Map<string, number>();
     const textAnimationEpochs = new Map<string, number>();
 
+    // Rule state is rebuilt from the schedule on every seek, like data and loop epochs: data
+    // changes, lifecycle events and delayed rules are queued at their OGraf time and replayed in
+    // order, so delays and rule transitions land on the same frame however the playhead arrives.
+    const rules = this.#rules;
+    this.#clearRuleTimers();
+    rules?.reset();
+    let ruleData: Record<string, unknown> = { ...this.#scheduleBaseData };
+    rules?.update(ruleData, Number.NEGATIVE_INFINITY);
+    type PendingRuleWork =
+      | { kind: 'data'; previous: Record<string, unknown>; current: Record<string, unknown> }
+      | { kind: 'event'; trigger: 'play' | 'step' | 'stop' | 'custom-action'; eventId?: string }
+      | { kind: 'rule'; fired: FiredRuntimeVisualRule };
+    const pendingRules: Array<{ at: number; order: number; work: PendingRuleWork }> = [];
+    let pendingOrder = 0;
+    const queueRuleWork = (at: number, work: PendingRuleWork) =>
+      pendingRules.push({ at, order: pendingOrder++, work });
+    const flushRules = (until: number): void => {
+      if (!rules) return;
+      for (;;) {
+        let next = -1;
+        for (let index = 0; index < pendingRules.length; index++) {
+          const entry = pendingRules[index]!;
+          const best = pendingRules[next];
+          if (
+            entry.at <= until &&
+            (!best || entry.at < best.at || (entry.at === best.at && entry.order < best.order))
+          )
+            next = index;
+        }
+        if (next < 0) return;
+        const [{ at, work }] = pendingRules.splice(next, 1) as [(typeof pendingRules)[number]];
+        if (work.kind === 'data') {
+          ruleData = work.current;
+          for (const fired of rules.dataChanged(work.previous, work.current))
+            queueRuleWork(at + rules.delayMs(fired), { kind: 'rule', fired });
+        } else if (work.kind === 'event') {
+          for (const fired of rules.eventFired(
+            work.trigger,
+            ruleData,
+            work.eventId === undefined ? {} : { eventId: work.eventId },
+          ))
+            queueRuleWork(at + rules.delayMs(fired), { kind: 'rule', fired });
+        } else rules.run(work.fired);
+        rules.update(ruleData, at);
+      }
+    };
+
     const loopEpochsAt = (atTimestamp: number): Map<string, number> => {
       const epochs = new Map<string, number>();
       const stepKeyframeId = step === undefined ? undefined : this.descriptor.stepKeyframeIds[step];
@@ -1685,6 +1817,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     };
 
     for (const scheduled of due) {
+      flushRules(scheduled.timestamp);
       advanceTo(scheduled.timestamp);
       advanceDataTo(scheduled.timestamp);
       const { type, params } = scheduled.action;
@@ -1701,6 +1834,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
             updateKeys = new Set();
             dataAnimation = undefined;
           }
+          const previousRuleData = data;
           data = { ...data, ...(updateParams.data as Record<string, unknown>) };
           if (!updateParams.skipAnimation) {
             for (const layer of this.activeDescriptor.layers) {
@@ -1735,6 +1869,11 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           const keys = this.#changedBindingKeys(updateParams.data);
           if (updateParams.skipAnimation || durationMs <= 0 || keys.size === 0) {
             displayData = { ...data };
+            queueRuleWork(scheduled.timestamp, {
+              kind: 'data',
+              previous: previousRuleData,
+              current: data,
+            });
           } else {
             dataAnimation = {
               startTimestamp: scheduled.timestamp,
@@ -1743,6 +1882,11 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
               newData: { ...data },
               keys,
             };
+            queueRuleWork(scheduled.timestamp + durationMs / 2, {
+              kind: 'data',
+              previous: previousRuleData,
+              current: data,
+            });
           }
         }
       } else if (type === 'playAction') {
@@ -1797,10 +1941,19 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         if (target.currentStep === undefined) {
           lifecycleEpoch = undefined;
           stepArrivalTimestamp = undefined;
+          queueRuleWork(scheduled.timestamp, { kind: 'event', trigger: 'stop' });
         } else {
           const arrival = scheduled.timestamp + (animation?.durationMs ?? 0);
           stepArrivalTimestamp = arrival;
           lifecycleEpoch ??= arrival;
+          if (previousStep === undefined)
+            queueRuleWork(arrival, { kind: 'event', trigger: 'play' });
+          const stepKeyframeId = this.descriptor.stepKeyframeIds[target.currentStep];
+          queueRuleWork(arrival, {
+            kind: 'event',
+            trigger: 'step',
+            ...(stepKeyframeId === undefined ? {} : { eventId: stepKeyframeId }),
+          });
         }
       } else if (type === 'stopAction') {
         const stopParams = params as StopActionParams;
@@ -1835,15 +1988,27 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         if (!animation) positionSeconds = targetSeconds;
         lifecycleEpoch = undefined;
         stepArrivalTimestamp = undefined;
+        queueRuleWork(scheduled.timestamp, { kind: 'event', trigger: 'stop' });
       } else if (type === 'customAction') {
         const customParams = params as CustomActionParams;
         if (customParams.payload && typeof customParams.payload === 'object') {
           dataAnimation = undefined;
           updateOpacity = 1;
           updateKeys = new Set();
+          const previousRuleData = data;
           data = { ...data, ...(customParams.payload as Record<string, unknown>) };
           displayData = { ...data };
+          queueRuleWork(scheduled.timestamp, {
+            kind: 'data',
+            previous: previousRuleData,
+            current: data,
+          });
         }
+        queueRuleWork(scheduled.timestamp, {
+          kind: 'event',
+          trigger: 'custom-action',
+          eventId: customParams.id,
+        });
         if (!customParams.skipAnimation) {
           customActionEpochs.set(customParams.id, scheduled.timestamp);
           for (const layer of this.activeDescriptor.layers) {
@@ -1858,6 +2023,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     }
 
     advanceDataTo(timestamp);
+    flushRules(timestamp);
+    rules?.publish(timestamp);
     this.#lastData = displayData;
     this.#refreshBoundLayers();
     this.#setBoundContentOpacity(updateKeys, updateOpacity);

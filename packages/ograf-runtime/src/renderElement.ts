@@ -1,10 +1,7 @@
 import {
   editablePathBounds,
   getPaintAtFrame,
-  applyElementDataValue,
-  parseEffectProperty,
   pathStretchSlices,
-  withEffectParameter,
   getTrackValueAtFrame,
   cornerRadiiToCss,
   hasElementShaderPaint,
@@ -17,10 +14,13 @@ import {
   type Paint,
   type LayerEffects,
 } from '@ograf-editor/scene-model';
-import { valueAtSourcePath } from '@ograf-editor/scene-model';
 import type { CompiledLayer } from '@ograf-editor/ograf-types';
-import { resolveVisualRuleElement } from './runtimeVisualRules';
-import { runtimeCollectionItemSelection } from './runtimeCollections';
+import {
+  resolveVisualRuleEffects,
+  resolveVisualRuleElement,
+  type RuntimeVisualRuleEffect,
+} from './runtimeVisualRules';
+import { resolveLayerBindingEffects, resolveLayerBindingElement } from './runtimeBindings';
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light_canvas.js';
 import { mountPattern, applyPatternPaint } from './patternRendering';
 import { disposeLayerEffects, waitForLayerEffectsReady } from './effectCompositing';
@@ -1182,57 +1182,26 @@ export function renderAnimatedElementAtTime(
   }
 }
 
-/**
- * The element a compiled layer should render with, given runtime data — mirrors the editor's
- * design-time `resolveEffectiveElement` (apps/editor/src/state/dataBinding.ts), adapted to the
- * compiled descriptor's shape (data keyed by field `key`, not `fieldId`). All current bindable
- * properties are string-typed, so the override always stringifies.
- */
-export function resolveBoundElement(layer: CompiledLayer, data: Record<string, unknown>): Element {
-  const bindings = layer.bindings ?? (layer.binding ? [layer.binding] : []);
-  const collectionIndex = layer.collectionItem
-    ? runtimeCollectionItemSelection(layer, data)?.index
-    : undefined;
-  const bound = bindings.reduce<Element>((element, binding) => {
-    const root = data[binding.dataKey];
-    const itemIndex = layer.collectionItem ? collectionIndex : binding.itemIndex;
-    const itemValue =
-      itemIndex === undefined ? root : Array.isArray(root) ? root[itemIndex] : undefined;
-    const value = valueAtSourcePath(itemValue, binding.sourcePath);
-    if (value === undefined) return element;
-    const mappedValue = binding.valueMap?.[String(value)] ?? value;
-    return applyElementDataValue(element, binding.targetProperty, mappedValue);
-  }, layer.element);
-  return resolveVisualRuleElement(layer, data, bound);
+/** Bindings, then visual rules: the element a compiled layer renders with for `data`. */
+export function resolveBoundElement(
+  layer: CompiledLayer,
+  data: Record<string, unknown>,
+  effect?: RuntimeVisualRuleEffect | null,
+): Element {
+  return resolveVisualRuleElement(layer, data, resolveLayerBindingElement(layer, data), effect);
 }
 
+/** Bindings, then visual rules, for effect parameters and the drop shadow colour. */
 export function resolveBoundEffects(
   layer: CompiledLayer,
   data: Record<string, unknown>,
   effects: LayerEffects = layer.effects,
+  effect?: RuntimeVisualRuleEffect | null,
 ): LayerEffects {
-  let resolved = effects;
-  for (const binding of layer.bindings ?? (layer.binding ? [layer.binding] : [])) {
-    if (
-      binding.targetProperty !== 'dropShadowColor' &&
-      !parseEffectProperty(binding.targetProperty)
-    )
-      continue;
-    const root = data[binding.dataKey];
-    const item =
-      binding.itemIndex === undefined
-        ? root
-        : Array.isArray(root)
-          ? root[binding.itemIndex]
-          : undefined;
-    const value = valueAtSourcePath(item, binding.sourcePath);
-    if (value !== undefined) {
-      const mapped = binding.valueMap?.[String(value)] ?? value;
-      resolved =
-        binding.targetProperty === 'dropShadowColor'
-          ? { ...resolved, dropShadowColor: String(mapped) }
-          : withEffectParameter(resolved, binding.targetProperty, mapped);
-    }
-  }
-  return resolved;
+  return resolveVisualRuleEffects(
+    layer,
+    data,
+    resolveLayerBindingEffects(layer, data, effects),
+    effect,
+  );
 }

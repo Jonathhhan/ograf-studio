@@ -10,7 +10,17 @@ import {
   shaderAnimationPropertySpec,
   shaderAnimationValueErrors,
   normalizeTextAnimation,
+  isVisualRuleEdgeDataRule,
+  visualRuleRange,
+  VISUAL_RULE_EVENT_OPERATORS,
+  VISUAL_RULE_OPERATOR_VALUES,
+  VISUAL_RULE_TRIGGER_VALUES,
+  type VisualRuleOperator,
+  type VisualRuleTrigger,
 } from '@ograf-editor/scene-model';
+
+const VISUAL_RULE_TRIGGERS: ReadonlySet<VisualRuleTrigger> = new Set(VISUAL_RULE_TRIGGER_VALUES);
+const VISUAL_RULE_OPERATORS: ReadonlySet<VisualRuleOperator> = new Set(VISUAL_RULE_OPERATOR_VALUES);
 import {
   effectStackErrors,
   parseEffectProperty,
@@ -1197,16 +1207,57 @@ function validateComposition(composition: Composition, errors: string[], warning
       errors.push(`${prefix}: layer "${layer.name}" repeats visual rule id "${ruleId}".`);
     }
     for (const rule of layer.visualRules ?? []) {
-      if (
-        rule.trigger &&
-        !['data', 'click', 'double-click', 'pointer-enter', 'pointer-leave'].includes(rule.trigger)
-      ) {
+      const ruleLabel = `${prefix}: layer "${layer.name}" visual rule "${rule.name}"`;
+      const trigger = rule.trigger ?? 'data';
+      if (!VISUAL_RULE_TRIGGERS.has(trigger)) {
         errors.push(`${prefix}: layer "${layer.name}" visual rule has an unknown trigger.`);
       }
-      if ((!rule.trigger || rule.trigger === 'data') && !fieldIds.has(rule.fieldId)) {
+      const conditions = [...(trigger === 'data' ? [rule] : []), ...(rule.conditions ?? [])];
+      if (trigger === 'data' && !fieldIds.has(rule.fieldId)) {
         errors.push(
           `${prefix}: layer "${layer.name}" visual rule references a missing data field.`,
         );
+      }
+      for (const condition of rule.conditions ?? []) {
+        if (!fieldIds.has(condition.fieldId))
+          errors.push(`${ruleLabel} has a condition on a missing data field.`);
+      }
+      for (const condition of conditions) {
+        if (!VISUAL_RULE_OPERATORS.has(condition.operator))
+          errors.push(`${ruleLabel} uses unknown operator "${condition.operator}".`);
+        if (condition.compareFieldId && !fieldIds.has(condition.compareFieldId))
+          errors.push(`${ruleLabel} compares with a missing data field.`);
+        if (
+          condition.operator === 'between' &&
+          !condition.compareFieldId &&
+          !visualRuleRange(condition.value)
+        )
+          errors.push(`${ruleLabel} needs a [min, max] pair for "between".`);
+        if (
+          condition.compareFieldId &&
+          ['between', 'one-of', 'not-one-of'].includes(condition.operator)
+        )
+          errors.push(`${ruleLabel} cannot compare "${condition.operator}" with another field.`);
+      }
+      if (trigger !== 'data' && conditions.some((c) => VISUAL_RULE_EVENT_OPERATORS.has(c.operator)))
+        errors.push(`${ruleLabel} can watch for changes only on a Data trigger.`);
+      if (rule.match !== undefined && rule.match !== 'all' && rule.match !== 'any')
+        errors.push(`${ruleLabel} has an unknown condition match "${String(rule.match)}".`);
+      if (trigger === 'custom-action' && (!rule.eventId || !customActionIds.has(rule.eventId)))
+        errors.push(`${ruleLabel} must name an existing custom action.`);
+      if (
+        trigger === 'step' &&
+        rule.eventId &&
+        !composition.keyframes.some((k) => k.id === rule.eventId && k.role === 'step')
+      )
+        errors.push(`${ruleLabel} references a missing step.`);
+      const isState =
+        trigger === 'hover' || (trigger === 'data' && !isVisualRuleEdgeDataRule(rule));
+      if (rule.delayFrames !== undefined) {
+        if (!Number.isFinite(rule.delayFrames) || rule.delayFrames < 0)
+          errors.push(`${ruleLabel} delay must be zero or more frames.`);
+        else if (isState && rule.delayFrames > 0)
+          errors.push(`${ruleLabel} delay applies only to event triggers.`);
       }
       if (rule.actions.length === 0) {
         errors.push(`${prefix}: layer "${layer.name}" visual rule "${rule.name}" has no actions.`);
@@ -1228,6 +1279,24 @@ function validateComposition(composition: Composition, errors: string[], warning
             `${prefix}: layer "${layer.name}" visual rule references missing media cue "${action.cueId}".`,
           );
         }
+        if (
+          action.type === 'visibility' ||
+          action.type === 'toggle-visibility' ||
+          action.type === 'property'
+        ) {
+          if (
+            action.targetLayerId &&
+            !composition.layers.some((candidate) => candidate.id === action.targetLayerId)
+          )
+            errors.push(`${ruleLabel} targets a missing layer "${action.targetLayerId}".`);
+          if (
+            action.transitionFrames !== undefined &&
+            (!Number.isFinite(action.transitionFrames) || action.transitionFrames < 0)
+          )
+            errors.push(`${ruleLabel} transition must be zero or more frames.`);
+        }
+        if (action.type === 'toggle-visibility' && isState)
+          errors.push(`${ruleLabel} can toggle visibility only on an event trigger.`);
       }
     }
     for (const { slot, paint } of getElementShaderPaints(layer.element)) {

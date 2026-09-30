@@ -47,8 +47,8 @@ references it in the OGraf manifest's `thumbnails` list.
 For DaVinci Resolve, choose the **Non-real-time** or **Dual** export profile: Resolve loads OGraf
 graphics in non-real-time mode and cannot render a real-time-only package. Enable **Transparent
 output** when the graphic should overlay video; an opaque composition background covers the full
-frame. Studio shows these as non-blocking playout warnings because both configurations remain legal
-OGraf for other workflows.
+frame. New compositions start transparent, shown as a checkerboard in the editor. Studio shows these
+as non-blocking playout warnings because both configurations remain legal OGraf for other workflows.
 
 ### Remote project URLs
 
@@ -212,6 +212,20 @@ Crossfade, an audio transition policy, and Keep current, Use fallback, or Transp
 the incoming source fails. Clip-to-clip, clip-to-live and live-to-clip changes prepare an incoming
 slot while the outgoing source remains active.
 
+For local testing, set a Live tag on a Media fill or a live Media Cue and choose **Start webcam**
+beside it. Studio asks for camera permission then uses the selected camera's muted video for that
+tag on the canvas and in OGraf Preview. **Stop live webcam** releases the camera when no other
+preview uses it. You can switch cameras after permission has been granted. Webcam selection and
+footage are preview-only:
+they are not saved in `.ogs` or exported. The exported graphic still requires its renderer to
+provide the live tag. A fallback image remains available when no source is provided.
+
+For a live video bed behind the graphic, choose **Webcam · local preview** in **Canvas Layout →
+Presentation background**, then press **Start webcam**. This editor-only background appears on the
+main canvas when **Transparent output** is enabled; it is not painted into OGraf Preview or export.
+The background and a live Media source may share one local camera without stopping one another.
+Changing the presentation background away from Webcam stops its use of the camera.
+
 Media Cues are real-time-only in the initial profile. Disable **Non-real-time** and export with the
 **Real-time** profile. Live output uses the `zd-ograf-media` version 1 renderer hook. Test target
 codec support, browser autoplay policy, live-source readiness and audio routing on the intended
@@ -231,31 +245,55 @@ playback; nested Auto layout containers move with their descendants.
 ### Visual rules
 
 Open the dockable **Rules** pane from the Window menu to edit ordered rules across the composition;
-optionally filter to the selected object. Its default undocked width is 800 px; a saved custom width
-is preserved. If the composition has no Data fields, **+ Add Rule**
-creates a text condition field automatically; enter its value in the Data pane or through playout
-data to activate the new rule. Rules
-support equality, emptiness, numeric comparison, and changed/increased/decreased conditions. A
-matching rule can show or hide the layer, set one or more bindable visual or exposed shader
-properties, trigger a custom action or shader-animation action, play a Sound Event, or start an
-audio/video/live Media Cue. State actions remain active while matched; event actions fire only when a
-condition enters the matching state. Rules run after ordinary bindings, in authored order; later
-matching state actions win. Hidden rule results participate in Auto layout's **Collapse hidden**
+optionally filter to the selected object, which also lists rules on other objects that change it.
+Its default undocked width is 800 px; a saved custom width is preserved. If the composition has no
+Data fields, **+ Add Rule** creates a text condition field automatically; enter its value in the
+Data pane or through playout data to activate the new rule.
+
+**Conditions.** A data condition compares a field with a value or, through the **value** menu, with
+another field — for example _Home score_ **Greater than** _Away score_. Operators cover equality,
+numeric comparison (**Greater than**, **At least**, **Less than**, **At most**, **Between**), text
+(**Contains**, **Starts with**, **Ends with**, **Is one of** a comma-separated list), emptiness, and
+**Changed** / **Increased** / **Decreased**. Equality treats `5` and `"5"`, and `true` and `"true"`,
+as the same value; **Aa** makes text comparisons ignore letter case. **+ and / or** adds more
+conditions, combined with **and** or **or**. Inside a runtime collection prototype, a condition on
+the collection's field reads that row's own item, so each row can colour itself.
+
+**Triggers.** Beside **Data condition**, a rule can start from the pointer — **While hovered**,
+**Clicked**, **Double-clicked**, **Mouse over**, **Mouse leave** — or from playout: **Played in**
+(the first step is reached), **Step reached** (a chosen step or any step), **Taken out**, or
+**Custom action ran**. On these triggers, **+ condition** adds an _only if_ guard, and **after N fr**
+delays the actions.
+
+**Actions.** A rule can show, hide or (on event triggers) toggle an object; set bindable visual,
+effect or exposed shader properties; trigger a custom action or shader-animation action; play a
+Sound Event; or start an audio/video/live Media Cue. Show/hide/toggle and property actions change
+the rule's own object by default; choose another object in the target menu to build tabs,
+reveal panels, or winner highlights. **fade N fr** fades visibility and **over N fr** animates
+numeric and colour property values instead of switching them.
+
+**State and events.** Data-condition and **While hovered** rules are states: their results hold
+while the condition holds and revert when it stops, so a hover highlight needs one rule. Every other
+trigger, and conditions that watch for a change, are events: their results stay until a later rule
+replaces them. When a state rule starts matching, it takes back the properties and visibility an
+earlier event set on the same object. Rules run after ordinary bindings, in authored order; when
+two matching state rules set the same property on one object, the later one wins and the earlier
+card shows **Overridden**. Hidden rule results participate in Auto layout's **Collapse hidden**
 spacing.
 
-Rules can also start from **Clicked**, **Double-clicked**, **Mouse over**, or **Mouse leave** on
-their target object. Choose the trigger beside **+ Add Rule**; pointer-triggered rules do not need a
-Data field. Their actions work in the OGraf Preview and exported real-time HTML graphic. Click/tap
-uses the object's rectangular bounds, and mouse-over/leave apply to mouse or pen hover. Studio's
-editing canvas keeps clicks for selecting and editing objects. If both click and double-click rules
-exist on the same object, a single-click action waits briefly so a double-click fires only the
-double-click rule. For a hover highlight, pair a Mouse over property action with a Mouse leave
-action that restores the original property. Pointer events are not part of non-real-time scheduled
-rendering; use a playout custom action for a deterministic or remote trigger.
+**Trying rules.** Data-condition cards show **Matched** or **Not matched** for the current test
+values. Event rule cards have **▶**, which applies their show/hide and property actions to the
+editing canvas; **Reset test** clears those results. Pointer rules run in the OGraf Preview and
+exported real-time HTML graphic, where click/tap uses the object's rectangular bounds and hover
+applies to mouse or pen; Studio's editing canvas keeps clicks for selecting and editing. If both
+click and double-click rules exist on the same object, a single-click action waits briefly so a
+double-click fires only the double-click rule. Playout triggers, delays, and transitions also replay
+exactly in non-real-time scheduled rendering; pointer events do not, so use a playout custom action
+for a deterministic or remote trigger.
 
 ### Data connections
 
-Use **Data → Data Connections** to preview a template from JSON or CSV without changing its OGraf
+Use **Data → Connections** to preview a template from JSON or CSV without changing its OGraf
 field contract. A connection can fetch an HTTP/HTTPS URL with optional polling or use pasted/imported
 JSON/CSV. Map each Studio field to a dot-separated JSON path or CSV column, choose default, empty, or
 keep-last handling for missing values, then select **Refresh now**. Status and failures stay visible
@@ -264,10 +302,10 @@ receive ordinary GDD data from the playout system.
 
 ### Rankings and paged collections
 
-Runtime Collections can identify items by a stable nested key, sort by a nested value ascending or
+**Data → Repeating lists** can identify items by a stable nested key, sort by a nested value ascending or
 descending, and expose one zero-based page at a time. Set Page size to zero to use the authored
-capacity. Bindings resolve back to the original array item after sorting, and stable keyed items
-animate from their previous slot when rankings change. Capacity still bounds generated DOM and is
+**Max items**. Bindings resolve back to the original array item after sorting, and stable keyed items
+animate from their previous slot when rankings change. **Max items** still bounds generated DOM and is
 mirrored to the array field's `maxItems`.
 
 ### Preserved design resizing
@@ -281,17 +319,17 @@ validation warning.
 
 ### Designed data update transitions
 
-Set the composition's **Update crossfade** duration and **Update interruption** policy, then choose a
-per-layer style under **Properties → Data update transition**. Bound layers can crossfade, slide in
+Set the composition's **Data change fade** duration and **Data arrives mid-fade** policy, then choose
+a per-layer style under **Properties → Advanced → Data change transition**. Bound layers can crossfade, slide in
 one of four directions, inherit the composition duration, override it, or update instantly. Unbound
-backgrounds remain on screen. **Queue updates** finishes each transition in order; **Replace active**
-cancels the older visual transition and applies the newest update. Exported action durations report
+backgrounds remain on screen. **Finish current fade first** finishes each transition in order;
+**Jump to newest data** cancels the older visual transition and applies the newest update. Exported action durations report
 the longest authored layer update so playout can schedule accurately.
 
 ### Fit animation duration
 
-Use the Timeline's **Retime animation phase** controls to fit IN, On air, OUT, or the Entire sequence
-to an exact frame count. Property keys inside the selected phase scale proportionally, preserving
+Use the Timeline's **Length** controls to set **In**, **On air**, **Out**, or the **Whole graphic**
+to an exact frame count, then choose **Set length**. Property keys inside the selected phase scale proportionally, preserving
 stagger relationships. Later keys shift by the exact duration delta so untouched phases keep their
 authored lengths. Layer-local loop clips use their own ruler and are not stretched.
 
@@ -302,6 +340,16 @@ progress from 0 to 1. The target follows the path's arc length, can rotate to th
 independent X/Y offsets. Motion Path Progress appears as a normal animatable property. Choose **Add
 ping-pong loop** for a ready-made 0→1→0 lifecycle loop, then edit its keys and duration normally.
 Moving, scaling, or rotating the source path updates the attachment deterministically.
+
+### Animate In / Out
+
+Select one or more layers and open **Properties → Animate In / Out**. Choose Fade, Slide, Fly, or
+Focus independently for entrance and exit; Slide and Fly offer four directions. Set the duration in
+frames and a feel (Smooth, Gentle, Snappy, Overshoot, or Linear), then use ▶ to preview that side.
+Focus requires the layer's built-in blur effect. The editor writes ordinary x/y, opacity, and blur
+keys between Start and the first Step, or the last Step and End. These keys remain editable on the
+Timeline; choosing another preset replaces only that side's motion. **None (cut)** holds the on-air
+pose, while **Custom keys** warns that choosing a preset would replace hand-authored keys there.
 
 ### Animation graph editor
 
@@ -430,12 +478,30 @@ can use geometric masks, but cannot currently supply an alpha mask for another o
 
 ## Editing and animation
 
+**Properties** lists what most layers need first: Transform, Animate In / Out, the layer's
+content, Data Bindings, Effects, and a summary of its Visual rules with **Open Rules**. Brand
+tokens, compositing and masks, layout relationships, data change transitions, and semantic intent
+sit under **Advanced**; typing in **Filter properties…** still finds them. The built-in blur and
+drop shadow stay out of the Effects list while they are off; **Show built-in…** lists them.
+
+**Properties → Animate In / Out** gives a selected layer an entrance and an exit without editing
+keys. Choose **Fade**, **Slide** (a short move with a fade, 80 px by default), **Fly** (from or to
+beyond the canvas edge), or **Focus** (a fade out of blur), pick a direction with the arrows, and
+set the duration and feel (**Smooth**, **Gentle**, **Snappy**, **Overshoot**, **Linear**). The
+entrance plays between Start and the first Step, and the exit between the last Step and End;
+duration can't exceed that span, so lengthen it on the timeline if you need more. **▶** plays the
+entrance or exit on the canvas. The choice applies to every selected unlocked layer and becomes
+ordinary keys, so exports and other tools see plain animation. It replaces only this layer's x, y,
+opacity, and blur keys inside that span; **Custom keys** marks a span with keys you made yourself,
+and choosing a style replaces them. **None (cut)** keeps the layer at its on-air pose. Focus needs
+the layer's built-in blur effect.
+
 AI proposals appear on the main canvas. Review frames and compare the original, then use
 **Accept changes** or **Reject** in **AI Assistant**. Acceptance creates one undoable history entry.
 
-**Pause at Steps** is enabled by default in the timeline. Uncheck it for continuous playback.
+**Stop at Steps** is enabled by default in the timeline. Uncheck it for continuous playback.
 With the timeline focused, **Space** toggles play/pause and **Left/Right Arrow** steps one frame.
-Enable **Auto-keyframe** beside **Pause at Steps** to create timeline keys and steps, including
+Enable **Auto-keyframe** beside **Stop at Steps** to create timeline keys and steps, including
 double-click inserts, property tracks, context-menu inserts, and loop keys. It is off by default
 and resets when opening or creating a project. Existing keys can still be selected and edited.
 When off, position, size, rotation, opacity, gradient-stop, stroke-width, and effect edits apply
@@ -446,6 +512,14 @@ For vector points and handles, see the [path-editing guide](../skills/ograf-auth
 Clicking blank canvas keeps path editing active. Choose **Done** or press **Escape** to finish.
 For recent changes, see the [release notes](releases/0.21.md).
 
+To let playout change a text or image layer, turn on **Properties → Editable in playout**. Studio
+creates a data field named after the layer, starting with its current text or image, and binds it,
+so the graphic doesn't change until playout sends a value. Turning it off removes the binding and
+the field, unless another layer or rule still uses it.
+
+The **Data** pane has tabs: **Fields** (with Test Data), **Lists** (repeating lists), **Actions**
+(custom actions), **Connections**, and **Schema** (what playout sees). Counts show what each holds.
+
 Manage a selected layer's data links under **Properties → Data Bindings**. Binding indicators are
 not drawn over the canvas artwork. **+ Add Binding** creates a new data field for the next unbound
 property and binds it immediately, even when the project has no fields yet. The new field starts
@@ -453,7 +527,22 @@ with that property's current value, so adding the binding does not change the gr
 different existing field in the binding's **Field** menu if you want to reuse one, or open **Data**
 to rename and edit the new field.
 
+## Menus and shortcuts
+
+**Edit** has Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, Group or Ungroup, Select all, and
+Deselect all, with the same shortcuts on the canvas (**Ctrl+X/C/V**, **Ctrl+G**,
+**Ctrl+Shift+G**). Text fields keep their own copy, paste, and undo. **Export…** beside **Save
+Project** opens Preview & Export. **Window → Reset layout** puts docked panes back where Studio
+first placed them. **Help** lists every keyboard shortcut, links to this guide, and shows the
+version.
+
 ## Fullscreen preview
+
+**Preview & Export** plays the exported graphic the way playout does: **Take In ▶** plays it in,
+**Next ⏭** continues to the next Step (or out after the last one), **⏮ Back** returns one Step,
+and **Take Out** plays it out. **Live** plays in real time; **Rendered** steps through time exactly,
+like a video renderer. The raw OGraf call log and the scheduled-action tester are under
+**Developer**; the log's heading shows **error** when a call fails.
 
 In **Preview & Export**, choose **Fullscreen** to fill the current display with the graphic.
 To use another monitor, first open the pane in a new window and move that window to the display.

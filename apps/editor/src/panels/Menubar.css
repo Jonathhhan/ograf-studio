@@ -383,3 +383,24 @@
   border-color: var(--accent);
   outline: none;
 }
+
+.menubar-menu-separator {
+  height: 1px;
+  margin: 2px 4px;
+  background: var(--border);
+}
+
+.menubar-actions .menubar-window-menu .menubar-menu-link {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.menubar-actions .menubar-window-menu .menubar-menu-link:is(:hover, :focus-visible) {
+  background: var(--bg-hover, rgb(255 255 255 / 6%));
+  outline: none;
+}

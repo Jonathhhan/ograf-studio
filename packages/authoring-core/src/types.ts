@@ -411,6 +411,14 @@ export type AuthoringOperation =
       motionPath?: import('@ograf-editor/scene-model').LayerMotionPath | null;
     }
   | {
+      type: 'set_layer_motion';
+      compositionId?: string;
+      layerId: string;
+      side: 'in' | 'out';
+      /** null clears the preset and holds the on-air pose through that window. */
+      spec: import('@ograf-editor/scene-model').LayerMotionSpec | null;
+    }
+  | {
       type: 'set_layer_visual_rules';
       compositionId?: string;
       layerId: string;

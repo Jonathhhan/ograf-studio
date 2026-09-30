@@ -9,6 +9,7 @@ import {
   resolveAssetValue,
   resolvePatternElement,
   type Composition,
+  type VisualRuleCondition,
 } from '@ograf-editor/scene-model';
 import type {
   CompiledGraphicDescriptor,
@@ -16,6 +17,7 @@ import type {
   CompiledLayer,
   CompiledPaintOrderEntry,
   CompiledRuntimeCollection,
+  CompiledVisualRuleCondition,
 } from '@ograf-editor/ograf-types';
 
 export type {
@@ -52,6 +54,31 @@ export function compileDescriptor(
   const stepKeyframeIds = keyframes
     .filter((keyframe) => keyframe.role === 'step')
     .map((keyframe) => keyframe.id);
+
+  const compiledLayerIds = new Set(
+    composition.layers
+      .filter((layer) => options.includeGuides || !layer.isGuide)
+      .map((layer) => layer.id),
+  );
+  const compileRuleCondition = (
+    condition: VisualRuleCondition,
+  ): CompiledVisualRuleCondition | null => {
+    const dataKey = fieldKeyById.get(condition.fieldId);
+    if (dataKey === undefined) return null;
+    const compareDataKey = condition.compareFieldId
+      ? fieldKeyById.get(condition.compareFieldId)
+      : undefined;
+    return {
+      dataKey,
+      sourcePath: [...condition.sourcePath],
+      operator: condition.operator,
+      ...(condition.value !== undefined ? { value: structuredClone(condition.value) } : {}),
+      ...(compareDataKey !== undefined
+        ? { compareDataKey, compareSourcePath: [...(condition.compareSourcePath ?? [])] }
+        : {}),
+      ...(condition.ignoreCase ? { ignoreCase: true } : {}),
+    };
+  };
 
   const compileLayer = (layer: Composition['layers'][number]): CompiledLayer => {
     const autoLayout = normalizeLayerAutoLayout(layer.autoLayout);
@@ -171,11 +198,36 @@ export function compileDescriptor(
             ];
       }),
       visualRules: (layer.visualRules ?? []).flatMap((rule) => {
-        const dataKey =
-          rule.trigger && rule.trigger !== 'data' ? '' : fieldKeyById.get(rule.fieldId);
-        if (dataKey === undefined) return [];
-        const { fieldId: _fieldId, ...compiledRule } = structuredClone(rule);
-        return [{ ...compiledRule, dataKey }];
+        const isData = !rule.trigger || rule.trigger === 'data';
+        const primary = compileRuleCondition(rule);
+        if (isData && !primary) return [];
+        const conditions = (rule.conditions ?? []).flatMap((condition) => {
+          const compiled = compileRuleCondition(condition);
+          return compiled ? [compiled] : [];
+        });
+        const actions = structuredClone(rule.actions).filter(
+          (action) =>
+            !('targetLayerId' in action) ||
+            !action.targetLayerId ||
+            compiledLayerIds.has(action.targetLayerId),
+        );
+        if (actions.length === 0) return [];
+        return [
+          {
+            id: rule.id,
+            name: rule.name,
+            enabled: rule.enabled,
+            ...(rule.trigger ? { trigger: rule.trigger } : {}),
+            ...(primary && isData
+              ? primary
+              : { dataKey: '', sourcePath: [], operator: rule.operator }),
+            ...(conditions.length ? { conditions } : {}),
+            ...(rule.match ? { match: rule.match } : {}),
+            ...(rule.eventId ? { eventId: rule.eventId } : {}),
+            ...(rule.delayFrames ? { delayFrames: rule.delayFrames } : {}),
+            actions,
+          },
+        ];
       }),
       clipParentId: clipParent?.id ?? null,
       layoutParentId: layoutParent?.id ?? null,

@@ -352,31 +352,93 @@ export type VisualRuleOperator =
   | 'not-empty'
   | 'greater-than'
   | 'less-than'
+  | 'greater-or-equal'
+  | 'less-or-equal'
+  /** Inclusive numeric range; `value` is a `[min, max]` pair. */
+  | 'between'
+  | 'contains'
+  | 'not-contains'
+  | 'starts-with'
+  | 'ends-with'
+  /** `value` is a list, or a comma-separated string. */
+  | 'one-of'
+  | 'not-one-of'
   | 'changed'
   | 'increased'
   | 'decreased';
 
+/**
+ * `data` and `hover` are states: their actions apply while the condition holds and revert when it
+ * stops. Every other trigger is an event whose actions persist until a later rule replaces them.
+ */
 export type VisualRuleTrigger =
-  'data' | 'click' | 'double-click' | 'pointer-enter' | 'pointer-leave';
+  | 'data'
+  | 'hover'
+  | 'click'
+  | 'double-click'
+  | 'pointer-enter'
+  | 'pointer-leave'
+  /** The graphic reached its first step from the Start state. */
+  | 'play'
+  /** A step was reached; `eventId` names the step keyframe, empty means any step. */
+  | 'step'
+  /** The graphic started leaving towards its End state. */
+  | 'stop'
+  /** A custom action ran; `eventId` names the public custom action id. */
+  | 'custom-action';
 
+export type VisualRuleMatch = 'all' | 'any';
+
+/** One comparison against runtime data. */
+export interface VisualRuleCondition {
+  fieldId: string;
+  sourcePath: string[];
+  operator: VisualRuleOperator;
+  /** Literal comparison value; `[min, max]` for `between`, a list for `one-of`. */
+  value?: unknown;
+  /** Compare against another data field instead of the literal `value`. */
+  compareFieldId?: string;
+  compareSourcePath?: string[];
+  /** Text comparisons ignore letter case. */
+  ignoreCase?: boolean;
+}
+
+/** Absent `targetLayerId` means the layer that owns the rule. */
 export type VisualRuleAction =
-  | { type: 'visibility'; visible: boolean }
-  | { type: 'property'; targetProperty: string; value: unknown }
+  | { type: 'visibility'; visible: boolean; targetLayerId?: string; transitionFrames?: number }
+  /** Event triggers only: flips the target's current visibility. */
+  | { type: 'toggle-visibility'; targetLayerId?: string; transitionFrames?: number }
+  | {
+      type: 'property';
+      targetProperty: string;
+      value: unknown;
+      targetLayerId?: string;
+      /** Numeric and colour values animate over this many frames; other values switch. */
+      transitionFrames?: number;
+    }
   | { type: 'custom-action'; actionId: string }
   | { type: 'play-sound'; cueId: string }
   | { type: 'take-media'; cueId: string; sourceId?: string }
   | { type: 'shader-animation'; actionId: string };
 
-export interface LayerVisualRule {
+/**
+ * The inherited condition is the primary data condition of a `data` rule. `conditions` add more
+ * data conditions, combined with the primary one by `match`; on every other trigger they act as a
+ * guard that must also hold when the event fires.
+ */
+export interface LayerVisualRule extends VisualRuleCondition {
   id: string;
   name: string;
   enabled: boolean;
   /** Missing in older projects means a data condition. */
   trigger?: VisualRuleTrigger;
-  fieldId: string;
-  sourcePath: string[];
-  operator: VisualRuleOperator;
-  value?: unknown;
+  conditions?: VisualRuleCondition[];
+  /** How the conditions combine; absent means `all`. */
+  match?: VisualRuleMatch;
+  /** Step keyframe id for `step`, public custom action id for `custom-action`. */
+  eventId?: string;
+  /** Event triggers only: wait this many frames before running the actions. */
+  delayFrames?: number;
   actions: VisualRuleAction[];
 }
 
@@ -695,6 +757,27 @@ export interface LayerLoopClip {
 }
 
 /** A same-composition matte. Path mode uses geometry; alpha mode uses painted transparency. */
+/** Fade; Slide moves a short distance while fading; Fly enters from off-canvas; Focus un-blurs. */
+export type LayerMotionStyle = 'fade' | 'slide' | 'fly' | 'focus';
+/** Where an entrance comes from, or where an exit goes. */
+export type LayerMotionDirection = 'left' | 'right' | 'up' | 'down';
+
+export interface LayerMotionSpec {
+  style: LayerMotionStyle;
+  /** Slide and Fly only. */
+  direction?: LayerMotionDirection;
+  /** Frames of motion, ending at the first Step (in) or at End (out). */
+  durationFrames: number;
+  /** Slide only: travel in composition pixels. */
+  distance?: number;
+  easing?: EasingPreset;
+}
+
+export interface LayerMotion {
+  in: LayerMotionSpec | null;
+  out: LayerMotionSpec | null;
+}
+
 export interface LayerMask {
   sourceLayerId: string;
   mode: 'alpha' | 'path';
@@ -725,6 +808,11 @@ export interface Layer {
   autoLayout: LayerAutoLayout;
   updateTransition: LayerUpdateTransition;
   motionPath: LayerMotionPath | null;
+  /**
+   * Authoring-only Animate In/Out choice. Its keys are baked into ordinary tracks, so exports and
+   * other tools see plain animation; this only lets Studio show and re-apply the choice.
+   */
+  motion?: LayerMotion | null;
   /** Independent animation keys on the composition frame ruler, sorted by frame. */
   keyframes: LayerKeyframe[];
   /** Canonical per-property animation tracks. Legacy full-pose keys remain as an aggregate view. */
@@ -1019,7 +1107,7 @@ export interface ComponentDefinition {
   dataFields: FieldDefinition[];
 }
 
-export type CanvasPresentationBackground = 'none' | 'big-buck-bunny' | 'still-image';
+export type CanvasPresentationBackground = 'none' | 'big-buck-bunny' | 'still-image' | 'webcam';
 
 export interface CompositionLayout {
   showRulers: boolean;

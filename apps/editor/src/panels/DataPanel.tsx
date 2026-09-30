@@ -72,6 +72,48 @@ function optionalNumber(value: string): number | undefined {
   return Number.isFinite(number) ? number : undefined;
 }
 
+type DataTab = 'fields' | 'lists' | 'actions' | 'connections' | 'schema';
+
+const DATA_TABS: Array<{ id: DataTab; label: string; intro: string }> = [
+  {
+    id: 'fields',
+    label: 'Fields',
+    intro: 'Values playout fills in, such as names and scores. Test values preview them here.',
+  },
+  {
+    id: 'lists',
+    label: 'Lists',
+    intro: 'Repeat a grouped item once for each entry of a list field.',
+  },
+  {
+    id: 'actions',
+    label: 'Actions',
+    intro: 'Named buttons playout can press, such as "Flash score". Rules can react to them.',
+  },
+  {
+    id: 'connections',
+    label: 'Connections',
+    intro: 'Preview with JSON or CSV data. Exports still receive ordinary playout data.',
+  },
+  {
+    id: 'schema',
+    label: 'Schema',
+    intro: 'What playout sees: the data form and actions this graphic declares.',
+  },
+];
+
+const DATA_TAB_STORAGE_KEY = 'ograf-studio:data-tab';
+
+function initialDataTab(): DataTab {
+  try {
+    const saved = window.localStorage.getItem(DATA_TAB_STORAGE_KEY);
+    if (DATA_TABS.some((candidate) => candidate.id === saved)) return saved as DataTab;
+  } catch {
+    // Fall back to Fields.
+  }
+  return 'fields';
+}
+
 export function DataPanel() {
   const composition = useActiveComposition();
   const addDataField = useProjectStore((s) => s.addDataField);
@@ -86,6 +128,15 @@ export function DataPanel() {
   const resetTestData = useTestDataStore((s) => s.resetAll);
 
   const [addFieldType, setAddFieldType] = useState<FieldType>('text');
+  const [tab, setTab] = useState<DataTab>(initialDataTab);
+  const chooseTab = (next: DataTab) => {
+    setTab(next);
+    try {
+      window.localStorage.setItem(DATA_TAB_STORAGE_KEY, next);
+    } catch {
+      // The tab still switches when storage is blocked.
+    }
+  };
 
   const schema = compileDataSchema(composition);
   const compiledCustomActions = compileCustomActions(composition);
@@ -93,277 +144,318 @@ export function DataPanel() {
   return (
     <Panel title="Data">
       <div className="data-panel">
-        <CollapsibleSection
-          sectionId="data.fields"
-          title="Fields"
-          className="data-panel-section"
-          actions={
-            <div className="data-panel-add-row">
-              <select
-                value={addFieldType}
-                onChange={(e) => setAddFieldType(e.target.value as FieldType)}
+        <div className="data-tabs" role="tablist" aria-label="Data sections">
+          {DATA_TABS.map(({ id, label }) => {
+            const count =
+              id === 'fields'
+                ? composition.dataFields.length
+                : id === 'lists'
+                  ? composition.runtimeCollections.length
+                  : id === 'actions'
+                    ? composition.customActions.length
+                    : id === 'connections'
+                      ? (composition.dataConnections ?? []).length
+                      : 0;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                className={tab === id ? 'active' : ''}
+                onClick={() => chooseTab(id)}
               >
-                {FIELD_TYPE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <button type="button" onClick={() => addDataField(addFieldType)}>
-                {'+ Add Field'}
+                {label}
+                {count > 0 ? <span className="data-tab-count">{count}</span> : null}
               </button>
-            </div>
-          }
-        >
-          {composition.dataFields.length === 0 ? (
-            <p className="panel-placeholder">
-              No fields yet — add one to make this template data-driven.
-            </p>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Label</th>
-                  <th>Type</th>
-                  <th>Default</th>
-                  <th>Req.</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {composition.dataFields.map((field) => (
-                  <Fragment key={field.id}>
+            );
+          })}
+        </div>
+        <p className="data-tab-intro">
+          {DATA_TABS.find((candidate) => candidate.id === tab)!.intro}
+        </p>
+
+        {tab === 'fields' ? (
+          <>
+            <CollapsibleSection
+              sectionId="data.fields"
+              title="Fields"
+              className="data-panel-section"
+              actions={
+                <div className="data-panel-add-row">
+                  <select
+                    value={addFieldType}
+                    onChange={(e) => setAddFieldType(e.target.value as FieldType)}
+                  >
+                    {FIELD_TYPE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={() => addDataField(addFieldType)}>
+                    {'+ Add Field'}
+                  </button>
+                </div>
+              }
+            >
+              {composition.dataFields.length === 0 ? (
+                <p className="panel-placeholder">
+                  No fields yet — add one to make this template data-driven.
+                </p>
+              ) : (
+                <table className="data-table">
+                  <thead>
                     <tr>
-                      <td>
-                        <input
-                          type="text"
-                          value={field.key}
-                          onChange={(e) => updateDataField(field.id, { key: e.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          value={field.label}
-                          onChange={(e) => updateDataField(field.id, { label: e.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <select
-                          value={field.type}
-                          disabled={!!field.generatedShaderParameter}
-                          onChange={(e) => {
-                            const type = e.target.value as FieldType;
-                            const options = defaultOptionsForFieldType(type);
-                            const defaults = createFieldDefinition(type);
-                            updateDataField(field.id, {
-                              type,
-                              options,
-                              constraints: defaultConstraintsForFieldType(type),
-                              fileExtensions: [],
-                              defaultValue: defaultValueForFieldType(type, options),
-                              properties: defaults.properties,
-                              items: defaults.items,
-                            });
-                          }}
-                        >
-                          {FIELD_TYPE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <DefaultValueInput
-                          field={field}
-                          value={field.defaultValue}
-                          onChange={(value) => updateDataField(field.id, { defaultValue: value })}
-                        />
-                        {field.type === 'color' && (
-                          <label>
-                            <span>Default from Brand Kit</span>
+                      <th>Key</th>
+                      <th>Label</th>
+                      <th>Type</th>
+                      <th>Default</th>
+                      <th>Req.</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {composition.dataFields.map((field) => (
+                      <Fragment key={field.id}>
+                        <tr>
+                          <td>
+                            <input
+                              type="text"
+                              value={field.key}
+                              onChange={(e) => updateDataField(field.id, { key: e.target.value })}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={field.label}
+                              onChange={(e) => updateDataField(field.id, { label: e.target.value })}
+                            />
+                          </td>
+                          <td>
                             <select
-                              aria-label={`${field.label} Brand Kit default`}
-                              value={field.defaultTokenId ?? ''}
-                              onChange={(event) =>
+                              value={field.type}
+                              disabled={!!field.generatedShaderParameter}
+                              onChange={(e) => {
+                                const type = e.target.value as FieldType;
+                                const options = defaultOptionsForFieldType(type);
+                                const defaults = createFieldDefinition(type);
                                 updateDataField(field.id, {
-                                  defaultTokenId: event.target.value || null,
-                                })
-                              }
+                                  type,
+                                  options,
+                                  constraints: defaultConstraintsForFieldType(type),
+                                  fileExtensions: [],
+                                  defaultValue: defaultValueForFieldType(type, options),
+                                  properties: defaults.properties,
+                                  items: defaults.items,
+                                });
+                              }}
                             >
-                              <option value="">Custom default</option>
-                              {composition.designSystem.tokens
-                                .filter((token) => token.type === 'color')
-                                .map((token) => (
-                                  <option key={token.id} value={token.id}>
-                                    {token.name}
-                                  </option>
-                                ))}
+                              {FIELD_TYPE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
                             </select>
-                          </label>
-                        )}
-                      </td>
-                      <td className="data-table-checkbox-cell">
-                        <input
-                          type="checkbox"
-                          checked={field.required}
-                          onChange={(e) =>
-                            updateDataField(field.id, { required: e.target.checked })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="data-table-delete"
-                          disabled={!!field.generatedShaderParameter}
-                          title={
-                            field.generatedShaderParameter
-                              ? 'Remove its #pragma ograf declaration in the shader to remove this field.'
-                              : undefined
-                          }
-                          onClick={() => removeDataField(field.id)}
-                        >
-                          {'✕'}
-                        </button>
-                      </td>
-                    </tr>
-                    <tr className="data-field-details-row">
-                      <td colSpan={6}>
-                        {field.generatedShaderParameter ? (
-                          <p className="inspector-hint">
-                            Defined by #pragma ograf {field.generatedShaderParameter.name}. Edit the
-                            shader declaration to change its type or range.
-                          </p>
-                        ) : (
-                          <FieldDetails field={field} update={updateDataField} />
-                        )}
-                      </td>
-                    </tr>
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CollapsibleSection>
-
-        <DataConnectionsSection />
-
-        <RuntimeCollectionsSection />
-
-        <CollapsibleSection
-          sectionId="data.custom-actions"
-          title="Custom Actions"
-          className="data-panel-section"
-          actions={
-            <button type="button" onClick={() => addCustomAction()}>
-              {'+ Add Action'}
-            </button>
-          }
-        >
-          {composition.customActions.length === 0 ? (
-            <p className="panel-placeholder">No custom actions yet.</p>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Action ID</th>
-                  <th>Name</th>
-                  <th>Description</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {composition.customActions.map((action) => (
-                  <tr key={action.id}>
-                    <td>
-                      <input
-                        type="text"
-                        value={action.actionId}
-                        onChange={(e) =>
-                          updateCustomAction(action.id, { actionId: e.target.value })
+                          </td>
+                          <td>
+                            <DefaultValueInput
+                              field={field}
+                              value={field.defaultValue}
+                              onChange={(value) =>
+                                updateDataField(field.id, { defaultValue: value })
+                              }
+                            />
+                            {field.type === 'color' && (
+                              <label>
+                                <span>Default from Brand Kit</span>
+                                <select
+                                  aria-label={`${field.label} Brand Kit default`}
+                                  value={field.defaultTokenId ?? ''}
+                                  onChange={(event) =>
+                                    updateDataField(field.id, {
+                                      defaultTokenId: event.target.value || null,
+                                    })
+                                  }
+                                >
+                                  <option value="">Custom default</option>
+                                  {composition.designSystem.tokens
+                                    .filter((token) => token.type === 'color')
+                                    .map((token) => (
+                                      <option key={token.id} value={token.id}>
+                                        {token.name}
+                                      </option>
+                                    ))}
+                                </select>
+                              </label>
+                            )}
+                          </td>
+                          <td className="data-table-checkbox-cell">
+                            <input
+                              type="checkbox"
+                              checked={field.required}
+                              onChange={(e) =>
+                                updateDataField(field.id, { required: e.target.checked })
+                              }
+                            />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="data-table-delete"
+                              disabled={!!field.generatedShaderParameter}
+                              title={
+                                field.generatedShaderParameter
+                                  ? 'Remove its #pragma ograf declaration in the shader to remove this field.'
+                                  : undefined
+                              }
+                              onClick={() => removeDataField(field.id)}
+                            >
+                              {'✕'}
+                            </button>
+                          </td>
+                        </tr>
+                        <tr className="data-field-details-row">
+                          <td colSpan={6}>
+                            {field.generatedShaderParameter ? (
+                              <p className="inspector-hint">
+                                Defined by #pragma ograf {field.generatedShaderParameter.name}. Edit
+                                the shader declaration to change its type or range.
+                              </p>
+                            ) : (
+                              <FieldDetails field={field} update={updateDataField} />
+                            )}
+                          </td>
+                        </tr>
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </CollapsibleSection>
+            {composition.dataFields.length > 0 && (
+              <CollapsibleSection
+                sectionId="data.test-data"
+                title="Test Data (live preview)"
+                className="data-panel-section"
+                actions={
+                  <button type="button" onClick={resetTestData}>
+                    Reset to defaults
+                  </button>
+                }
+              >
+                <div className="test-data-form">
+                  {composition.dataFields.map((field) => (
+                    <PropertyRow
+                      help={`${field.description ? field.description + ' ' : ''}Test value for ${field.label || field.key} (${field.type}). Updates the editor preview without changing the field default or exported source.`}
+                      className="test-data-row"
+                      key={field.id}
+                    >
+                      <span>{field.label || field.key}</span>
+                      <DefaultValueInput
+                        field={field}
+                        value={testValues[field.id] ?? field.defaultValue}
+                        onChange={(value) =>
+                          setTestValue(field.id, value, composition.layers, composition.dataFields)
                         }
                       />
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={action.name}
-                        onChange={(e) => updateCustomAction(action.id, { name: e.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={action.description}
-                        onChange={(e) =>
-                          updateCustomAction(action.id, { description: e.target.value })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="data-table-delete"
-                        onClick={() => removeCustomAction(action.id)}
-                      >
-                        {'✕'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CollapsibleSection>
-
-        {composition.dataFields.length > 0 && (
-          <CollapsibleSection
-            sectionId="data.test-data"
-            title="Test Data (live preview)"
-            className="data-panel-section"
-            actions={
-              <button type="button" onClick={resetTestData}>
-                Reset to defaults
-              </button>
-            }
-          >
-            <div className="test-data-form">
-              {composition.dataFields.map((field) => (
-                <PropertyRow
-                  help={`${field.description ? field.description + ' ' : ''}Test value for ${field.label || field.key} (${field.type}). Updates the editor preview without changing the field default or exported source.`}
-                  className="test-data-row"
-                  key={field.id}
-                >
-                  <span>{field.label || field.key}</span>
-                  <DefaultValueInput
-                    field={field}
-                    value={testValues[field.id] ?? field.defaultValue}
-                    onChange={(value) =>
-                      setTestValue(field.id, value, composition.layers, composition.dataFields)
-                    }
-                  />
-                </PropertyRow>
-              ))}
-            </div>
-          </CollapsibleSection>
-        )}
-
-        <CollapsibleSection
-          sectionId="data.compiled-schema"
-          title="Compiled Schema Preview"
-          className="data-panel-section"
-          defaultOpen={false}
-        >
-          <pre className="data-json-preview">{JSON.stringify(schema, null, 2)}</pre>
-          {compiledCustomActions.length > 0 && (
-            <pre className="data-json-preview">
-              {JSON.stringify(compiledCustomActions, null, 2)}
-            </pre>
-          )}
-        </CollapsibleSection>
+                    </PropertyRow>
+                  ))}
+                </div>
+              </CollapsibleSection>
+            )}
+          </>
+        ) : null}
+        {tab === 'lists' ? <RuntimeCollectionsSection /> : null}
+        {tab === 'actions' ? (
+          <>
+            <CollapsibleSection
+              sectionId="data.custom-actions"
+              title="Custom Actions"
+              className="data-panel-section"
+              actions={
+                <button type="button" onClick={() => addCustomAction()}>
+                  {'+ Add Action'}
+                </button>
+              }
+            >
+              {composition.customActions.length === 0 ? (
+                <p className="panel-placeholder">No custom actions yet.</p>
+              ) : (
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Action ID</th>
+                      <th>Name</th>
+                      <th>Description</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {composition.customActions.map((action) => (
+                      <tr key={action.id}>
+                        <td>
+                          <input
+                            type="text"
+                            value={action.actionId}
+                            onChange={(e) =>
+                              updateCustomAction(action.id, { actionId: e.target.value })
+                            }
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={action.name}
+                            onChange={(e) =>
+                              updateCustomAction(action.id, { name: e.target.value })
+                            }
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={action.description}
+                            onChange={(e) =>
+                              updateCustomAction(action.id, { description: e.target.value })
+                            }
+                          />
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="data-table-delete"
+                            onClick={() => removeCustomAction(action.id)}
+                          >
+                            {'✕'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </CollapsibleSection>
+          </>
+        ) : null}
+        {tab === 'connections' ? <DataConnectionsSection /> : null}
+        {tab === 'schema' ? (
+          <>
+            <CollapsibleSection
+              sectionId="data.compiled-schema"
+              title="Compiled Schema Preview"
+              className="data-panel-section"
+            >
+              <pre className="data-json-preview">{JSON.stringify(schema, null, 2)}</pre>
+              {compiledCustomActions.length > 0 && (
+                <pre className="data-json-preview">
+                  {JSON.stringify(compiledCustomActions, null, 2)}
+                </pre>
+              )}
+            </CollapsibleSection>
+          </>
+        ) : null}
       </div>
     </Panel>
   );
@@ -847,12 +939,12 @@ function RuntimeCollectionsSection() {
   return (
     <CollapsibleSection
       sectionId="data.runtime-collections"
-      title="Runtime Collections"
+      title="Repeating lists"
       className="data-panel-section"
     >
       <p className="panel-placeholder">
-        Repeat one grouped item prototype from an object-item GDD array. Items share the prototype
-        timeline; overflow truncates at the authored capacity.
+        Repeat a grouped item once for each entry of a list field. Every copy shares the item's
+        animation; entries beyond the maximum are not shown.
       </p>
       <div className="data-panel-add-row">
         <select value={fieldId} onChange={(event) => setFieldId(event.target.value)}>
@@ -870,7 +962,7 @@ function RuntimeCollectionsSection() {
           ))}
         </select>
         <label>
-          X/item
+          X step
           <input
             type="number"
             value={offsetX}
@@ -878,7 +970,7 @@ function RuntimeCollectionsSection() {
           />
         </label>
         <label>
-          Y/item
+          Y step
           <input
             type="number"
             value={offsetY}
@@ -886,7 +978,7 @@ function RuntimeCollectionsSection() {
           />
         </label>
         <label>
-          Capacity
+          Max items
           <input
             type="number"
             min={1}
@@ -913,7 +1005,7 @@ function RuntimeCollectionsSection() {
             )
           }
         >
-          + Register Prototype
+          + Make repeating list
         </button>
       </div>
       {composition.runtimeCollections.map((collection) => (

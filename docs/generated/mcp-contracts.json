@@ -720,7 +720,7 @@
                         "dimOutsideCanvas": { "type": "boolean" },
                         "presentationBackground": {
                           "type": "string",
-                          "enum": ["none", "big-buck-bunny", "still-image"]
+                          "enum": ["none", "big-buck-bunny", "still-image", "webcam"]
                         },
                         "presentationBackgroundImageSource": {
                           "type": "string",
@@ -2151,6 +2151,38 @@
                 {
                   "type": "object",
                   "properties": {
+                    "type": { "type": "string", "const": "set_layer_motion" },
+                    "compositionId": { "type": "string" },
+                    "layerId": { "type": "string" },
+                    "layerName": { "type": "string" },
+                    "side": { "type": "string", "enum": ["in", "out"] },
+                    "spec": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "style": {
+                              "type": "string",
+                              "enum": ["fade", "slide", "fly", "focus"]
+                            },
+                            "durationFrames": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["style", "durationFrames"],
+                          "additionalProperties": {}
+                        },
+                        { "type": "null" }
+                      ]
+                    }
+                  },
+                  "required": ["type", "side", "spec"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
                     "type": { "type": "string", "const": "set_layer_visual_rules" },
                     "compositionId": { "type": "string" },
                     "layerId": { "type": "string" },
@@ -2167,24 +2199,20 @@
                             "type": "string",
                             "enum": [
                               "data",
+                              "hover",
                               "click",
                               "double-click",
                               "pointer-enter",
-                              "pointer-leave"
+                              "pointer-leave",
+                              "play",
+                              "step",
+                              "stop",
+                              "custom-action"
                             ]
                           },
-                          "fieldId": {
-                            "default": "",
-                            "description": "Required for data rules; pointer rules do not need a Data field.",
-                            "type": "string"
-                          },
-                          "sourcePath": {
-                            "default": [],
-                            "type": "array",
-                            "items": { "type": "string" }
-                          },
+                          "fieldId": { "type": "string" },
+                          "sourcePath": { "type": "array", "items": { "type": "string" } },
                           "operator": {
-                            "default": "equals",
                             "type": "string",
                             "enum": [
                               "equals",
@@ -2193,12 +2221,35 @@
                               "not-empty",
                               "greater-than",
                               "less-than",
+                              "greater-or-equal",
+                              "less-or-equal",
+                              "between",
+                              "contains",
+                              "not-contains",
+                              "starts-with",
+                              "ends-with",
+                              "one-of",
+                              "not-one-of",
                               "changed",
                               "increased",
                               "decreased"
                             ]
                           },
                           "value": {},
+                          "compareFieldId": { "type": "string" },
+                          "compareSourcePath": { "type": "array", "items": { "type": "string" } },
+                          "ignoreCase": { "type": "boolean" },
+                          "conditions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "propertyNames": { "type": "string" },
+                              "additionalProperties": {}
+                            }
+                          },
+                          "match": { "type": "string", "enum": ["all", "any"] },
+                          "eventId": { "type": "string" },
+                          "delayFrames": { "type": "number" },
                           "actions": {
                             "type": "array",
                             "items": {
@@ -2206,10 +2257,15 @@
                                 {
                                   "type": "object",
                                   "properties": {
-                                    "type": { "type": "string", "const": "visibility" },
-                                    "visible": { "type": "boolean" }
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["visibility", "toggle-visibility"]
+                                    },
+                                    "visible": { "type": "boolean" },
+                                    "targetLayerId": { "type": "string" },
+                                    "transitionFrames": { "type": "number" }
                                   },
-                                  "required": ["type", "visible"],
+                                  "required": ["type"],
                                   "additionalProperties": false
                                 },
                                 {
@@ -2217,7 +2273,9 @@
                                   "properties": {
                                     "type": { "type": "string", "const": "property" },
                                     "targetProperty": { "type": "string", "minLength": 1 },
-                                    "value": {}
+                                    "value": {},
+                                    "targetLayerId": { "type": "string" },
+                                    "transitionFrames": { "type": "number" }
                                   },
                                   "required": ["type", "targetProperty", "value"],
                                   "additionalProperties": false

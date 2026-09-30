@@ -1,6 +1,8 @@
 import { CANVAS_LAYOUT_HELP } from './propertyHelp';
+import { WithWarning } from '../components/WarningBadge';
 import { PropertyRow } from '../components/PropertyRow';
 import { CollapsibleSection } from '../components/CollapsibleSection';
+import { WebcamPreviewControls } from '../components/WebcamPreviewControls';
 import { useRef, useState } from 'react';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { colorPickerValue } from '../canvas/compositionBackground';
@@ -175,25 +177,25 @@ export function CompositionSettings({
         </PropertyRow>
         <FrameDurationControl
           propertyColumns
-          label="Update crossfade"
+          label="Data change fade"
           frames={composition.updateTransitionFrames}
           frameRate={composition.frameRate}
           minFrames={0}
           onChange={(updateTransitionFrames) => update({ updateTransitionFrames })}
         />
         <PropertyRow
-          help="When another update arrives during an active data transition, queue it or replace the transition immediately."
+          help="What happens when new data arrives while the previous change is still fading: finish that fade first, or jump straight to the newest data."
           className="inspector-row"
         >
-          <span>Update interruption</span>
+          <span>Data arrives mid-fade</span>
           <select
             value={composition.updateInterruption ?? 'queue'}
             onChange={(event) =>
               update({ updateInterruption: event.target.value as 'queue' | 'replace' })
             }
           >
-            <option value="queue">Queue updates</option>
-            <option value="replace">Replace active</option>
+            <option value="queue">Finish current fade first</option>
+            <option value="replace">Jump to newest data</option>
           </select>
         </PropertyRow>
       </CollapsibleSection>
@@ -219,17 +221,14 @@ export function CompositionSettings({
           className="inspector-row inspector-checkbox-row"
         >
           <span>Non-real-time</span>
-          <input
-            type="checkbox"
-            checked={project.supportsNonRealTime}
-            onChange={(event) => setProjectMeta({ supportsNonRealTime: event.target.checked })}
-          />
+          <WithWarning message={nonRealtimeWarning?.message}>
+            <input
+              type="checkbox"
+              checked={project.supportsNonRealTime}
+              onChange={(event) => setProjectMeta({ supportsNonRealTime: event.target.checked })}
+            />
+          </WithWarning>
         </PropertyRow>
-        {nonRealtimeWarning ? (
-          <p className="inspector-playout-warning" role="status">
-            ⚠ {nonRealtimeWarning.message}
-          </p>
-        ) : null}
       </CollapsibleSection>
 
       <CollapsibleSection sectionId="properties.background" title="Background">
@@ -240,13 +239,15 @@ export function CompositionSettings({
           className="inspector-row"
         >
           <span>Transparent output</span>
-          <input
-            type="checkbox"
-            checked={isTransparent}
-            onChange={(e) =>
-              update({ backgroundColor: e.target.checked ? 'transparent' : '#000000' })
-            }
-          />
+          <WithWarning message={backgroundWarning?.message}>
+            <input
+              type="checkbox"
+              checked={isTransparent}
+              onChange={(e) =>
+                update({ backgroundColor: e.target.checked ? 'transparent' : '#000000' })
+              }
+            />
+          </WithWarning>
         </PropertyRow>
         <PropertyRow
           help={
@@ -267,11 +268,6 @@ export function CompositionSettings({
             an opaque background.
           </p>
         )}
-        {backgroundWarning ? (
-          <p className="inspector-playout-warning" role="status">
-            ⚠ {backgroundWarning.message}
-          </p>
-        ) : null}
       </CollapsibleSection>
 
       <CollapsibleSection sectionId="properties.canvas-layout" title="Canvas layout">
@@ -303,7 +299,7 @@ export function CompositionSettings({
         ))}
         <PropertyRow
           help={
-            'Choose a video or still image behind the graphic for previewing its appearance over footage. This presentation background is editor-only and is not exported.'
+            'Choose a video, still image, or local webcam behind the graphic. Presentation backgrounds are editor-only and are not exported.'
           }
           className="inspector-row"
         >
@@ -319,8 +315,18 @@ export function CompositionSettings({
             <option value="none">None</option>
             <option value="big-buck-bunny">Big Buck Bunny · looping video</option>
             <option value="still-image">Still image</option>
+            <option value="webcam">Webcam · local preview</option>
           </select>
         </PropertyRow>
+        {composition.layout.presentationBackground === 'webcam' ? (
+          <div className="inspector-presentation-background-controls">
+            <WebcamPreviewControls presentation />
+            <p className="inspector-hint">
+              Start the camera to preview your transparent graphic over live video. Only the
+              background choice is saved; camera selection and frames are never exported.
+            </p>
+          </div>
+        ) : null}
         {composition.layout.presentationBackground === 'big-buck-bunny' ? (
           <p className="inspector-hint">
             Editor-only video bed; use Transparent output to see it through the composition. Big

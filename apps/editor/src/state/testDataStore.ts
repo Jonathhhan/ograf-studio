@@ -1,28 +1,39 @@
 import { create } from 'zustand';
 
 import {
-  visualRuleMatches,
-  visualRuleValue,
+  applyVisualRuleEventActions,
+  collectVisualRuleStates,
+  firedVisualRuleDataRules,
+  releaseVisualRuleOverrides,
   type FieldDefinition,
   type FieldValue,
   type Layer,
+  type LayerVisualRule,
+  type VisualRuleEffect,
 } from '@ograf-editor/scene-model';
+import { editorVisualRuleEngine } from './dataBinding';
 
 export type TestValue = FieldValue;
 
-export interface VisualRuleStateOverride {
-  properties: Record<string, unknown>;
-  visibility?: boolean;
+/** Event-rule output on the Studio canvas: change rules, and rules simulated from the Rules panel. */
+export type VisualRuleStateOverride = VisualRuleEffect;
+
+function toMap(record: Record<string, VisualRuleEffect>): Map<string, VisualRuleEffect> {
+  return new Map(Object.entries(record));
 }
 
-const EVENT_OPERATORS = new Set(['changed', 'increased', 'decreased']);
-
-function valueForField(
+function visibleOf(
+  layers: readonly Layer[],
+  fields: readonly FieldDefinition[],
   values: Record<string, TestValue>,
-  field: FieldDefinition | undefined,
-): TestValue | undefined {
-  if (!field) return undefined;
-  return Object.hasOwn(values, field.id) ? values[field.id] : field.defaultValue;
+  overrides: ReadonlyMap<string, VisualRuleEffect>,
+): (layerId: string) => boolean {
+  const states = collectVisualRuleStates(editorVisualRuleEngine(layers, fields), values);
+  return (layerId) =>
+    overrides.get(layerId)?.visibility ??
+    states.get(layerId)?.visibility ??
+    layers.find((layer) => layer.id === layerId)?.isVisible ??
+    true;
 }
 
 export function updateVisualRuleStateOverrides(
@@ -32,45 +43,29 @@ export function updateVisualRuleStateOverrides(
   previousValues: Record<string, TestValue>,
   nextValues: Record<string, TestValue>,
 ): Record<string, VisualRuleStateOverride> {
-  let result = current;
-  for (const layer of layers) {
-    let layerOverride = current[layer.id];
-    for (const rule of layer.visualRules ?? []) {
-      if (
-        !rule.enabled ||
-        (rule.trigger && rule.trigger !== 'data') ||
-        !EVENT_OPERATORS.has(rule.operator)
-      )
-        continue;
-      const field = fields.find((candidate) => candidate.id === rule.fieldId);
-      const currentValue = visualRuleValue(valueForField(nextValues, field), rule.sourcePath);
-      const previousValue = visualRuleValue(valueForField(previousValues, field), rule.sourcePath);
-      if (!visualRuleMatches(rule.operator, currentValue, rule.value, previousValue)) continue;
-      for (const action of rule.actions) {
-        if (action.type === 'property') {
-          layerOverride = {
-            properties: {
-              ...(layerOverride?.properties ?? {}),
-              [action.targetProperty]: action.value,
-            },
-            ...(layerOverride?.visibility === undefined
-              ? {}
-              : { visibility: layerOverride.visibility }),
-          };
-        } else if (action.type === 'visibility') {
-          layerOverride = {
-            properties: { ...(layerOverride?.properties ?? {}) },
-            visibility: action.visible,
-          };
-        }
-      }
-    }
-    if (layerOverride !== current[layer.id]) {
-      if (result === current) result = { ...current };
-      if (layerOverride) result[layer.id] = layerOverride;
-    }
+  if (!layers.some((layer) => layer.visualRules?.length)) return current;
+  const engine = editorVisualRuleEngine(layers, fields);
+  // Delays belong to playback; the canvas shows where a change rule lands.
+  let overrides = releaseVisualRuleOverrides(
+    engine,
+    toMap(current),
+    { data: previousValues },
+    { data: nextValues },
+  );
+  for (const fired of firedVisualRuleDataRules(engine, nextValues, previousValues)) {
+    if (fired.entered) continue;
+    overrides = applyVisualRuleEventActions(
+      engine,
+      overrides,
+      fired.rule.actions,
+      fired.hostLayerId,
+      visibleOf(layers, fields, nextValues, overrides),
+    );
   }
-  return result;
+  const changed =
+    overrides.size !== Object.keys(current).length ||
+    [...overrides].some(([layerId, effect]) => current[layerId] !== effect);
+  return changed ? Object.fromEntries(overrides) : current;
 }
 
 interface TestDataState {
@@ -88,6 +83,15 @@ interface TestDataState {
     layers?: Layer[],
     fields?: FieldDefinition[],
   ) => void;
+  /** Runs one rule's show/hide/property actions on the canvas as if its trigger fired. */
+  simulateVisualRule: (
+    hostLayerId: string,
+    rule: LayerVisualRule,
+    layers: Layer[],
+    fields: FieldDefinition[],
+  ) => void;
+  /** Clears simulated and change-rule results, keeping test values. */
+  resetVisualRuleSimulation: () => void;
   resetAll: () => void;
 }
 
@@ -122,5 +126,22 @@ export const useTestDataStore = create<TestDataState>((set) => ({
         ),
       };
     }),
+  simulateVisualRule: (hostLayerId, rule, layers, fields) =>
+    set((state) => {
+      const engine = editorVisualRuleEngine(layers, fields);
+      const overrides = toMap(state.visualRuleStateOverrides);
+      return {
+        visualRuleStateOverrides: Object.fromEntries(
+          applyVisualRuleEventActions(
+            engine,
+            overrides,
+            rule.actions,
+            hostLayerId,
+            visibleOf(layers, fields, state.values, overrides),
+          ),
+        ),
+      };
+    }),
+  resetVisualRuleSimulation: () => set({ visualRuleStateOverrides: {} }),
   resetAll: () => set({ values: {}, visualRuleStateOverrides: {} }),
 }));

@@ -1,3 +1,4 @@
+import { usePaneRequestStore } from '../state/paneRequestStore';
 import {
   Fragment,
   useEffect,
@@ -631,6 +632,14 @@ export function DockWorkspace({
   useEffect(() => {
     if (proposalId) setLayout((current) => revealDockPane(current, 'chat'));
   }, [proposalId]);
+  const paneRequest = usePaneRequestStore((state) => state.request);
+  useEffect(() => {
+    if (paneRequest) setLayout((current) => revealDockPane(current, paneRequest.pane));
+  }, [paneRequest]);
+  const resetRequest = usePaneRequestStore((state) => state.resetRequest);
+  useEffect(() => {
+    if (resetRequest > 0) setLayout(createDefaultDockLayout());
+  }, [resetRequest]);
   const { windows: detachedWindows } = useDetachedWindows();
   const [draggingPane, setDraggingPane] = useState<DockPaneId | null>(null);
   const [dropTarget, setDropTarget] = useState<DockDropTarget | null>(null);

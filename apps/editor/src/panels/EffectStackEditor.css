@@ -198,3 +198,10 @@
   padding-top: 1px;
   padding-bottom: 1px;
 }
+
+.effect-stack-builtins {
+  justify-self: start;
+  padding: 1px 6px;
+  color: var(--text-dim);
+  font-size: 10px;
+}

@@ -60,6 +60,18 @@ function offsetLayer(
       }
     : null;
   layer.bindings = layer.bindings.map((binding) => ({ ...binding, itemIndex: slot }));
+  // A row's rules drive that row's copies of sibling prototype layers.
+  if (layer.visualRules)
+    layer.visualRules = layer.visualRules.map((rule) => ({
+      ...rule,
+      actions: rule.actions.map((action) =>
+        'targetLayerId' in action &&
+        action.targetLayerId &&
+        idByPrototypeId.has(action.targetLayerId)
+          ? { ...action, targetLayerId: idByPrototypeId.get(action.targetLayerId)! }
+          : action,
+      ),
+    }));
   layer.collectionItem = {
     collectionId: collection.id,
     dataKey: collection.dataKey,
@@ -71,6 +83,7 @@ function offsetLayer(
     pageSize: collection.pageSize,
     page: collection.page,
     offsetPerItem: { ...collection.offsetPerItem },
+    prototypeLayerId: prototype.id,
   };
   return layer;
 }

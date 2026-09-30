@@ -1,3 +1,5 @@
+import { WithWarning } from '../components/WarningBadge';
+import { WebcamPreviewControls } from '../components/WebcamPreviewControls';
 import { PropertyRow } from '../components/PropertyRow';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -19,6 +21,9 @@ import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { mediaPaintReadyToCommit } from './mediaPaintDraft';
 import { MEDIA_FILE_ACCEPT, mediaFileImportError } from './mediaFileImport';
 import './PaintEditor.css';
+
+const MEDIA_PAINT_WARNING =
+  'Media is real-time-only. Studio keeps Real-time enabled and Non-real-time disabled while a Media paint is present. Prefer H.264 MP4 or VP8/VP9 WebM, and test the exported package on the target renderer because browser codec support varies.';
 
 interface PaintEditorProps {
   value: Paint | undefined;
@@ -350,21 +355,23 @@ function MediaPaintControls({
         className="inspector-row"
       >
         <span>Source type</span>
-        <select
-          value={value.source.kind}
-          disabled={disabled}
-          onChange={(event) =>
-            patch({
-              source:
-                event.target.value === 'live'
-                  ? { kind: 'live', tag: 'programme' }
-                  : { kind: 'clip', src: '' },
-            })
-          }
-        >
-          <option value="clip">Clip</option>
-          <option value="live">Live</option>
-        </select>
+        <WithWarning message={MEDIA_PAINT_WARNING}>
+          <select
+            value={value.source.kind}
+            disabled={disabled}
+            onChange={(event) =>
+              patch({
+                source:
+                  event.target.value === 'live'
+                    ? { kind: 'live', tag: 'programme' }
+                    : { kind: 'clip', src: '' },
+              })
+            }
+          >
+            <option value="clip">Clip</option>
+            <option value="live">Live</option>
+          </select>
+        </WithWarning>
       </PropertyRow>
       {value.source.kind === 'clip' ? (
         <>
@@ -476,6 +483,7 @@ function MediaPaintControls({
               }
             />
           </PropertyRow>
+          <WebcamPreviewControls tag={value.source.tag} disabled={disabled} />
           <PropertyRow
             help="Portable image shown when live media is unavailable."
             className="inspector-row"
@@ -616,11 +624,6 @@ function MediaPaintControls({
         </>
       ) : null}
       <p className="inspector-hint">Media paint is visual-only and always muted.</p>
-      <p className="inspector-playout-warning" role="status">
-        Media is real-time-only. Studio keeps Real-time enabled and Non-real-time disabled while a
-        Media paint is present. Prefer H.264 MP4 or VP8/VP9 WebM, and test the exported package on
-        the target renderer because browser codec support varies.
-      </p>
     </div>
   );
 }

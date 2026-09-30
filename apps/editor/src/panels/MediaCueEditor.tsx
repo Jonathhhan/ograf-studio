@@ -6,6 +6,7 @@ import {
   type MediaCue,
 } from '@ograf-editor/scene-model';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
+import { WebcamPreviewControls } from '../components/WebcamPreviewControls';
 import './MediaCueEditor.css';
 
 export function MediaCueEditor({ cue }: { cue: MediaCue }) {
@@ -87,21 +88,24 @@ export function MediaCueEditor({ cue }: { cue: MediaCue }) {
           </select>
         </label>
         {activeSource?.kind === 'live' ? (
-          <label>
-            Live tag
-            <input
-              value={activeSource.tag}
-              onChange={(event) =>
-                update({
-                  sources: cue.sources.map((source) =>
-                    source.id === activeSource.id && source.kind === 'live'
-                      ? { ...source, tag: event.target.value }
-                      : source,
-                  ),
-                })
-              }
-            />
-          </label>
+          <>
+            <label>
+              Live tag
+              <input
+                value={activeSource.tag}
+                onChange={(event) =>
+                  update({
+                    sources: cue.sources.map((source) =>
+                      source.id === activeSource.id && source.kind === 'live'
+                        ? { ...source, tag: event.target.value }
+                        : source,
+                    ),
+                  })
+                }
+              />
+            </label>
+            <WebcamPreviewControls tag={activeSource.tag} />
+          </>
         ) : null}
       </div>
 

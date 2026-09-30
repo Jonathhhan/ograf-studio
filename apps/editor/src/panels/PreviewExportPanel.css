@@ -342,3 +342,17 @@
   width: calc(100% - 8px);
   margin: 1px 4px;
 }
+
+.preview-developer > summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.preview-developer[open] > summary {
+  margin-bottom: 4px;
+}
+
+.preview-developer-error {
+  color: #ff8b8b;
+}

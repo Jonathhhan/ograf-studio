@@ -45,11 +45,14 @@ export { applyCompiledMotionPaths } from './motionPathRendering';
 export { resolveMediaTimelinePosition } from './mediaTimeline';
 export { MediaCueRuntime, mediaCueAutomaticStartMs } from './mediaCueRuntime';
 export {
+  createRuntimeVisualRuleEngine,
   layerHasRuntimeVisualInputs,
-  matchingVisualRules,
+  resolveVisualRuleEffects,
   resolveVisualRuleElement,
-  triggeredVisualRuleActions,
+  RuntimeVisualRules,
+  visualRuleEffectFor,
   visualRuleLayerVisible,
+  type RuntimeVisualRuleEffect,
 } from './runtimeVisualRules';
 export { expandRuntimeCollections, isRuntimeCollectionLayerActive } from './runtimeCollections';
 export { resolvePlayTarget, type LifecycleTarget } from './lifecycle';

@@ -27,8 +27,8 @@ export function TextAnimationEditor({
       sectionId="properties.text-animation"
       title={
         animation.type === 'none'
-          ? 'Animation'
-          : `Animation · ${TEXT_ANIMATION_LABELS[animation.type]}`
+          ? 'Text animation'
+          : `Text animation · ${TEXT_ANIMATION_LABELS[animation.type]}`
       }
       defaultOpen={false}
     >

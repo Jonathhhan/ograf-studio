@@ -38,6 +38,38 @@ describe('canonical OGraf validation', () => {
       ),
     ).toBe(false);
   });
+  it('reports broken rule targets, comparisons, triggers, and state-only misuse', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const field = createFieldDefinition('integer', { key: 'score' });
+    composition.dataFields.push(field);
+    const layer = createLayerOfKind('rectangle');
+    layer.visualRules = [
+      createLayerVisualRule({
+        name: 'Target',
+        fieldId: field.id,
+        actions: [{ type: 'visibility', visible: true, targetLayerId: 'missing-layer' }],
+      }),
+      createLayerVisualRule({ name: 'Compare', fieldId: field.id, compareFieldId: 'missing' }),
+      createLayerVisualRule({ name: 'Range', fieldId: field.id, operator: 'between', value: 'x' }),
+      createLayerVisualRule({ name: 'Action', trigger: 'custom-action', eventId: 'missing' }),
+      createLayerVisualRule({
+        name: 'Toggle',
+        fieldId: field.id,
+        delayFrames: 5,
+        actions: [{ type: 'toggle-visibility' }],
+      }),
+    ];
+    composition.layers.push(layer);
+    const errors = validateProject(project).errors.join('\n');
+    expect(errors).toContain('"Target" targets a missing layer');
+    expect(errors).toContain('"Compare" compares with a missing data field');
+    expect(errors).toContain('"Range" needs a [min, max] pair');
+    expect(errors).toContain('"Action" must name an existing custom action');
+    expect(errors).toContain('"Toggle" delay applies only to event triggers');
+    expect(errors).toContain('"Toggle" can toggle visibility only on an event trigger');
+  });
+
   it('validates media clip assets and keeps live sources realtime-only', () => {
     const project = createProject();
     const composition = project.compositions[0]!;

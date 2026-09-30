@@ -4,6 +4,7 @@ import { useProjectStore } from './projectStore';
 import { useSelectionStore } from './selectionStore';
 import { selectableLayerIds } from './selectAllLayers';
 import { isInteractiveShortcutTarget } from './keyboardShortcuts';
+import { copyLayers, cutLayers, groupLayers, pasteLayers, ungroupLayers } from './layerCommands';
 
 export function duplicateLayerSelection(layerIds: string[]): string[] {
   const state = useProjectStore.getState();
@@ -74,6 +75,19 @@ export function installEditorShortcuts(owner: Window) {
       return;
     }
     if (interactiveTarget) return;
+    // Layer clipboard and grouping. Text fields returned above, so they keep native copy/paste,
+    // and nothing is prevented when there is nothing to act on.
+    if (modifier && !e.altKey && !e.repeat && !insideModal) {
+      if (key === 'c' && !e.shiftKey && copyLayers() > 0) return e.preventDefault();
+      if (key === 'x' && !e.shiftKey && cutLayers() > 0) return e.preventDefault();
+      if (key === 'v' && !e.shiftKey && pasteLayers().length > 0) return e.preventDefault();
+      if (key === 'g') {
+        e.preventDefault();
+        if (e.shiftKey) ungroupLayers();
+        else groupLayers();
+        return;
+      }
+    }
     if (e.code === 'Space' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) {
       const { controller, isPlaying } = useTimelineStore.getState();
       if (!controller) return;

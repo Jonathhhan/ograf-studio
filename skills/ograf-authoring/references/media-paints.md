@@ -91,5 +91,11 @@ video and **Create Playback Cue** on audio create cues without Timeline rows or 
 version 1 hook; manifests declare `ZeroDensityHTML >= 1.0`. Remote URLs require public internet/CORS.
 Media Cues are real-time-only in the initial profile, so use realtime certification/export.
 
+Studio can supply muted webcam video for a live tag on the canvas and in OGraf Preview. Start it
+explicitly beside the tag in Media fill or Media Cue controls; permission, device choice, and frames
+stay local and never enter `.ogs` or exported packages. Canvas Layout also offers an editor-only
+Webcam presentation background behind transparent artwork. Both previews can share one camera but
+stop independently. Exported live tags still depend on the target renderer's source hook.
+
 There is intentionally no conversion from the unreleased experimental Audio element or Media-paint
 prototype into Media Cues.

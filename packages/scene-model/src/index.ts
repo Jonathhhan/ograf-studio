@@ -44,6 +44,7 @@ export * from './stylePacks';
 export * from './repeaterRecipes';
 export * from './designQa';
 export * from './motionPresets';
+export * from './layerMotion';
 export * from './motionPath';
 export * from './blendModes';
 export * from './fieldSchema';

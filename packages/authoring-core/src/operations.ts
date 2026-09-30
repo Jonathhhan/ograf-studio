@@ -1,5 +1,10 @@
 import {
   isGradientPaint,
+  normalizeLayerVisualRule,
+  pruneVisualRuleReferences,
+  remapVisualRule,
+  renameVisualRuleCustomAction,
+  visualRuleFieldIds,
   isMediaPaint,
   getElementShaderPaint,
   getElementShaderPaints,
@@ -8,6 +13,9 @@ import {
   normalizeMediaPaint,
   normalizeLayerAutoLayout,
   normalizeTextAnimation,
+  applyLayerMotion,
+  layerMotionStyleAvailable,
+  layerMotionWindows,
   migrateShaderBindingTarget,
   shaderPaintConflictsWithBinding,
   parseShaderAnimationProperty,
@@ -575,9 +583,7 @@ function duplicateGroup(
         ...new Set(
           sources.flatMap((layer) => [
             ...layer.bindings.map((binding) => binding.fieldId),
-            ...(layer.visualRules ?? [])
-              .filter((rule) => !rule.trigger || rule.trigger === 'data')
-              .map((rule) => rule.fieldId),
+            ...(layer.visualRules ?? []).flatMap(visualRuleFieldIds),
           ]),
         ),
       ];
@@ -718,12 +724,14 @@ function duplicateGroup(
           ...binding,
           fieldId: fieldIds[binding.fieldId] ?? binding.fieldId,
         }));
-        layer.visualRules = (layer.visualRules ?? []).map((rule) => ({
-          ...rule,
-          id: createId('visual-rule'),
-          fieldId: fieldIds[rule.fieldId] ?? rule.fieldId,
-        }));
       }
+      // Rules that drive siblings inside the group drive the copied siblings.
+      layer.visualRules = (layer.visualRules ?? []).map((rule) =>
+        remapVisualRule(rule, {
+          layerIds: new Map(Object.entries(layerIds)),
+          ...(bindings === 'clone' ? { fieldIds: new Map(Object.entries(fieldIds)) } : {}),
+        }),
+      );
       summary.generatedIds.push({ operationIndex, kind: 'layer', id: layer.id });
       summary.affectedLayerIds.push(layer.id);
       return layer;
@@ -1103,6 +1111,7 @@ export function applyAuthoringOperations(
           );
         }
         summary.affectedFrames.push(removedFrame);
+        pruneVisualRuleReferences(composition);
         break;
       }
       case 'add_canvas_guide': {
@@ -1533,6 +1542,7 @@ export function applyAuthoringOperations(
           throw new Error(`Media cue not found: ${operation.cueId}`);
         }
         composition.mediaCues = composition.mediaCues.filter((cue) => cue.id !== operation.cueId);
+        pruneVisualRuleReferences(composition);
         break;
       }
       case 'add_layer': {
@@ -1675,6 +1685,7 @@ export function applyAuthoringOperations(
         for (const layer of composition.layers) {
           if (layer.parentId === operation.layerId) layer.parentId = null;
         }
+        pruneVisualRuleReferences(composition);
         break;
       case 'rename_layer':
         layerFor(composition, operation.layerId).name = operation.name;
@@ -1739,15 +1750,53 @@ export function applyAuthoringOperations(
         }
         break;
       }
+      case 'set_layer_motion': {
+        const layer = layerFor(composition, operation.layerId);
+        assertUnlocked(layer);
+        const windows = layerMotionWindows(composition);
+        if (!windows) throw new Error('Animate In/Out needs a Start, Step, and End keyframe.');
+        const available = operation.side === 'in' ? windows.inFrames : windows.outFrames;
+        if (available < 1) throw new Error(`Animate ${operation.side} has no available frames.`);
+        if (operation.spec) {
+          if (operation.spec.durationFrames > available)
+            throw new Error(`Animate ${operation.side} duration exceeds ${available} frames.`);
+          if (!layerMotionStyleAvailable(layer, operation.spec.style))
+            throw new Error('Focus motion needs the layer’s built-in blur effect.');
+        }
+        applyLayerMotion(composition, layer, operation.side, operation.spec);
+        break;
+      }
       case 'set_layer_visual_rules': {
         const layer = layerFor(composition, operation.layerId);
         assertUnlocked(layer);
+        const rules = operation.rules.map(normalizeLayerVisualRule);
         const fieldIds = new Set(composition.dataFields.map((field) => field.id));
         const actionIds = new Set(composition.customActions.map((action) => action.actionId));
-        for (const rule of operation.rules) {
-          if ((!rule.trigger || rule.trigger === 'data') && !fieldIds.has(rule.fieldId))
+        const layerIds = new Set(composition.layers.map((candidate) => candidate.id));
+        for (const rule of rules) {
+          const trigger = rule.trigger ?? 'data';
+          if (trigger === 'data' && !fieldIds.has(rule.fieldId))
             throw new Error(`Visual rule field not found: ${rule.fieldId}`);
+          for (const fieldId of visualRuleFieldIds(rule)) {
+            if (!fieldIds.has(fieldId)) throw new Error(`Visual rule field not found: ${fieldId}`);
+          }
+          if (trigger === 'custom-action' && (!rule.eventId || !actionIds.has(rule.eventId)))
+            throw new Error(`Visual rule trigger custom action not found: ${rule.eventId ?? ''}`);
+          if (
+            trigger === 'step' &&
+            rule.eventId &&
+            !composition.keyframes.some((key) => key.id === rule.eventId && key.role === 'step')
+          )
+            throw new Error(`Visual rule trigger step not found: ${rule.eventId}`);
           for (const action of rule.actions) {
+            if (
+              (action.type === 'visibility' ||
+                action.type === 'toggle-visibility' ||
+                action.type === 'property') &&
+              action.targetLayerId &&
+              !layerIds.has(action.targetLayerId)
+            )
+              throw new Error(`Visual rule target layer not found: ${action.targetLayerId}`);
             if (
               (action.type === 'custom-action' || action.type === 'shader-animation') &&
               !actionIds.has(action.actionId)
@@ -1762,7 +1811,7 @@ export function applyAuthoringOperations(
             }
           }
         }
-        layer.visualRules = structuredClone(operation.rules);
+        layer.visualRules = structuredClone(rules);
         break;
       }
       case 'set_layer_mask': {
@@ -2383,8 +2432,12 @@ export function applyAuthoringOperations(
           throw new Error(
             'Remove the corresponding #pragma ograf declaration from the shader source to remove its generated data field.',
           );
-        const consumers = composition.layers.filter((layer) =>
-          layer.bindings.some((binding) => binding.fieldId === operation.fieldId),
+        const consumers = composition.layers.filter(
+          (layer) =>
+            layer.bindings.some((binding) => binding.fieldId === operation.fieldId) ||
+            (layer.visualRules ?? []).some((rule) =>
+              visualRuleFieldIds(rule).includes(operation.fieldId),
+            ),
         );
         const collectionConsumers = composition.runtimeCollections.filter(
           (collection) => collection.fieldId === operation.fieldId,
@@ -2427,6 +2480,7 @@ export function applyAuthoringOperations(
             (collection) => collection.fieldId !== field.id,
           );
         }
+        pruneVisualRuleReferences(composition);
         break;
       }
       case 'set_layer_binding': {
@@ -2657,6 +2711,7 @@ export function applyAuthoringOperations(
               layer.element.textAnimation.customActionId = nextActionId;
             }
           }
+          renameVisualRuleCustomAction(composition.layers, previousActionId, nextActionId);
         }
         if (operation.name !== undefined) action.name = operation.name;
         if (operation.description !== undefined) action.description = operation.description;
@@ -2684,6 +2739,7 @@ export function applyAuthoringOperations(
             layer.element.textAnimation.customActionId = null;
           }
         }
+        pruneVisualRuleReferences(composition);
         break;
       }
       case 'set_transition': {

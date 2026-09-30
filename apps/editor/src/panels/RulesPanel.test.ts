@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createFieldDefinition, createLayerOfKind, createProject } from '@ograf-editor/scene-model';
+import {
+  createAsset,
+  createFieldDefinition,
+  createLayerOfKind,
+  createProject,
+} from '@ograf-editor/scene-model';
+import { validateProject } from '@ograf-editor/validation';
 import { useProjectStore } from '../state/projectStore';
 
 const source = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -90,6 +96,34 @@ describe('dockable Rules pane', () => {
       fieldId: updated.dataFields[0]!.id,
       operator: 'not-empty',
     });
+  });
+
+  it('turns imported audio into a sound only rules start', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const layer = createLayerOfKind('rectangle');
+    composition.layers.push(layer);
+    composition.assets.push(
+      createAsset({
+        id: 'click-sound',
+        name: 'click.mp3',
+        kind: 'audio',
+        mimeType: 'audio/mpeg',
+        dataUri: 'data:audio/mpeg;base64,AAAA',
+      }),
+    );
+    useProjectStore.getState().loadProject(project);
+
+    const cueId = useProjectStore.getState().addRuleSoundFromAsset('click-sound');
+    const ruleId = useProjectStore.getState().addLayerVisualRule(layer.id, 'click')!;
+    useProjectStore.getState().updateLayerVisualRule(layer.id, ruleId, {
+      actions: [{ type: 'play-sound', cueId }],
+    });
+    const updated = useProjectStore.getState().project;
+    expect(updated.compositions[0]!.mediaCues).toEqual([
+      expect.objectContaining({ id: cueId, name: 'click', trigger: { type: 'manual' } }),
+    ]);
+    expect(validateProject(updated).errors).toEqual([]);
   });
 
   it('keeps one rule editor to two compact rows', () => {

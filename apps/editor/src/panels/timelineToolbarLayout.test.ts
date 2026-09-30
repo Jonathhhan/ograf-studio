@@ -10,7 +10,7 @@ describe('Timeline toolbar grouping', () => {
 
     expect(panel).toContain('timeline-playback-options');
     expect(panel).toContain('>Keys</span>');
-    expect(panel).toContain('>Retime</span>');
+    expect(panel).toContain('>Length</span>');
     expect(panel).toContain('>View</span>');
     expect(panel).toContain('>Transition</span>');
     expect(css).toMatch(

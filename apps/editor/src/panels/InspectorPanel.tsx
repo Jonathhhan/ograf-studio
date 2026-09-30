@@ -1,6 +1,9 @@
 import { useEditorWindow } from '../layout/EditorWindow';
 import { TRANSFORM_HELP } from './propertyHelp';
+import { WithWarning } from '../components/WarningBadge';
 import { PropertyRow } from '../components/PropertyRow';
+import { LayerMotionEditor } from './LayerMotionEditor';
+import { usePaneRequestStore } from '../state/paneRequestStore';
 import { CollapsibleSection } from '../components/CollapsibleSection';
 import { EffectStackEditor } from './EffectStackEditor';
 import { ImageSourceEditor } from './ImageSourceEditor';
@@ -21,7 +24,7 @@ import {
 import { useSelectionStore } from '../state/selectionStore';
 import { useShaderParameterPreviewStore } from '../state/shaderParameterPreviewStore';
 import { bindableProperties } from '../state/dataBinding';
-import { nextBindingProperty } from '../state/bindingFieldCreation';
+import { nextBindingProperty, playoutProperty } from '../state/bindingFieldCreation';
 import type {
   BlendMode,
   CornerRadii,
@@ -264,10 +267,24 @@ function CornerRadiusEditor({
   );
 }
 
+const VISUAL_RULE_TRIGGER_LABELS: Record<VisualRuleTrigger, string> = {
+  data: 'Data',
+  hover: 'While hovered',
+  click: 'Clicked',
+  'double-click': 'Double-clicked',
+  'pointer-enter': 'Mouse over',
+  'pointer-leave': 'Mouse leave',
+  play: 'Played in',
+  step: 'Step reached',
+  stop: 'Taken out',
+  'custom-action': 'Custom action',
+};
+
 export function InspectorPanel() {
   const { window } = useEditorWindow();
   const composition = useActiveComposition();
   const currentFrame = useTimelineStore((s) => s.currentFrame);
+  const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
   const selectedLayerId = useSelectionStore((s) => s.selectedLayerId);
   const selectedLayerIds = useSelectionStore((s) => s.selectedLayerIds);
   const liveTransform = useSelectionStore((s) => s.liveTransform);
@@ -292,14 +309,13 @@ export function InspectorPanel() {
   const setLayerUpdateTransition = useProjectStore((s) => s.setLayerUpdateTransition);
   const setLayerMotionPath = useProjectStore((s) => s.setLayerMotionPath);
   const addLayerVisualRule = useProjectStore((s) => s.addLayerVisualRule);
-  const updateLayerVisualRule = useProjectStore((s) => s.updateLayerVisualRule);
-  const removeLayerVisualRule = useProjectStore((s) => s.removeLayerVisualRule);
+  const revealPane = usePaneRequestStore((s) => s.reveal);
+  const setLayerPlayoutEditable = useProjectStore((s) => s.setLayerPlayoutEditable);
   const setLayerSemantics = useProjectStore((s) => s.setLayerSemantics);
   const setLayerBlendMode = useProjectStore((s) => s.setLayerBlendMode);
   const bindDesignToken = useProjectStore((s) => s.bindDesignToken);
   const unbindDesignToken = useProjectStore((s) => s.unbindDesignToken);
   const [propertyFilter, setPropertyFilter] = useState('');
-  const [newRuleTrigger, setNewRuleTrigger] = useState<VisualRuleTrigger>('data');
   const [audioImportError, setAudioImportError] = useState<string | null>(null);
   const inspectorRef = useRef<HTMLDivElement>(null);
   usePropertiesFilter(inspectorRef, propertyFilter);
@@ -332,6 +348,11 @@ export function InspectorPanel() {
     ? composition.layers.filter((candidate) => selectedLayerIds.includes(candidate.id))
     : [layer];
   const visualRules = layer.visualRules ?? [];
+  const playoutTarget = playoutProperty(layer);
+  const playoutFieldId = playoutTarget
+    ? layer.bindings.find((binding) => binding.targetProperty === playoutTarget.value)?.fieldId
+    : undefined;
+  const playoutField = composition.dataFields.find((field) => field.id === playoutFieldId) ?? null;
   const pathStretchInsets = layer.element.type === 'path' ? layer.element.stretchInsets : undefined;
   const selectedTextElement = layer.element.type === 'text' ? layer.element : null;
   const selectedTextAnimation = selectedTextElement
@@ -518,11 +539,37 @@ export function InspectorPanel() {
           }
         />
         <p className="inspector-hint">1 is back; {composition.layers.length} is front.</p>
+        {playoutTarget ? (
+          <PropertyRow
+            help={`Let playout replace this layer's ${playoutTarget.label.toLowerCase()}. Switching on creates a data field named after the layer, starting with the current ${playoutTarget.label.toLowerCase()}; switching off removes it unless something else uses it.`}
+            className="inspector-row inspector-checkbox-row"
+          >
+            <span>Editable in playout</span>
+            <input
+              type="checkbox"
+              checked={playoutField !== null}
+              disabled={layer.isLocked}
+              onChange={(event) => setLayerPlayoutEditable(layer.id, event.target.checked)}
+            />
+          </PropertyRow>
+        ) : null}
+        {playoutField ? (
+          <p className="inspector-hint">
+            Playout fills this from <strong>{playoutField.label || playoutField.key}</strong> (
+            <code>{playoutField.key}</code>). Rename or describe it under Data → Fields.
+          </p>
+        ) : null}
         <CollapsibleSection
           sectionId="properties.transform"
-          title={`Transform — frame ${roundedFrame}`}
+          title={autoKeyframe ? `Transform — key at frame ${roundedFrame}` : 'Transform'}
         >
-          {!activeLayerKeyframe && (
+          {!autoKeyframe && (
+            <p className="inspector-hint">
+              Edits move all of this layer&apos;s keys. To animate, use Animate In / Out or turn on
+              Auto-keyframe.
+            </p>
+          )}
+          {autoKeyframe && !activeLayerKeyframe && (
             <div className="inspector-evaluated-pose">
               <span>Evaluated between keys</span>
               <output>{evaluatedPixelSummary}</output>
@@ -612,6 +659,14 @@ export function InspectorPanel() {
               </select>
             </PropertyRow>
           )}
+        </CollapsibleSection>
+
+        <CollapsibleSection sectionId="properties.motion" title="Animate In / Out">
+          <LayerMotionEditor
+            composition={composition}
+            layer={layer}
+            layerIds={selectedLayerIds.includes(layer.id) ? selectedLayerIds : [layer.id]}
+          />
         </CollapsibleSection>
 
         <CollapsibleSection
@@ -1532,17 +1587,19 @@ export function InspectorPanel() {
             <>
               <PropertyRow help="Packaged audio clip used by this layer." className="inspector-row">
                 <span>Audio source</span>
-                <select
-                  value={selectedAudioElement.src ?? ''}
-                  onChange={(event) => setElement({ src: event.target.value || null })}
-                >
-                  <option value="">None</option>
-                  {audioAssets.map((asset) => (
-                    <option key={asset.id} value={`asset:${asset.id}`}>
-                      {asset.name}
-                    </option>
-                  ))}
-                </select>
+                <WithWarning message="Audio is real-time-only and may require an operator interaction in ordinary browsers.">
+                  <select
+                    value={selectedAudioElement.src ?? ''}
+                    onChange={(event) => setElement({ src: event.target.value || null })}
+                  >
+                    <option value="">None</option>
+                    {audioAssets.map((asset) => (
+                      <option key={asset.id} value={`asset:${asset.id}`}>
+                        {asset.name}
+                      </option>
+                    ))}
+                  </select>
+                </WithWarning>
               </PropertyRow>
               <div className="inspector-button-row">
                 <label>
@@ -1637,10 +1694,6 @@ export function InspectorPanel() {
                   }
                 />
               </PropertyRow>
-              <p className="inspector-playout-warning">
-                Audio is real-time-only and may require an operator interaction in ordinary
-                browsers.
-              </p>
             </>
           )}
         </CollapsibleSection>
@@ -1653,702 +1706,6 @@ export function InspectorPanel() {
             onChange={setTextAnimation}
           />
         ) : null}
-        {tokenTargets.length > 0 && (
-          <CollapsibleSection sectionId="properties.brand-tokens" title="Brand tokens">
-            {tokenTargets.map((target) => {
-              const binding = layer.designTokenBindings.find(
-                (candidate) => candidate.targetProperty === target.property,
-              );
-              const compatibleTokens = composition.designSystem.tokens.filter(
-                (token) => token.type === target.tokenType,
-              );
-              return (
-                <PropertyRow
-                  help={`Link ${target.label.toLowerCase()} to a shared Brand Kit token. Editing the token updates this property on linked layers. Unlinked removes the connection while keeping the current value.`}
-                  className="inspector-row"
-                  key={target.property}
-                >
-                  <span>{target.label}</span>
-                  <select
-                    value={binding?.tokenId ?? ''}
-                    onChange={(event) => {
-                      if (event.target.value) {
-                        bindDesignToken(layer.id, event.target.value, target.property);
-                      } else {
-                        unbindDesignToken(layer.id, target.property);
-                      }
-                    }}
-                  >
-                    <option value="">Unlinked</option>
-                    {compatibleTokens.map((token) => (
-                      <option key={token.id} value={token.id}>
-                        {token.name} ({token.key})
-                      </option>
-                    ))}
-                  </select>
-                </PropertyRow>
-              );
-            })}
-            {composition.designSystem.tokens.length === 0 && (
-              <p className="inspector-hint">Create brand tokens in Brand Kit first.</p>
-            )}
-          </CollapsibleSection>
-        )}
-        <EffectStackEditor layer={layer} frame={roundedFrame} groupLayers={effectGroupLayers} />
-        <LayerLightingEditor key={`lighting-${layer.id}`} layer={layer} composition={composition} />
-
-        <CollapsibleSection sectionId="properties.compositing" title="Compositing">
-          <PropertyRow
-            help={
-              "Choose how this layer's colors combine with layers behind it. Normal draws it normally; other modes can lighten, darken or mix the result."
-            }
-            className="inspector-row"
-          >
-            <span>Blend mode</span>
-            <select
-              value={layer.blendMode}
-              disabled={layer.isLocked}
-              onChange={(event) => setLayerBlendMode(layer.id, event.target.value as BlendMode)}
-            >
-              {BLEND_MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {mode.replace('-', ' ')}
-                </option>
-              ))}
-            </select>
-          </PropertyRow>
-
-          <LayerMaskEditor composition={composition} layer={layer} key={layer.id} />
-        </CollapsibleSection>
-        <CollapsibleSection sectionId="properties.layout" title="Layout relationships">
-          <PropertyRow
-            help="Arrange this layer's direct children automatically in paint order."
-            className="inspector-row"
-          >
-            <span>Auto layout</span>
-            <select
-              value={autoLayout.direction}
-              onChange={(event) =>
-                setLayerAutoLayout(layer.id, {
-                  direction: event.target.value as typeof autoLayout.direction,
-                })
-              }
-            >
-              <option value="none">Off</option>
-              <option value="horizontal">Horizontal</option>
-              <option value="vertical">Vertical</option>
-            </select>
-          </PropertyRow>
-          {autoLayout.direction !== 'none' ? (
-            <>
-              <PropertyRow help="Space between each direct child." className="inspector-row">
-                <span>Gap</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={autoLayout.gap}
-                  onChange={(event) =>
-                    setLayerAutoLayout(layer.id, { gap: Number(event.target.value) })
-                  }
-                />
-              </PropertyRow>
-              <PropertyRow help="Alignment across the flow direction." className="inspector-row">
-                <span>Alignment</span>
-                <select
-                  value={autoLayout.align}
-                  onChange={(event) =>
-                    setLayerAutoLayout(layer.id, {
-                      align: event.target.value as typeof autoLayout.align,
-                    })
-                  }
-                >
-                  <option value="start">Start</option>
-                  <option value="center">Center</option>
-                  <option value="end">End</option>
-                  <option value="stretch">Stretch</option>
-                </select>
-              </PropertyRow>
-              {(
-                [
-                  ['paddingTop', 'Padding top'],
-                  ['paddingRight', 'Padding right'],
-                  ['paddingBottom', 'Padding bottom'],
-                  ['paddingLeft', 'Padding left'],
-                ] as const
-              ).map(([property, label]) => (
-                <PropertyRow help={`${label} in pixels.`} className="inspector-row" key={property}>
-                  <span>{label}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={autoLayout[property]}
-                    onChange={(event) =>
-                      setLayerAutoLayout(layer.id, { [property]: Number(event.target.value) })
-                    }
-                  />
-                </PropertyRow>
-              ))}
-              <PropertyRow
-                help="Resize this container's width to its laid-out children."
-                className="inspector-row inspector-checkbox-row"
-              >
-                <span>Hug width</span>
-                <input
-                  type="checkbox"
-                  checked={autoLayout.hugWidth}
-                  onChange={(event) =>
-                    setLayerAutoLayout(layer.id, { hugWidth: event.target.checked })
-                  }
-                />
-              </PropertyRow>
-              <PropertyRow
-                help="Resize this container's height to its laid-out children."
-                className="inspector-row inspector-checkbox-row"
-              >
-                <span>Hug height</span>
-                <input
-                  type="checkbox"
-                  checked={autoLayout.hugHeight}
-                  onChange={(event) =>
-                    setLayerAutoLayout(layer.id, { hugHeight: event.target.checked })
-                  }
-                />
-              </PropertyRow>
-              {autoLayout.hugWidth ? (
-                <>
-                  <PropertyRow
-                    help="Minimum hugged background width; zero disables the minimum."
-                    className="inspector-row"
-                  >
-                    <span>Minimum width</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={autoLayout.minWidth}
-                      onChange={(event) =>
-                        setLayerAutoLayout(layer.id, { minWidth: Number(event.target.value) })
-                      }
-                    />
-                  </PropertyRow>
-                  <PropertyRow
-                    help="Maximum hugged background width; zero leaves it unlimited."
-                    className="inspector-row"
-                  >
-                    <span>Maximum width</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={autoLayout.maxWidth}
-                      onChange={(event) =>
-                        setLayerAutoLayout(layer.id, { maxWidth: Number(event.target.value) })
-                      }
-                    />
-                  </PropertyRow>
-                </>
-              ) : null}
-              <PropertyRow
-                help="Remove hidden direct children from spacing instead of reserving their slot."
-                className="inspector-row inspector-checkbox-row"
-              >
-                <span>Collapse hidden</span>
-                <input
-                  type="checkbox"
-                  checked={autoLayout.collapseHidden}
-                  onChange={(event) =>
-                    setLayerAutoLayout(layer.id, { collapseHidden: event.target.checked })
-                  }
-                />
-              </PropertyRow>
-            </>
-          ) : null}
-          <PropertyRow
-            help={
-              "Clip child layers at this parent layer's bounds. Use it to keep moving content inside a panel or lower-third background."
-            }
-            className="inspector-row inspector-checkbox-row"
-          >
-            <span>Clip children</span>
-            <input
-              type="checkbox"
-              checked={layer.clipChildren}
-              onChange={(event) => setLayerClipChildren(layer.id, event.target.checked)}
-            />
-          </PropertyRow>
-
-          <PropertyRow
-            help={
-              'Lock this layer to protect it from selection-based edits and accidental moves. Unlock it before editing its transform or protected properties.'
-            }
-            className="inspector-row inspector-checkbox-row"
-          >
-            <span>Locked</span>
-            <input
-              type="checkbox"
-              checked={layer.isLocked}
-              onChange={() => toggleLayerLock(layer.id)}
-            />
-          </PropertyRow>
-          <PropertyRow
-            help={
-              'Choose a parent layer to establish a layout relationship. Parent movement and resizing can move or resize this layer according to its constraints.'
-            }
-            className="inspector-row"
-          >
-            <span>Parent</span>
-            <select
-              value={layer.parentId ?? ''}
-              onChange={(event) => setLayerParent(layer.id, event.target.value || null)}
-            >
-              <option value="">None</option>
-              {composition.layers
-                .filter((candidate) => candidate.id !== layer.id)
-                .map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                  </option>
-                ))}
-            </select>
-          </PropertyRow>
-          <PropertyRow
-            help="Attach this layer to an editable path. Animate Motion Path Progress from 0 to 1, or use a ping-pong local loop."
-            className="inspector-row"
-          >
-            <span>Motion path</span>
-            <select
-              value={layer.motionPath?.sourceLayerId ?? ''}
-              onChange={(event) =>
-                setLayerMotionPath(
-                  layer.id,
-                  event.target.value
-                    ? {
-                        sourceLayerId: event.target.value,
-                        progress: layer.motionPath?.progress ?? 0,
-                        orientToPath: layer.motionPath?.orientToPath ?? true,
-                        offsetX: layer.motionPath?.offsetX ?? 0,
-                        offsetY: layer.motionPath?.offsetY ?? 0,
-                      }
-                    : null,
-                )
-              }
-            >
-              <option value="">None</option>
-              {composition.layers
-                .filter(
-                  (candidate) => candidate.id !== layer.id && candidate.element.type === 'path',
-                )
-                .map((candidate) => (
-                  <option value={candidate.id} key={candidate.id}>
-                    {candidate.name}
-                  </option>
-                ))}
-            </select>
-          </PropertyRow>
-          {layer.motionPath ? (
-            <>
-              <PropertyRow help="Position along the path from 0 to 1." className="inspector-row">
-                <span>Path progress</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={layer.motionPath.progress}
-                  onChange={(event) =>
-                    setLayerMotionPath(layer.id, {
-                      ...layer.motionPath!,
-                      progress: Math.max(0, Math.min(1, Number(event.target.value))),
-                    })
-                  }
-                />
-              </PropertyRow>
-              <PropertyRow
-                help="Rotate the attached layer to match the path tangent."
-                className="inspector-row inspector-checkbox-row"
-              >
-                <span>Orient to path</span>
-                <input
-                  type="checkbox"
-                  checked={layer.motionPath.orientToPath}
-                  onChange={(event) =>
-                    setLayerMotionPath(layer.id, {
-                      ...layer.motionPath!,
-                      orientToPath: event.target.checked,
-                    })
-                  }
-                />
-              </PropertyRow>
-              {(['offsetX', 'offsetY'] as const).map((property) => (
-                <PropertyRow
-                  help="Pixel offset from the sampled path point."
-                  className="inspector-row"
-                  key={property}
-                >
-                  <span>{property === 'offsetX' ? 'Path offset X' : 'Path offset Y'}</span>
-                  <input
-                    type="number"
-                    value={layer.motionPath![property]}
-                    onChange={(event) =>
-                      setLayerMotionPath(layer.id, {
-                        ...layer.motionPath!,
-                        [property]: Number(event.target.value),
-                      })
-                    }
-                  />
-                </PropertyRow>
-              ))}
-              <div className="inspector-button-row">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const store = useProjectStore.getState();
-                    store.setLayerLoop(layer.id, {
-                      name: 'Path ping-pong',
-                      activation: { type: 'lifecycle' },
-                      durationFrames: 50,
-                      repeatCount: null,
-                    });
-                    store.setLayerLoopPropertyTrack(layer.id, 'motionPathProgress', [
-                      createLayerPropertyKeyframe(0, 0),
-                      createLayerPropertyKeyframe(25, 1, { easing: 'sine-in-out' }),
-                      createLayerPropertyKeyframe(50, 0, { easing: 'sine-in-out' }),
-                    ]);
-                  }}
-                >
-                  Add ping-pong loop
-                </button>
-              </div>
-            </>
-          ) : null}
-          <div className="inspector-grid">
-            <PropertyRow
-              help={
-                "Choose how the layer's horizontal position and width respond when its parent or canvas is resized: anchor an edge, stretch, center or scale."
-              }
-              className="inspector-row"
-            >
-              <span>Horizontal</span>
-              <select
-                value={layer.constraints.horizontal}
-                onChange={(event) =>
-                  setLayerConstraints(layer.id, {
-                    horizontal: event.target.value as typeof layer.constraints.horizontal,
-                  })
-                }
-              >
-                <option value="left">Left</option>
-                <option value="right">Right</option>
-                <option value="left-right">Left + Right</option>
-                <option value="center">Center</option>
-                <option value="scale">Scale</option>
-              </select>
-            </PropertyRow>
-            <PropertyRow
-              help={
-                "Choose how the layer's vertical position and height respond when its parent or canvas is resized: anchor an edge, stretch, center or scale."
-              }
-              className="inspector-row"
-            >
-              <span>Vertical</span>
-              <select
-                value={layer.constraints.vertical}
-                onChange={(event) =>
-                  setLayerConstraints(layer.id, {
-                    vertical: event.target.value as typeof layer.constraints.vertical,
-                  })
-                }
-              >
-                <option value="top">Top</option>
-                <option value="bottom">Bottom</option>
-                <option value="top-bottom">Top + Bottom</option>
-                <option value="center">Center</option>
-                <option value="scale">Scale</option>
-              </select>
-            </PropertyRow>
-          </div>
-          {layer.groupId && <p className="inspector-hint">Persistent group: {layer.groupId}</p>}
-        </CollapsibleSection>
-
-        <CollapsibleSection sectionId="properties.update-transition" title="Data update transition">
-          <PropertyRow
-            help="How this layer changes when bound data updates."
-            className="inspector-row"
-          >
-            <span>Style</span>
-            <select
-              value={layer.updateTransition?.style ?? 'inherit'}
-              onChange={(event) =>
-                setLayerUpdateTransition(layer.id, {
-                  style: event.target.value as typeof layer.updateTransition.style,
-                })
-              }
-            >
-              <option value="inherit">Crossfade · composition duration</option>
-              <option value="none">No transition</option>
-              <option value="crossfade">Crossfade</option>
-              <option value="slide-left">Slide left</option>
-              <option value="slide-right">Slide right</option>
-              <option value="slide-up">Slide up</option>
-              <option value="slide-down">Slide down</option>
-            </select>
-          </PropertyRow>
-          <PropertyRow
-            help="Per-layer duration in frames. Zero inherits the composition Update crossfade duration."
-            className="inspector-row"
-          >
-            <span>Duration frames</span>
-            <input
-              type="number"
-              min={0}
-              value={layer.updateTransition?.durationFrames ?? 0}
-              onChange={(event) =>
-                setLayerUpdateTransition(layer.id, { durationFrames: Number(event.target.value) })
-              }
-            />
-          </PropertyRow>
-          {(layer.updateTransition?.style ?? 'inherit').startsWith('slide') ? (
-            <PropertyRow help="Slide travel distance in pixels." className="inspector-row">
-              <span>Distance</span>
-              <input
-                type="number"
-                min={0}
-                value={layer.updateTransition?.distance ?? 24}
-                onChange={(event) =>
-                  setLayerUpdateTransition(layer.id, { distance: Number(event.target.value) })
-                }
-              />
-            </PropertyRow>
-          ) : null}
-        </CollapsibleSection>
-
-        <CollapsibleSection
-          sectionId="properties.visual-rules"
-          title="Visual rules"
-          actions={
-            <>
-              <select
-                aria-label="New visual rule trigger"
-                value={newRuleTrigger}
-                onChange={(event) => setNewRuleTrigger(event.target.value as VisualRuleTrigger)}
-              >
-                <option value="data">Data</option>
-                <option value="click">Clicked</option>
-                <option value="double-click">Double-clicked</option>
-                <option value="pointer-enter">Mouse over</option>
-                <option value="pointer-leave">Mouse leave</option>
-              </select>
-              <button
-                type="button"
-                disabled={layer.isLocked}
-                onClick={() => addLayerVisualRule(layer.id, newRuleTrigger)}
-              >
-                + Add Rule
-              </button>
-            </>
-          }
-        >
-          {visualRules.length === 0 ? (
-            <p className="inspector-hint">No visual rules on this layer.</p>
-          ) : (
-            visualRules.map((rule) => {
-              const action = rule.actions[0] ?? { type: 'visibility' as const, visible: true };
-              const needsValue = ![
-                'empty',
-                'not-empty',
-                'changed',
-                'increased',
-                'decreased',
-              ].includes(rule.operator);
-              return (
-                <div className="inspector-binding" key={rule.id}>
-                  <input
-                    aria-label="Visual rule name"
-                    value={rule.name}
-                    onChange={(event) =>
-                      updateLayerVisualRule(layer.id, rule.id, { name: event.target.value })
-                    }
-                  />
-                  <label>
-                    Trigger
-                    <select
-                      aria-label="Visual rule trigger"
-                      value={rule.trigger ?? 'data'}
-                      onChange={(event) =>
-                        updateLayerVisualRule(layer.id, rule.id, {
-                          trigger: event.target.value as VisualRuleTrigger,
-                        })
-                      }
-                    >
-                      <option value="data">Data</option>
-                      <option value="click">Clicked</option>
-                      <option value="double-click">Double-clicked</option>
-                      <option value="pointer-enter">Mouse over</option>
-                      <option value="pointer-leave">Mouse leave</option>
-                    </select>
-                  </label>
-                  {!rule.trigger || rule.trigger === 'data' ? (
-                    <>
-                      <label>
-                        Field
-                        <select
-                          value={rule.fieldId}
-                          onChange={(event) =>
-                            updateLayerVisualRule(layer.id, rule.id, {
-                              fieldId: event.target.value,
-                            })
-                          }
-                        >
-                          {composition.dataFields.map((field) => (
-                            <option key={field.id} value={field.id}>
-                              {field.label || field.key}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        Condition
-                        <select
-                          value={rule.operator}
-                          onChange={(event) =>
-                            updateLayerVisualRule(layer.id, rule.id, {
-                              operator: event.target.value as typeof rule.operator,
-                            })
-                          }
-                        >
-                          <option value="equals">Equals</option>
-                          <option value="not-equals">Does not equal</option>
-                          <option value="empty">Is empty</option>
-                          <option value="not-empty">Is not empty</option>
-                          <option value="greater-than">Greater than</option>
-                          <option value="less-than">Less than</option>
-                          <option value="changed">Changed</option>
-                          <option value="increased">Increased</option>
-                          <option value="decreased">Decreased</option>
-                        </select>
-                      </label>
-                      {needsValue ? (
-                        <label>
-                          Compare value
-                          <input
-                            value={String(rule.value ?? '')}
-                            onChange={(event) =>
-                              updateLayerVisualRule(layer.id, rule.id, {
-                                value: ['greater-than', 'less-than'].includes(rule.operator)
-                                  ? Number(event.target.value)
-                                  : event.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                      ) : null}
-                    </>
-                  ) : null}
-                  <label>
-                    Action
-                    <select
-                      value={action.type}
-                      onChange={(event) => {
-                        const type = event.target.value;
-                        updateLayerVisualRule(layer.id, rule.id, {
-                          actions: [
-                            type === 'property'
-                              ? { type, targetProperty: 'fill', value: '#ffffff' }
-                              : type === 'custom-action'
-                                ? {
-                                    type,
-                                    actionId: composition.customActions[0]?.actionId ?? '',
-                                  }
-                                : { type: 'visibility', visible: true },
-                          ],
-                        });
-                      }}
-                    >
-                      <option value="visibility">Show or hide</option>
-                      <option value="property">Set property</option>
-                      <option value="custom-action">Trigger custom action</option>
-                    </select>
-                  </label>
-                  {action.type === 'visibility' ? (
-                    <label>
-                      Result
-                      <select
-                        value={action.visible ? 'show' : 'hide'}
-                        onChange={(event) =>
-                          updateLayerVisualRule(layer.id, rule.id, {
-                            actions: [
-                              { type: 'visibility', visible: event.target.value === 'show' },
-                            ],
-                          })
-                        }
-                      >
-                        <option value="show">Show layer</option>
-                        <option value="hide">Hide layer</option>
-                      </select>
-                    </label>
-                  ) : action.type === 'property' ? (
-                    <>
-                      <label>
-                        Property
-                        <select
-                          value={action.targetProperty}
-                          onChange={(event) =>
-                            updateLayerVisualRule(layer.id, rule.id, {
-                              actions: [{ ...action, targetProperty: event.target.value }],
-                            })
-                          }
-                        >
-                          {bindableProperties(layer.element, layer.effects).map((property) => (
-                            <option key={property.value} value={property.value}>
-                              {property.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        Value
-                        <input
-                          value={String(action.value ?? '')}
-                          onChange={(event) =>
-                            updateLayerVisualRule(layer.id, rule.id, {
-                              actions: [{ ...action, value: event.target.value }],
-                            })
-                          }
-                        />
-                      </label>
-                    </>
-                  ) : action.type === 'custom-action' || action.type === 'shader-animation' ? (
-                    <label>
-                      {action.type === 'shader-animation'
-                        ? 'Shader animation action'
-                        : 'Custom action'}
-                      <select
-                        value={action.actionId}
-                        onChange={(event) =>
-                          updateLayerVisualRule(layer.id, rule.id, {
-                            actions: [{ ...action, actionId: event.target.value }],
-                          })
-                        }
-                      >
-                        <option value="">Choose action</option>
-                        {composition.customActions.map((candidate) => (
-                          <option key={candidate.id} value={candidate.actionId}>
-                            {candidate.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : (
-                    <p className="inspector-hint">
-                      Configure media event actions in the dockable Rules pane.
-                    </p>
-                  )}
-                  <button type="button" onClick={() => removeLayerVisualRule(layer.id, rule.id)}>
-                    Remove rule
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </CollapsibleSection>
 
         <CollapsibleSection sectionId="properties.data-bindings" title="Data Bindings">
           <div className="inspector-binding-list">
@@ -2487,58 +1844,580 @@ export function InspectorPanel() {
           </div>
         </CollapsibleSection>
 
-        <CollapsibleSection sectionId="properties.semantic-intent" title="Semantic intent">
-          <PropertyRow
-            help={
-              "Describe the layer's purpose, such as headline, background or container. Style packs and design checks use this semantic role when styling or reviewing the scene."
-            }
-            className="inspector-row"
-          >
-            <span>Role</span>
-            <select
-              value={layer.semantics.role}
-              onChange={(event) =>
-                setLayerSemantics(layer.id, { role: event.target.value as SemanticLayerRole })
-              }
-            >
-              {SEMANTIC_ROLES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
+        <EffectStackEditor layer={layer} frame={roundedFrame} groupLayers={effectGroupLayers} />
+        <LayerLightingEditor key={`lighting-${layer.id}`} layer={layer} composition={composition} />
+
+        <CollapsibleSection
+          sectionId="properties.visual-rules"
+          title={visualRules.length ? `Visual rules · ${visualRules.length}` : 'Visual rules'}
+          actions={
+            <button type="button" onClick={() => revealPane('rules')}>
+              Open Rules
+            </button>
+          }
+        >
+          {visualRules.length === 0 ? (
+            <p className="inspector-hint">
+              No rules on this layer. Rules react to data, clicks and playout.
+            </p>
+          ) : (
+            <ul className="inspector-rule-summary">
+              {visualRules.map((rule) => (
+                <li key={rule.id} className={rule.enabled ? '' : 'is-disabled'}>
+                  <span>{rule.name}</span>
+                  <small>{VISUAL_RULE_TRIGGER_LABELS[rule.trigger ?? 'data']}</small>
+                </li>
               ))}
-            </select>
-          </PropertyRow>
-          <PropertyRow
-            help={
-              'Comma-separated tags that help organize and find the layer. Authoring tools can use tags to target related layers.'
-            }
-            className="inspector-row"
-          >
-            <span>Tags</span>
-            <input
-              type="text"
-              value={layer.semantics.tags.join(', ')}
-              placeholder="primary, breaking-news"
-              onChange={(event) =>
-                setLayerSemantics(layer.id, {
-                  tags: event.target.value.split(',').map((tag) => tag.trim()),
-                })
+            </ul>
+          )}
+          <div className="inspector-button-row">
+            <button
+              type="button"
+              disabled={layer.isLocked}
+              onClick={() => {
+                addLayerVisualRule(layer.id, 'data');
+                revealPane('rules');
+              }}
+            >
+              + Add Rule
+            </button>
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          sectionId="properties.advanced"
+          title="Advanced"
+          defaultOpen={false}
+          className="inspector-advanced"
+        >
+          {tokenTargets.length > 0 &&
+            (composition.designSystem.tokens.length > 0 ||
+              layer.designTokenBindings.length > 0) && (
+              <CollapsibleSection sectionId="properties.brand-tokens" title="Brand tokens">
+                {tokenTargets.map((target) => {
+                  const binding = layer.designTokenBindings.find(
+                    (candidate) => candidate.targetProperty === target.property,
+                  );
+                  const compatibleTokens = composition.designSystem.tokens.filter(
+                    (token) => token.type === target.tokenType,
+                  );
+                  return (
+                    <PropertyRow
+                      help={`Link ${target.label.toLowerCase()} to a shared Brand Kit token. Editing the token updates this property on linked layers. Unlinked removes the connection while keeping the current value.`}
+                      className="inspector-row"
+                      key={target.property}
+                    >
+                      <span>{target.label}</span>
+                      <select
+                        value={binding?.tokenId ?? ''}
+                        onChange={(event) => {
+                          if (event.target.value) {
+                            bindDesignToken(layer.id, event.target.value, target.property);
+                          } else {
+                            unbindDesignToken(layer.id, target.property);
+                          }
+                        }}
+                      >
+                        <option value="">Unlinked</option>
+                        {compatibleTokens.map((token) => (
+                          <option key={token.id} value={token.id}>
+                            {token.name} ({token.key})
+                          </option>
+                        ))}
+                      </select>
+                    </PropertyRow>
+                  );
+                })}
+                {composition.designSystem.tokens.length === 0 && (
+                  <p className="inspector-hint">Create brand tokens in Brand Kit first.</p>
+                )}
+              </CollapsibleSection>
+            )}
+          <CollapsibleSection sectionId="properties.compositing" title="Compositing">
+            <PropertyRow
+              help={
+                "Choose how this layer's colors combine with layers behind it. Normal draws it normally; other modes can lighten, darken or mix the result."
               }
-            />
-          </PropertyRow>
-          <PropertyRow
-            help={
-              'Describe what this layer is meant to communicate or do. This is design guidance for authors and AI tools; it is not displayed in the graphic.'
-            }
-            className="inspector-row"
+              className="inspector-row"
+            >
+              <span>Blend mode</span>
+              <select
+                value={layer.blendMode}
+                disabled={layer.isLocked}
+                onChange={(event) => setLayerBlendMode(layer.id, event.target.value as BlendMode)}
+              >
+                {BLEND_MODES.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {mode.replace('-', ' ')}
+                  </option>
+                ))}
+              </select>
+            </PropertyRow>
+
+            <LayerMaskEditor composition={composition} layer={layer} key={layer.id} />
+          </CollapsibleSection>
+          <CollapsibleSection sectionId="properties.layout" title="Layout relationships">
+            <PropertyRow
+              help="Arrange this layer's direct children automatically in paint order."
+              className="inspector-row"
+            >
+              <span>Auto layout</span>
+              <select
+                value={autoLayout.direction}
+                onChange={(event) =>
+                  setLayerAutoLayout(layer.id, {
+                    direction: event.target.value as typeof autoLayout.direction,
+                  })
+                }
+              >
+                <option value="none">Off</option>
+                <option value="horizontal">Horizontal</option>
+                <option value="vertical">Vertical</option>
+              </select>
+            </PropertyRow>
+            {autoLayout.direction !== 'none' ? (
+              <>
+                <PropertyRow help="Space between each direct child." className="inspector-row">
+                  <span>Gap</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={autoLayout.gap}
+                    onChange={(event) =>
+                      setLayerAutoLayout(layer.id, { gap: Number(event.target.value) })
+                    }
+                  />
+                </PropertyRow>
+                <PropertyRow help="Alignment across the flow direction." className="inspector-row">
+                  <span>Alignment</span>
+                  <select
+                    value={autoLayout.align}
+                    onChange={(event) =>
+                      setLayerAutoLayout(layer.id, {
+                        align: event.target.value as typeof autoLayout.align,
+                      })
+                    }
+                  >
+                    <option value="start">Start</option>
+                    <option value="center">Center</option>
+                    <option value="end">End</option>
+                    <option value="stretch">Stretch</option>
+                  </select>
+                </PropertyRow>
+                {(
+                  [
+                    ['paddingTop', 'Padding top'],
+                    ['paddingRight', 'Padding right'],
+                    ['paddingBottom', 'Padding bottom'],
+                    ['paddingLeft', 'Padding left'],
+                  ] as const
+                ).map(([property, label]) => (
+                  <PropertyRow
+                    help={`${label} in pixels.`}
+                    className="inspector-row"
+                    key={property}
+                  >
+                    <span>{label}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={autoLayout[property]}
+                      onChange={(event) =>
+                        setLayerAutoLayout(layer.id, { [property]: Number(event.target.value) })
+                      }
+                    />
+                  </PropertyRow>
+                ))}
+                <PropertyRow
+                  help="Resize this container's width to its laid-out children."
+                  className="inspector-row inspector-checkbox-row"
+                >
+                  <span>Hug width</span>
+                  <input
+                    type="checkbox"
+                    checked={autoLayout.hugWidth}
+                    onChange={(event) =>
+                      setLayerAutoLayout(layer.id, { hugWidth: event.target.checked })
+                    }
+                  />
+                </PropertyRow>
+                <PropertyRow
+                  help="Resize this container's height to its laid-out children."
+                  className="inspector-row inspector-checkbox-row"
+                >
+                  <span>Hug height</span>
+                  <input
+                    type="checkbox"
+                    checked={autoLayout.hugHeight}
+                    onChange={(event) =>
+                      setLayerAutoLayout(layer.id, { hugHeight: event.target.checked })
+                    }
+                  />
+                </PropertyRow>
+                {autoLayout.hugWidth ? (
+                  <>
+                    <PropertyRow
+                      help="Minimum hugged background width; zero disables the minimum."
+                      className="inspector-row"
+                    >
+                      <span>Minimum width</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={autoLayout.minWidth}
+                        onChange={(event) =>
+                          setLayerAutoLayout(layer.id, { minWidth: Number(event.target.value) })
+                        }
+                      />
+                    </PropertyRow>
+                    <PropertyRow
+                      help="Maximum hugged background width; zero leaves it unlimited."
+                      className="inspector-row"
+                    >
+                      <span>Maximum width</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={autoLayout.maxWidth}
+                        onChange={(event) =>
+                          setLayerAutoLayout(layer.id, { maxWidth: Number(event.target.value) })
+                        }
+                      />
+                    </PropertyRow>
+                  </>
+                ) : null}
+                <PropertyRow
+                  help="Remove hidden direct children from spacing instead of reserving their slot."
+                  className="inspector-row inspector-checkbox-row"
+                >
+                  <span>Collapse hidden</span>
+                  <input
+                    type="checkbox"
+                    checked={autoLayout.collapseHidden}
+                    onChange={(event) =>
+                      setLayerAutoLayout(layer.id, { collapseHidden: event.target.checked })
+                    }
+                  />
+                </PropertyRow>
+              </>
+            ) : null}
+            <PropertyRow
+              help={
+                "Clip child layers at this parent layer's bounds. Use it to keep moving content inside a panel or lower-third background."
+              }
+              className="inspector-row inspector-checkbox-row"
+            >
+              <span>Clip children</span>
+              <input
+                type="checkbox"
+                checked={layer.clipChildren}
+                onChange={(event) => setLayerClipChildren(layer.id, event.target.checked)}
+              />
+            </PropertyRow>
+
+            <PropertyRow
+              help={
+                'Lock this layer to protect it from selection-based edits and accidental moves. Unlock it before editing its transform or protected properties.'
+              }
+              className="inspector-row inspector-checkbox-row"
+            >
+              <span>Locked</span>
+              <input
+                type="checkbox"
+                checked={layer.isLocked}
+                onChange={() => toggleLayerLock(layer.id)}
+              />
+            </PropertyRow>
+            <PropertyRow
+              help={
+                'Choose a parent layer to establish a layout relationship. Parent movement and resizing can move or resize this layer according to its constraints.'
+              }
+              className="inspector-row"
+            >
+              <span>Parent</span>
+              <select
+                value={layer.parentId ?? ''}
+                onChange={(event) => setLayerParent(layer.id, event.target.value || null)}
+              >
+                <option value="">None</option>
+                {composition.layers
+                  .filter((candidate) => candidate.id !== layer.id)
+                  .map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.name}
+                    </option>
+                  ))}
+              </select>
+            </PropertyRow>
+            <PropertyRow
+              help="Attach this layer to an editable path. Animate Motion Path Progress from 0 to 1, or use a ping-pong local loop."
+              className="inspector-row"
+            >
+              <span>Motion path</span>
+              <select
+                value={layer.motionPath?.sourceLayerId ?? ''}
+                onChange={(event) =>
+                  setLayerMotionPath(
+                    layer.id,
+                    event.target.value
+                      ? {
+                          sourceLayerId: event.target.value,
+                          progress: layer.motionPath?.progress ?? 0,
+                          orientToPath: layer.motionPath?.orientToPath ?? true,
+                          offsetX: layer.motionPath?.offsetX ?? 0,
+                          offsetY: layer.motionPath?.offsetY ?? 0,
+                        }
+                      : null,
+                  )
+                }
+              >
+                <option value="">None</option>
+                {composition.layers
+                  .filter(
+                    (candidate) => candidate.id !== layer.id && candidate.element.type === 'path',
+                  )
+                  .map((candidate) => (
+                    <option value={candidate.id} key={candidate.id}>
+                      {candidate.name}
+                    </option>
+                  ))}
+              </select>
+            </PropertyRow>
+            {layer.motionPath ? (
+              <>
+                <PropertyRow help="Position along the path from 0 to 1." className="inspector-row">
+                  <span>Path progress</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={layer.motionPath.progress}
+                    onChange={(event) =>
+                      setLayerMotionPath(layer.id, {
+                        ...layer.motionPath!,
+                        progress: Math.max(0, Math.min(1, Number(event.target.value))),
+                      })
+                    }
+                  />
+                </PropertyRow>
+                <PropertyRow
+                  help="Rotate the attached layer to match the path tangent."
+                  className="inspector-row inspector-checkbox-row"
+                >
+                  <span>Orient to path</span>
+                  <input
+                    type="checkbox"
+                    checked={layer.motionPath.orientToPath}
+                    onChange={(event) =>
+                      setLayerMotionPath(layer.id, {
+                        ...layer.motionPath!,
+                        orientToPath: event.target.checked,
+                      })
+                    }
+                  />
+                </PropertyRow>
+                {(['offsetX', 'offsetY'] as const).map((property) => (
+                  <PropertyRow
+                    help="Pixel offset from the sampled path point."
+                    className="inspector-row"
+                    key={property}
+                  >
+                    <span>{property === 'offsetX' ? 'Path offset X' : 'Path offset Y'}</span>
+                    <input
+                      type="number"
+                      value={layer.motionPath![property]}
+                      onChange={(event) =>
+                        setLayerMotionPath(layer.id, {
+                          ...layer.motionPath!,
+                          [property]: Number(event.target.value),
+                        })
+                      }
+                    />
+                  </PropertyRow>
+                ))}
+                <div className="inspector-button-row">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const store = useProjectStore.getState();
+                      store.setLayerLoop(layer.id, {
+                        name: 'Path ping-pong',
+                        activation: { type: 'lifecycle' },
+                        durationFrames: 50,
+                        repeatCount: null,
+                      });
+                      store.setLayerLoopPropertyTrack(layer.id, 'motionPathProgress', [
+                        createLayerPropertyKeyframe(0, 0),
+                        createLayerPropertyKeyframe(25, 1, { easing: 'sine-in-out' }),
+                        createLayerPropertyKeyframe(50, 0, { easing: 'sine-in-out' }),
+                      ]);
+                    }}
+                  >
+                    Add ping-pong loop
+                  </button>
+                </div>
+              </>
+            ) : null}
+            <div className="inspector-grid">
+              <PropertyRow
+                help={
+                  "Choose how the layer's horizontal position and width respond when its parent or canvas is resized: anchor an edge, stretch, center or scale."
+                }
+                className="inspector-row"
+              >
+                <span>Horizontal</span>
+                <select
+                  value={layer.constraints.horizontal}
+                  onChange={(event) =>
+                    setLayerConstraints(layer.id, {
+                      horizontal: event.target.value as typeof layer.constraints.horizontal,
+                    })
+                  }
+                >
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                  <option value="left-right">Left + Right</option>
+                  <option value="center">Center</option>
+                  <option value="scale">Scale</option>
+                </select>
+              </PropertyRow>
+              <PropertyRow
+                help={
+                  "Choose how the layer's vertical position and height respond when its parent or canvas is resized: anchor an edge, stretch, center or scale."
+                }
+                className="inspector-row"
+              >
+                <span>Vertical</span>
+                <select
+                  value={layer.constraints.vertical}
+                  onChange={(event) =>
+                    setLayerConstraints(layer.id, {
+                      vertical: event.target.value as typeof layer.constraints.vertical,
+                    })
+                  }
+                >
+                  <option value="top">Top</option>
+                  <option value="bottom">Bottom</option>
+                  <option value="top-bottom">Top + Bottom</option>
+                  <option value="center">Center</option>
+                  <option value="scale">Scale</option>
+                </select>
+              </PropertyRow>
+            </div>
+            {layer.groupId && <p className="inspector-hint">Persistent group: {layer.groupId}</p>}
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            sectionId="properties.update-transition"
+            title="Data change transition"
           >
-            <span>Intent</span>
-            <textarea
-              value={layer.semantics.description}
-              placeholder="What this layer means in the design"
-              onChange={(event) => setLayerSemantics(layer.id, { description: event.target.value })}
-            />
-          </PropertyRow>
+            <PropertyRow
+              help="How this layer changes when bound data updates."
+              className="inspector-row"
+            >
+              <span>Style</span>
+              <select
+                value={layer.updateTransition?.style ?? 'inherit'}
+                onChange={(event) =>
+                  setLayerUpdateTransition(layer.id, {
+                    style: event.target.value as typeof layer.updateTransition.style,
+                  })
+                }
+              >
+                <option value="inherit">Crossfade · composition duration</option>
+                <option value="none">No transition</option>
+                <option value="crossfade">Crossfade</option>
+                <option value="slide-left">Slide left</option>
+                <option value="slide-right">Slide right</option>
+                <option value="slide-up">Slide up</option>
+                <option value="slide-down">Slide down</option>
+              </select>
+            </PropertyRow>
+            <PropertyRow
+              help="Per-layer duration in frames. Zero uses the composition Data change fade."
+              className="inspector-row"
+            >
+              <span>Duration frames</span>
+              <input
+                type="number"
+                min={0}
+                value={layer.updateTransition?.durationFrames ?? 0}
+                onChange={(event) =>
+                  setLayerUpdateTransition(layer.id, { durationFrames: Number(event.target.value) })
+                }
+              />
+            </PropertyRow>
+            {(layer.updateTransition?.style ?? 'inherit').startsWith('slide') ? (
+              <PropertyRow help="Slide travel distance in pixels." className="inspector-row">
+                <span>Distance</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={layer.updateTransition?.distance ?? 24}
+                  onChange={(event) =>
+                    setLayerUpdateTransition(layer.id, { distance: Number(event.target.value) })
+                  }
+                />
+              </PropertyRow>
+            ) : null}
+          </CollapsibleSection>
+
+          <CollapsibleSection sectionId="properties.semantic-intent" title="Semantic intent">
+            <PropertyRow
+              help={
+                "Describe the layer's purpose, such as headline, background or container. Style packs and design checks use this semantic role when styling or reviewing the scene."
+              }
+              className="inspector-row"
+            >
+              <span>Role</span>
+              <select
+                value={layer.semantics.role}
+                onChange={(event) =>
+                  setLayerSemantics(layer.id, { role: event.target.value as SemanticLayerRole })
+                }
+              >
+                {SEMANTIC_ROLES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </PropertyRow>
+            <PropertyRow
+              help={
+                'Comma-separated tags that help organize and find the layer. Authoring tools can use tags to target related layers.'
+              }
+              className="inspector-row"
+            >
+              <span>Tags</span>
+              <input
+                type="text"
+                value={layer.semantics.tags.join(', ')}
+                placeholder="primary, breaking-news"
+                onChange={(event) =>
+                  setLayerSemantics(layer.id, {
+                    tags: event.target.value.split(',').map((tag) => tag.trim()),
+                  })
+                }
+              />
+            </PropertyRow>
+            <PropertyRow
+              help={
+                'Describe what this layer is meant to communicate or do. This is design guidance for authors and AI tools; it is not displayed in the graphic.'
+              }
+              className="inspector-row"
+            >
+              <span>Intent</span>
+              <textarea
+                value={layer.semantics.description}
+                placeholder="What this layer means in the design"
+                onChange={(event) =>
+                  setLayerSemantics(layer.id, { description: event.target.value })
+                }
+              />
+            </PropertyRow>
+          </CollapsibleSection>
         </CollapsibleSection>
       </div>
     </Panel>

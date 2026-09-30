@@ -48,6 +48,11 @@ import {
   createLayerOfKind,
   createMediaCue,
   createLayerVisualRule,
+  applyLayerMotion,
+  pruneVisualRuleReferences,
+  remapVisualRule,
+  renameVisualRuleCustomAction,
+  visualRuleFieldIds,
   createProject,
   createShaderPaint,
   createShaderResource as createStoredShaderResource,
@@ -133,6 +138,8 @@ import {
   type LayerConstraints,
   type LayerAutoLayout,
   type LayerVisualRule,
+  type LayerMotionSide,
+  type LayerMotionSpec,
   type VisualRuleTrigger,
   type DataConnectionDefinition,
   DEFAULT_LAYER_AUTO_LAYOUT,
@@ -164,7 +171,7 @@ import { useLayerClipboardStore } from './layerClipboardStore';
 import { planLifecycleRetime, type LifecycleRetimePlan } from './lifecycleRetime';
 import { buildSvgBundle } from './svgBundleImport';
 import { placeImages, prepareImage, readImageSize, type ImagePlacement } from './imageImport';
-import { createNextBinding } from './bindingFieldCreation';
+import { createNextBinding, createPlayoutBinding, playoutProperty } from './bindingFieldCreation';
 import {
   defaultShaderResourceName,
   isStoredShaderResourceTarget,
@@ -237,6 +244,8 @@ interface ProjectActions {
 
   addMediaCueFromAsset: (assetId: string) => string;
   addSoundEventFromAsset: (assetId: string, frame?: number) => string;
+  /** An audio cue that only rules start: manual trigger, never on the timeline by itself. */
+  addRuleSoundFromAsset: (assetId: string) => string;
   addLiveMediaCue: () => string;
   updateMediaCue: (cueId: string, patch: Partial<MediaCue>) => void;
   removeMediaCue: (cueId: string) => void;
@@ -398,6 +407,14 @@ interface ProjectActions {
   ) => void;
   moveLayerVisualRule: (layerId: string, ruleId: string, direction: -1 | 1) => void;
   duplicateLayerVisualRule: (layerId: string, ruleId: string) => string | null;
+  /** Bakes an Animate In or Out choice into each unlocked layer's tracks. */
+  setLayerMotion: (
+    layerIds: string | string[],
+    side: LayerMotionSide,
+    spec: LayerMotionSpec | null,
+  ) => void;
+  /** Replaces a whole rule, which lets the editor drop optional keys. */
+  replaceLayerVisualRule: (layerId: string, ruleId: string, rule: LayerVisualRule) => void;
   removeLayerVisualRule: (layerId: string, ruleId: string) => void;
   addDataConnection: () => string;
   updateDataConnection: (
@@ -464,6 +481,8 @@ interface ProjectActions {
   ) => void;
   setLayerBindings: (layerId: string, bindings: LayerBinding[]) => void;
   addLayerBinding: (layerId: string) => string | null;
+  /** Creates or removes the one field + binding that lets playout fill this layer's content. */
+  setLayerPlayoutEditable: (layerId: string, editable: boolean) => void;
   addRuntimeCollection: (
     fieldId: string,
     prototypeLayerIds: string[],
@@ -927,9 +946,7 @@ function appendLayerCopies(
           .filter((layer) => linkedInstanceKey(layer) === instanceKey)
           .flatMap((layer) => [
             ...layer.bindings.map((binding) => binding.fieldId),
-            ...(layer.visualRules ?? [])
-              .filter((rule) => !rule.trigger || rule.trigger === 'data')
-              .map((rule) => rule.fieldId),
+            ...(layer.visualRules ?? []).flatMap(visualRuleFieldIds),
           ]),
       ),
     ];
@@ -989,14 +1006,16 @@ function appendLayerCopies(
         return fieldId ? [{ ...structuredClone(binding), fieldId }] : [];
       }),
       visualRules: (source.visualRules ?? []).flatMap((rule) => {
-        if (rule.trigger && rule.trigger !== 'data')
-          return [{ ...structuredClone(rule), id: createId('visual-rule') }];
-        const fieldId =
-          fieldIds?.get(rule.fieldId) ??
-          (composition.dataFields.some((field) => field.id === rule.fieldId)
-            ? rule.fieldId
-            : undefined);
-        return fieldId ? [{ ...structuredClone(rule), id: createId('visual-rule'), fieldId }] : [];
+        const available = (fieldId: string) =>
+          Boolean(fieldIds?.get(fieldId)) ||
+          composition.dataFields.some((field) => field.id === fieldId);
+        if (!visualRuleFieldIds(rule).every(available)) return [];
+        return [
+          remapVisualRule(rule, {
+            layerIds: idMap,
+            ...(fieldIds ? { fieldIds } : {}),
+          }),
+        ];
       }),
       keyframes: source.keyframes.map((keyframe) =>
         createLayerKeyframe(
@@ -1307,6 +1326,40 @@ export const useProjectStore = create<ProjectStore>()(
         return cueId;
       },
 
+      addRuleSoundFromAsset: (assetId) => {
+        let cueId = '';
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const asset = composition.assets.find((candidate) => candidate.id === assetId);
+          if (!asset || asset.kind !== 'audio') {
+            throw new Error('Rule sounds require an imported audio asset.');
+          }
+          const sourceId = createId('media-source');
+          const cue = createMediaCue({
+            name: asset.name.replace(/\.[^.]+$/, '') || 'Sound',
+            sources: [
+              {
+                id: sourceId,
+                name: asset.name,
+                kind: 'clip',
+                mediaType: 'audio',
+                src: `asset:${asset.id}`,
+              },
+            ],
+            activeSourceId: sourceId,
+            trigger: { type: 'manual' },
+            durationFrames: null,
+            loop: false,
+            muted: false,
+            retrigger: 'restart',
+          });
+          (composition.mediaCues ??= []).push(cue);
+          cueId = cue.id;
+          enforceMediaRuntimeProfile(state.project);
+        });
+        return cueId;
+      },
+
       addLiveMediaCue: () => {
         let cueId = '';
         set((state) => {
@@ -1341,6 +1394,7 @@ export const useProjectStore = create<ProjectStore>()(
         set((state) => {
           const composition = getActiveComposition(state.project, state.activeCompositionId);
           composition.mediaCues = (composition.mediaCues ?? []).filter((cue) => cue.id !== cueId);
+          pruneVisualRuleReferences(composition);
         }),
 
       addLayer: (kind) => {
@@ -1542,6 +1596,8 @@ export const useProjectStore = create<ProjectStore>()(
         set((state) => {
           const composition = getActiveComposition(state.project, state.activeCompositionId);
           pastedIds = appendLayerCopies(composition, sourceComposition, sources, offset);
+          // Rules pasted from another composition may aim at layers that aren't here.
+          pruneVisualRuleReferences(composition);
         });
         return pastedIds;
       },
@@ -1592,6 +1648,7 @@ export const useProjectStore = create<ProjectStore>()(
           composition.layout.timelineFolders = composition.layout.timelineFolders.filter(
             (folder) => folder.layerIds.length > 0,
           );
+          pruneVisualRuleReferences(composition);
         }),
 
       updateLayerTransform: (layerId, frame, patch) =>
@@ -3073,6 +3130,36 @@ export const useProjectStore = create<ProjectStore>()(
         return duplicatedId;
       },
 
+      setLayerMotion: (layerIds, side, spec) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const ids = new Set(Array.isArray(layerIds) ? layerIds : [layerIds]);
+          for (const layer of composition.layers) {
+            if (!ids.has(layer.id) || layer.isLocked) continue;
+            applyLayerMotion(composition, layer, side, spec);
+          }
+        }),
+
+      replaceLayerVisualRule: (layerId, ruleId, next) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          const index = layer?.visualRules?.findIndex((candidate) => candidate.id === ruleId) ?? -1;
+          if (!layer || layer.isLocked || index < 0) return;
+          const rule = { ...structuredClone(next), id: ruleId };
+          if (
+            (rule.trigger ?? 'data') === 'data' &&
+            !composition.dataFields.some((field) => field.id === rule.fieldId)
+          ) {
+            const createdField = composition.dataFields.length === 0;
+            rule.fieldId = (
+              composition.dataFields[0] ?? createRuleConditionField(composition, layer)
+            ).id;
+            if (createdField) rule.operator = 'not-empty';
+          }
+          layer.visualRules[index] = rule;
+        }),
+
       removeLayerVisualRule: (layerId, ruleId) =>
         set((state) => {
           const composition = getActiveComposition(state.project, state.activeCompositionId);
@@ -3359,6 +3446,7 @@ export const useProjectStore = create<ProjectStore>()(
           composition.transitions = composition.transitions.filter(
             (t) => t.fromKeyframeId !== keyframeId && t.toKeyframeId !== keyframeId,
           );
+          pruneVisualRuleReferences(composition);
           if (previousKeyframe && nextKeyframe) {
             composition.transitions.push(
               createTransition(previousKeyframe.id, nextKeyframe.id, {
@@ -3445,10 +3533,8 @@ export const useProjectStore = create<ProjectStore>()(
           );
           for (const layer of composition.layers) {
             layer.bindings = layer.bindings.filter((binding) => binding.fieldId !== fieldId);
-            layer.visualRules = (layer.visualRules ?? []).filter(
-              (rule) => (rule.trigger && rule.trigger !== 'data') || rule.fieldId !== fieldId,
-            );
           }
+          pruneVisualRuleReferences(composition);
         }),
 
       updateDataField: (fieldId, patch) =>
@@ -3498,6 +3584,44 @@ export const useProjectStore = create<ProjectStore>()(
           if (layer && !layer.isLocked) {
             layer.bindings = bindings;
             syncShaderParameterFields(composition, layer);
+          }
+        }),
+
+      setLayerPlayoutEditable: (layerId, editable) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+          const property = layer ? playoutProperty(layer) : null;
+          if (!layer || layer.isLocked || !property) return;
+          const bound = layer.bindings.filter(
+            (binding) => binding.targetProperty === property.value,
+          );
+          if (editable) {
+            if (bound.length > 0) return;
+            const created = createPlayoutBinding(layer, composition.dataFields);
+            if (!created) return;
+            composition.dataFields.push(created.field);
+            layer.bindings.push(created.binding);
+            return;
+          }
+          layer.bindings = layer.bindings.filter(
+            (binding) => binding.targetProperty !== property.value,
+          );
+          // A field nothing else reads goes with the switch, so toggling doesn't pile up fields.
+          for (const { fieldId } of bound) {
+            const stillUsed =
+              composition.layers.some(
+                (candidate) =>
+                  candidate.bindings.some((binding) => binding.fieldId === fieldId) ||
+                  (candidate.visualRules ?? []).some((rule) =>
+                    visualRuleFieldIds(rule).includes(fieldId),
+                  ),
+              ) || composition.runtimeCollections.some((item) => item.fieldId === fieldId);
+            const field = composition.dataFields.find((candidate) => candidate.id === fieldId);
+            if (!stillUsed && field && !field.generatedShaderParameter)
+              composition.dataFields = composition.dataFields.filter(
+                (candidate) => candidate.id !== fieldId,
+              );
           }
         }),
 
@@ -3610,6 +3734,7 @@ export const useProjectStore = create<ProjectStore>()(
                 layer.element.textAnimation.customActionId = null;
               }
             }
+            pruneVisualRuleReferences(composition);
           }
         }),
 
@@ -3642,6 +3767,7 @@ export const useProjectStore = create<ProjectStore>()(
                   layer.element.textAnimation.customActionId = trimmed;
                 }
               }
+              renameVisualRuleCustomAction(composition.layers, previousActionId, trimmed);
             }
           }
           Object.assign(action, nextPatch);

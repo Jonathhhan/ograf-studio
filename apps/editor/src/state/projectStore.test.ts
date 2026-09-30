@@ -319,11 +319,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     ).toBeUndefined();
   });
 
-  it('creates new projects with an opaque black canvas and 20% gray outside-canvas fill', () => {
+  it('creates new projects with a transparent overlay canvas and 20% gray outside-canvas fill', () => {
     const state = useProjectStore.getState();
     const composition = getActiveComposition(state.project, state.activeCompositionId);
 
-    expect(composition.backgroundColor).toBe('#000000');
+    expect(composition.backgroundColor).toBe('transparent');
     expect(composition.layout.dimOutsideCanvas).toBe(true);
   });
 

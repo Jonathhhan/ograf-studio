@@ -111,7 +111,7 @@ export function nextBindingProperty(layer: Layer): { value: string; label: strin
 }
 
 function uniqueFieldKey(layerName: string, target: string, fields: FieldDefinition[]): string {
-  let base = `${layerName}_${target}`
+  let base = (target ? `${layerName}_${target}` : layerName)
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
     .replace(/[^a-zA-Z0-9]+/g, '_')
@@ -151,6 +151,33 @@ export function createNextBinding(
           ),
         }
       : {}),
+  });
+  return { field, binding: { fieldId: field.id, targetProperty: property.value } };
+}
+
+/** The one property that makes a layer's content editable from playout, if it has one. */
+export function playoutProperty(layer: Layer): { value: string; label: string } | null {
+  if (layer.element.type === 'text') return { value: 'content', label: 'Text' };
+  if (layer.element.type === 'image') return { value: 'src', label: 'Image' };
+  return null;
+}
+
+/**
+ * The field and binding behind "Editable in playout": named after the layer, seeded with its
+ * current text or image, so switching it on doesn't change the graphic.
+ */
+export function createPlayoutBinding(
+  layer: Layer,
+  existingFields: FieldDefinition[],
+): { field: FieldDefinition; binding: LayerBinding } | null {
+  const property = playoutProperty(layer);
+  const seed = property ? fieldSeed(layer, property.value) : null;
+  if (!property || !seed) return null;
+  const key = uniqueFieldKey(layer.name, '', existingFields);
+  const field = createFieldDefinition(seed.type, {
+    key,
+    label: layer.name,
+    defaultValue: seed.defaultValue,
   });
   return { field, binding: { fieldId: field.id, targetProperty: property.value } };
 }

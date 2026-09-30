@@ -90,6 +90,16 @@
   color: #ffe2a0;
 }
 
+.rules-match.overridden {
+  background: #5b2b24;
+  color: #ffc2b8;
+  cursor: help;
+}
+
+.rules-card.overridden {
+  border-color: #7a3a30;
+}
+
 .rules-editor-row,
 .rules-condition-grid {
   display: flex;
@@ -102,8 +112,15 @@
   align-items: flex-start;
 }
 
-.rules-condition-grid {
+.rules-conditions {
+  display: grid;
+  min-width: 0;
   flex: 1 1 48%;
+  gap: 3px;
+}
+
+.rules-condition-grid {
+  flex-wrap: wrap;
 }
 
 .rules-condition-grid > select,
@@ -135,7 +152,7 @@
 .rules-action {
   width: 100%;
   min-width: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .rules-action > select,
@@ -191,4 +208,77 @@
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+.rules-condition-grid > .rules-compare-source,
+.rules-condition-grid > .rules-match-mode {
+  min-width: 52px;
+  max-width: 96px;
+  flex: none;
+}
+
+.rules-range {
+  display: flex;
+  min-width: 96px;
+  flex: 1;
+  gap: 3px;
+}
+
+.rules-range > input {
+  width: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.rules-frames {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-dim);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.rules-frames > input {
+  width: 42px;
+  min-width: 42px;
+  max-width: 42px;
+}
+
+.rules-action > .rules-action-target {
+  min-width: 80px;
+  max-width: 140px;
+}
+
+.rules-ignore-case {
+  width: 24px;
+  flex: none;
+  padding: 0;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.rules-ignore-case.active {
+  background: var(--accent);
+  color: var(--bg-panel);
+}
+
+.rules-add-condition {
+  flex: none;
+  justify-self: start;
+  padding: 0 6px;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.rules-simulate {
+  width: 22px;
+  flex: none;
+  padding: 0;
+  color: #ffe2a0;
+}
+
+.rules-reset-simulation {
+  flex: none;
 }

@@ -120,7 +120,7 @@ Supported operation discriminators:
 - Compositing: `set_layer_mask`; `set_layer_flags.isMaskOnly` controls source-only output
 - Timeline: `set_property_key`, `set_property_track`, `stagger_property_track`,
   `move_property_key`, `remove_property_key`, `set_property_key_easing`, `set_transition`,
-  `set_layer_loop`, `set_loop_property_track`, `remove_layer_loop`
+  `set_layer_loop`, `set_loop_property_track`, `remove_layer_loop`, `set_layer_motion`
 - Data: `add_data_field`, `update_data_field`, `remove_data_field`, `set_layer_bindings`,
   `set_layer_binding` (legacy single-binding replace), `create_runtime_collection`,
   `update_runtime_collection`, `remove_runtime_collection`
@@ -285,13 +285,13 @@ and is remapped by `duplicate_group`. Parent translation and composition resize 
 regular tracks.
 Unlock a layer before attempting content, transform, binding, effect, or timeline mutations.
 
-`set_layer_visual_rules` replaces ordered rules. A data rule (default `trigger`) needs an existing
-`fieldId` in MCP; `sourcePath` is optional and `operator` tests the value. Pointer triggers `click`,
-`double-click`, `pointer-enter`, and `pointer-leave` omit field and operator; they run only in
-interactive real-time HTML, not canvas editing or non-real-time replay. Actions include visibility,
-property, custom-action, shader-animation, play-sound, and take-media. Changed/increased/decreased
-need previous data; other data events fire on matching entry. Pair enter/leave to restore hover
-styling; use custom actions for remote playout. Validate action and media cue references.
+`set_layer_visual_rules` replaces ordered rules. Data rules (default `trigger`) need an existing
+`fieldId`; compare with `value` or `compareFieldId`, and add `conditions` combined by `match`.
+`data`/`hover` are states that revert; pointer (`click`, `double-click`, `pointer-enter`,
+`pointer-leave`) and playout (`play`, `step`, `stop`, `custom-action` with `eventId`) triggers are
+events whose results persist, optionally after `delayFrames`. Visibility, toggle-visibility and
+property actions take `targetLayerId` and `transitionFrames`. Details:
+[visual rules](./visual-rules.md).
 
 `create_timeline_group` accepts at least two existing `layerIds`, plus optional `name` and
 `#RRGGBB` `color`, and returns a stable timeline-group ID. Prefer one named/color-coded group for

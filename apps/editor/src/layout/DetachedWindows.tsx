@@ -6,6 +6,7 @@ import { detachedWindowWidth, DOCK_PANE_LABELS, type DockPaneId } from './dockMo
 import { EditorWindowContext, type EditorWindow } from './EditorWindow';
 import { NumericScrubController } from '../components/NumericScrubController';
 import { installEditorShortcuts } from '../state/editorShortcuts';
+import { registerWebcamPreviewAdapter } from '../state/webcamPreview';
 import './DetachedWindows.css';
 import {
   DetachedWindowContext,
@@ -47,6 +48,7 @@ export function DetachedWindowsProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
+      registerWebcamPreviewAdapter(popup.customElements, popup.HTMLElement);
       const doc = popup.document;
       doc.title = `${DOCK_PANE_LABELS[pane]} — OGraf Studio`;
       const base = doc.createElement('base');

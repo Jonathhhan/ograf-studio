@@ -41,7 +41,8 @@ export function EffectStackEditor({
 }) {
   const [type, setType] = useState<EffectType>('glow'),
     [error, setError] = useState(''),
-    [dragOver, setDragOver] = useState(false);
+    [dragOver, setDragOver] = useState(false),
+    [showBuiltIns, setShowBuiltIns] = useState(false);
   const add = useProjectStore((s) => s.addLayerEffect),
     update = useProjectStore((s) => s.updateLayerEffect),
     remove = useProjectStore((s) => s.removeLayerEffect),
@@ -73,10 +74,23 @@ export function EffectStackEditor({
       setError(e instanceof Error ? e.message : String(e));
     }
   };
+  // Every layer carries a built-in blur and drop shadow. While they are off they are noise, so
+  // they stay out of the list until used or asked for.
+  const builtInIdle = (effect: (typeof stack)[number]) =>
+    effect.legacy === 'blur'
+      ? effects.blur <= 0 && !(layer.animationTracks.blur ?? []).some((key) => key.value > 0)
+      : effect.legacy === 'drop-shadow'
+        ? !effectEnabled(effect, effects)
+        : false;
+  const idleBuiltIns = stack.filter(builtInIdle);
+  const visible = showBuiltIns ? stack : stack.filter((effect) => !builtInIdle(effect));
+  /** Swaps with the neighbour the author can see, keeping hidden built-ins in place. */
   const move = (index: number, delta: number) =>
     run(() => {
       const ids = stack.map((e) => e.id);
-      [ids[index], ids[index + delta]] = [ids[index + delta]!, ids[index]!];
+      const from = ids.indexOf(visible[index]!.id);
+      const to = ids.indexOf(visible[index + delta]!.id);
+      [ids[from], ids[to]] = [ids[to]!, ids[from]!];
       if (isGroup) reorderGroup(targetIds, ids);
       else reorder(layer.id, ids);
     });
@@ -138,7 +152,7 @@ export function EffectStackEditor({
         title={
           <>
             {isGroup ? 'Group effects stack' : 'Effects stack'}
-            {stack.length > 0 && <span className="effect-stack-count">{stack.length}</span>}
+            {visible.length > 0 && <span className="effect-stack-count">{visible.length}</span>}
           </>
         }
       >
@@ -174,8 +188,19 @@ export function EffectStackEditor({
             {error}
           </p>
         )}
+        {idleBuiltIns.length > 0 ? (
+          <button
+            type="button"
+            className="effect-stack-builtins"
+            aria-pressed={showBuiltIns}
+            onClick={() => setShowBuiltIns((current) => !current)}
+          >
+            {showBuiltIns ? 'Hide' : 'Show'} built-in{' '}
+            {idleBuiltIns.map((effect) => effect.name.toLowerCase()).join(' and ')} (off)
+          </button>
+        ) : null}
         <div className="effect-stack-list">
-          {stack.map((effect, index) => {
+          {visible.map((effect, index) => {
             const params = effectParams(effect, effects),
               enabled = effectEnabled(effect, effects),
               catalog = EFFECT_CATALOG[effect.type];
@@ -212,7 +237,7 @@ export function EffectStackEditor({
                     <button
                       aria-label={`Move ${effect.name} down`}
                       title="Move down"
-                      disabled={index === stack.length - 1}
+                      disabled={index === visible.length - 1}
                       onClick={() => move(index, 1)}
                     >
                       ↓

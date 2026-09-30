@@ -62,3 +62,22 @@ export function applyElementDataValue(element: Element, property: string, value:
     [property]: property === 'fill' && value && typeof value === 'object' ? value : String(value),
   } as Element;
 }
+
+/** The value `applyElementDataValue` would replace; `undefined` when the element lacks it. */
+export function readElementDataValue(element: Element, property: string): unknown {
+  if (property === 'dropShadowColor' || property.startsWith('effects.')) return undefined;
+  const shaderTarget = /^(?:(fill|strokePaint)\.)?parameters\.(.+)$/.exec(property);
+  if (shaderTarget) {
+    const shader = getElementShaderPaint(
+      element,
+      shaderTarget[1] === 'strokePaint' ? 'stroke' : 'fill',
+    );
+    return shader ? resolveShaderParameters(shader)[shaderTarget[2]!] : undefined;
+  }
+  const stop = /^fill\.stops\[(0|[1-9]\d*)\]\.color$/.exec(property);
+  if (stop)
+    return 'fill' in element && isGradientPaint(element.fill)
+      ? element.fill.stops[Number(stop[1])]?.color
+      : undefined;
+  return (element as unknown as Record<string, unknown>)[property];
+}

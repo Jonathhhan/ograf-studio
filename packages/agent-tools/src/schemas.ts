@@ -3,6 +3,8 @@ import {
   BLEND_MODES,
   EFFECT_TYPES,
   STYLE_PACK_IDS,
+  VISUAL_RULE_OPERATOR_VALUES,
+  VISUAL_RULE_TRIGGER_VALUES,
   type AnimatableLayerProperty,
   type DesignTokenTargetProperty,
   type FieldValue,
@@ -351,6 +353,60 @@ const mediaCueSchema = z
   .strict();
 const mediaCuePatchSchema = mediaCueSchema.omit({ id: true }).partial().strict();
 
+const visualRuleConditionShape = {
+  fieldId: z.string(),
+  sourcePath: z.array(z.string()).optional(),
+  operator: z.enum(VISUAL_RULE_OPERATOR_VALUES).optional(),
+  value: z.unknown().optional(),
+  compareFieldId: z.string().optional(),
+  compareSourcePath: z.array(z.string()).optional(),
+  ignoreCase: z.boolean().optional(),
+};
+
+const visualRuleConditionSchema = z.object(visualRuleConditionShape).strict();
+
+const visualRuleTargetShape = {
+  targetLayerId: z.string().optional(),
+  transitionFrames: z.number().optional(),
+};
+
+const layerMotionSpecSchema = z
+  .object({
+    style: z.enum(['fade', 'slide', 'fly', 'focus']),
+    durationFrames: z.number().int().positive(),
+  })
+  .catchall(z.unknown())
+  .superRefine((spec, context) => {
+    const allowed = new Set(['style', 'direction', 'durationFrames', 'distance', 'easing']);
+    for (const key of Object.keys(spec))
+      if (!allowed.has(key))
+        context.addIssue({ code: 'custom', path: [key], message: 'Unknown motion setting.' });
+    if (!['fade', 'slide', 'fly', 'focus'].includes(String(spec.style)))
+      context.addIssue({ code: 'custom', path: ['style'], message: 'Unknown motion style.' });
+    if (!Number.isInteger(spec.durationFrames) || Number(spec.durationFrames) < 1)
+      context.addIssue({
+        code: 'custom',
+        path: ['durationFrames'],
+        message: 'Use positive frames.',
+      });
+    if (
+      spec.direction !== undefined &&
+      !['left', 'right', 'up', 'down'].includes(String(spec.direction))
+    )
+      context.addIssue({ code: 'custom', path: ['direction'], message: 'Unknown direction.' });
+    if (
+      spec.distance !== undefined &&
+      !(typeof spec.distance === 'number' && Number.isFinite(spec.distance) && spec.distance >= 0)
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['distance'],
+        message: 'Use a non-negative distance.',
+      });
+    if (spec.easing !== undefined && !easingSchema.safeParse(spec.easing).success)
+      context.addIssue({ code: 'custom', path: ['easing'], message: 'Unknown easing preset.' });
+  });
+
 export const authoringOperationSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('set_layer_lighting'),
@@ -448,7 +504,9 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
         showTitleSafe: z.boolean().optional(),
         showCenterMarker: z.boolean().optional(),
         dimOutsideCanvas: z.boolean().optional(),
-        presentationBackground: z.enum(['none', 'big-buck-bunny', 'still-image']).optional(),
+        presentationBackground: z
+          .enum(['none', 'big-buck-bunny', 'still-image', 'webcam'])
+          .optional(),
         presentationBackgroundImageSource: z.string().max(2048).optional(),
         presentationBackgroundImageName: z.string().max(260).optional(),
         snappingEnabled: z.boolean().optional(),
@@ -912,6 +970,14 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
       .optional(),
   }),
   z.object({
+    type: z.literal('set_layer_motion'),
+    compositionId,
+    layerId,
+    layerName,
+    side: z.enum(['in', 'out']),
+    spec: layerMotionSpecSchema.nullable(),
+  }),
+  z.object({
     type: z.literal('set_layer_visual_rules'),
     compositionId,
     layerId,
@@ -922,36 +988,28 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
           id: z.string().min(1),
           name: z.string().min(1),
           enabled: z.boolean(),
-          trigger: z
-            .enum(['data', 'click', 'double-click', 'pointer-enter', 'pointer-leave'])
-            .optional(),
-          fieldId: z
-            .string()
-            .default('')
-            .describe('Required for data rules; pointer rules do not need a Data field.'),
-          sourcePath: z.array(z.string()).default([]),
-          operator: z
-            .enum([
-              'equals',
-              'not-equals',
-              'empty',
-              'not-empty',
-              'greater-than',
-              'less-than',
-              'changed',
-              'increased',
-              'decreased',
-            ])
-            .default('equals'),
-          value: z.unknown().optional(),
+          trigger: z.enum(VISUAL_RULE_TRIGGER_VALUES).optional(),
+          ...visualRuleConditionShape,
+          fieldId: z.string().optional(),
+          conditions: z.array(z.record(z.string(), z.unknown())).optional(),
+          match: z.enum(['all', 'any']).optional(),
+          eventId: z.string().optional(),
+          delayFrames: z.number().optional(),
           actions: z.array(
             z.discriminatedUnion('type', [
-              z.object({ type: z.literal('visibility'), visible: z.boolean() }).strict(),
+              z
+                .object({
+                  type: z.enum(['visibility', 'toggle-visibility']),
+                  visible: z.boolean().optional(),
+                  ...visualRuleTargetShape,
+                })
+                .strict(),
               z
                 .object({
                   type: z.literal('property'),
                   targetProperty: z.string().min(1),
                   value: z.unknown(),
+                  ...visualRuleTargetShape,
                 })
                 .strict(),
               z.object({ type: z.literal('custom-action'), actionId: z.string().min(1) }).strict(),
@@ -971,11 +1029,81 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
         })
         .strict()
         .superRefine((rule, context) => {
-          if ((!rule.trigger || rule.trigger === 'data') && !rule.fieldId) {
+          const trigger = rule.trigger ?? 'data';
+          for (const [index, condition] of (rule.conditions ?? []).entries()) {
+            const parsed = visualRuleConditionSchema.safeParse(condition);
+            if (!parsed.success)
+              for (const issue of parsed.error.issues)
+                context.addIssue({
+                  code: 'custom',
+                  path: ['conditions', index, ...issue.path.map(String)],
+                  message: issue.message,
+                });
+          }
+          if (trigger === 'data' && !rule.fieldId) {
             context.addIssue({
               code: 'custom',
               path: ['fieldId'],
-              message: 'Data rules require a fieldId; pointer rules do not.',
+              message: 'Data rules require a fieldId; other triggers do not.',
+            });
+          }
+          if (trigger === 'custom-action' && !rule.eventId) {
+            context.addIssue({
+              code: 'custom',
+              path: ['eventId'],
+              message: 'custom-action rules name the triggering custom actionId in eventId.',
+            });
+          }
+          const conditions = [
+            ...(trigger === 'data' ? [rule] : []),
+            ...(rule.conditions ?? []).map((condition) => ({
+              operator: String(condition.operator ?? ''),
+            })),
+          ];
+          if (
+            trigger !== 'data' &&
+            conditions.some((condition) =>
+              ['changed', 'increased', 'decreased'].includes(condition.operator ?? ''),
+            )
+          ) {
+            context.addIssue({
+              code: 'custom',
+              path: ['conditions'],
+              message: 'changed/increased/decreased watch data, so they need a data trigger.',
+            });
+          }
+          const isState =
+            trigger === 'hover' ||
+            (trigger === 'data' &&
+              !conditions.some((condition) =>
+                ['changed', 'increased', 'decreased'].includes(condition.operator ?? ''),
+              ));
+          if (isState && (rule.delayFrames ?? 0) > 0) {
+            context.addIssue({
+              code: 'custom',
+              path: ['delayFrames'],
+              message: 'Delays apply to event triggers only.',
+            });
+          }
+          for (const [index, action] of rule.actions.entries()) {
+            if (action.type === 'visibility' && action.visible === undefined)
+              context.addIssue({
+                code: 'custom',
+                path: ['actions', index, 'visible'],
+                message: 'visibility actions need visible; use toggle-visibility to flip.',
+              });
+            if (action.type === 'toggle-visibility' && action.visible !== undefined)
+              context.addIssue({
+                code: 'custom',
+                path: ['actions', index, 'visible'],
+                message: 'toggle-visibility flips the current visibility; omit visible.',
+              });
+          }
+          if (isState && rule.actions.some((action) => action.type === 'toggle-visibility')) {
+            context.addIssue({
+              code: 'custom',
+              path: ['actions'],
+              message: 'toggle-visibility needs an event trigger; state rules use visibility.',
             });
           }
         }),

@@ -567,7 +567,7 @@ export function createComposition(overrides: Partial<Composition> = {}): Composi
     name: 'Main',
     width: 1920,
     height: 1080,
-    backgroundColor: '#000000',
+    backgroundColor: 'transparent',
     frameRate: DEFAULT_FRAME_RATE,
     updateTransitionFrames: 0,
     updateInterruption: 'queue',

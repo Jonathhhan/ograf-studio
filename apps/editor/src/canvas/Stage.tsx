@@ -1,4 +1,11 @@
 import { previewBindingData } from '../state/dataBinding';
+import {
+  copyLayers as copyLayerSelection,
+  deleteLayers as deleteLayerSelection,
+  groupLayers as groupLayerSelection,
+  pasteLayers as pasteLayerClipboard,
+  ungroupLayers as ungroupLayerSelection,
+} from '../state/layerCommands';
 import { useTestDataStore } from '../state/testDataStore';
 import {
   useCallback,
@@ -121,11 +128,8 @@ export function Stage({ style }: { style?: CSSProperties }) {
   const updateLayerTransform = useProjectStore((s) => s.updateLayerTransform);
   const updateLayerElement = useProjectStore((s) => s.updateLayerElement);
   const setTestValue = useTestDataStore((s) => s.setValue);
-  const pasteLayers = useProjectStore((s) => s.pasteLayers);
   const removeLayer = useProjectStore((s) => s.removeLayer);
   const removeLayerKeyframe = useProjectStore((s) => s.removeLayerKeyframe);
-  const groupLayers = useProjectStore((s) => s.groupLayers);
-  const ungroupLayers = useProjectStore((s) => s.ungroupLayers);
   const selectedLayerId = useSelectionStore((s) => s.selectedLayerId);
   const selectedLayerIds = useSelectionStore((s) => s.selectedLayerIds);
   const selectedLayerKeyframeId = useSelectionStore((s) => s.selectedLayerKeyframeId);
@@ -137,7 +141,6 @@ export function Stage({ style }: { style?: CSSProperties }) {
   const setLiveTransform = useSelectionStore((s) => s.setLiveTransform);
   const clearLiveTransform = useSelectionStore((s) => s.clearLiveTransform);
   const clipboardLayers = useLayerClipboardStore((s) => s.layers);
-  const copyLayers = useLayerClipboardStore((s) => s.copy);
 
   const setCurrentFrame = useTimelineStore((s) => s.setCurrentFrame);
   const isPlaying = useTimelineStore((s) => s.isPlaying);
@@ -378,25 +381,16 @@ export function Stage({ style }: { style?: CSSProperties }) {
       ])
     : undefined;
 
-  const snapshotLayers = (layerIds: string[]): Layer[] => {
-    const wanted = new Set(layerIds);
-    return composition.layers
-      .filter((layer) => wanted.has(layer.id))
-      .map((layer) => structuredClone(layer));
-  };
-
   const copyLayerIds = (layerIds: string[]) => {
-    copyLayers(snapshotLayers(layerIds));
+    copyLayerSelection(layerIds);
   };
 
   const deleteLayerIds = (layerIds: string[]) => {
-    for (const layerId of layerIds) removeLayer(layerId);
-    select(null);
+    deleteLayerSelection(layerIds);
   };
 
   const pasteClipboardLayers = () => {
-    if (clipboardLayers.length === 0) return;
-    selectMany(pasteLayers(clipboardLayers));
+    pasteLayerClipboard();
   };
 
   const handleCanvasContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -1382,11 +1376,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
                     id: 'ungroup',
                     label: 'Ungroup',
                     separatorBefore: true,
-                    onSelect: () => {
-                      const primary = objectMenu.layerIds.at(-1) ?? null;
-                      ungroupLayers(objectMenu.layerIds);
-                      select(primary);
-                    },
+                    onSelect: () => ungroupLayerSelection(objectMenu.layerIds),
                   },
                 ]
               : [
@@ -1395,9 +1385,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
                     label: 'Group',
                     separatorBefore: true,
                     disabled: objectMenu.layerIds.length < 2,
-                    onSelect: () => {
-                      if (groupLayers(objectMenu.layerIds)) selectMany(objectMenu.layerIds);
-                    },
+                    onSelect: () => groupLayerSelection(objectMenu.layerIds),
                   },
                 ]),
             {

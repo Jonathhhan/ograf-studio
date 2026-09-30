@@ -79,7 +79,7 @@ export function LayerListPanel() {
         ) : (
           <>
             <p className="layer-list-drag-hint">
-              Row centre parents · edges reorder · drop in AI Assistant to reference
+              Drag onto a row to parent · onto a row edge to reorder · into AI Assistant to mention
             </p>
             <ul className="layer-list">
               {layers.map((layer) => {
