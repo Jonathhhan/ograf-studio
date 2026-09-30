@@ -6,7 +6,9 @@ import { selectedStandaloneTargets } from './standaloneTargets.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = selectedStandaloneTargets();
-const packageVersion = JSON.parse(await readFile(resolve(repositoryRoot, 'package.json'), 'utf8')).version;
+const packageVersion = JSON.parse(
+  await readFile(resolve(repositoryRoot, 'package.json'), 'utf8'),
+).version;
 
 const expectedMachine = {
   'mach-o:x64': 0x01000007,

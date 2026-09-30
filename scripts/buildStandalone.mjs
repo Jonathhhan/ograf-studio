@@ -21,7 +21,9 @@ const outputParts = parse(outfile);
 const stagedOutfile = resolve(outputParts.dir, `${outputParts.name}.next${outputParts.ext}`);
 const previousOutfile = resolve(outputParts.dir, `${outputParts.name}.previous${outputParts.ext}`);
 const generatedEntrypoint = resolve(repositoryRoot, 'release/standalone-entry.ts');
-const packageVersion = JSON.parse(await readFile(resolve(repositoryRoot, 'package.json'), 'utf8')).version;
+const packageVersion = JSON.parse(
+  await readFile(resolve(repositoryRoot, 'package.json'), 'utf8'),
+).version;
 const versionParts = /^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/.exec(packageVersion);
 if (!versionParts) throw new Error(`Unsupported standalone version: ${packageVersion}`);
 const version =
