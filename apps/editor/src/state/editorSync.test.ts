@@ -3,6 +3,17 @@ import { createProject } from '@ograf-editor/scene-model';
 import { EditorSync } from './editorSync';
 
 describe('revision-safe editor synchronization', () => {
+  it('discards stale conflict data when a restarted server accepts the hello baseline', () => {
+    const sync = new EditorSync(createProject());
+    sync.acknowledge(0);
+    sync.changed({ ...sync.local, name: 'Local' });
+    sync.receive({ project: { ...sync.local, name: 'Old server' }, revision: 1, source: 'agent' });
+    sync.beginConnection();
+    sync.acknowledge(0);
+    expect(sync.conflict).toBeNull();
+    expect(sync.resolve('remote')).toBeNull();
+    expect(sync.local.name).toBe('Local');
+  });
   it('retains unsent edits when a server update arrives during debounce', () => {
     const base = createProject();
     const sync = new EditorSync(base);

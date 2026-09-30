@@ -8,7 +8,7 @@ import {
   hasElementShaderPaint,
 } from '@ograf-editor/scene-model';
 import { parseEditablePath, pathConversionError } from '@ograf-editor/scene-model';
-import { access, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -573,38 +573,6 @@ async function certifiedArtifacts(
     certification,
     ...(includeThumbnail ? { thumbnailFrame: projectThumbnailFrame(project) } : {}),
   };
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function atomicWrite(
-  path: string,
-  data: string | Uint8Array,
-  overwrite: boolean,
-): Promise<void> {
-  if (!overwrite && (await exists(path))) {
-    throw new Error('Target already exists. Set overwrite=true only after confirming replacement.');
-  }
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temporary, data);
-  try {
-    await rename(temporary, path);
-  } catch (error) {
-    if (!overwrite) {
-      await unlink(temporary).catch(() => undefined);
-      throw error;
-    }
-    await unlink(path).catch(() => undefined);
-    await rename(temporary, path);
-  }
 }
 
 function inspectComposition(composition: Composition) {
@@ -4021,7 +3989,7 @@ export function createOGrafToolRecords(
       }
       const output = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
       const target = workspace.resolveAllowedPath(path);
-      await atomicWrite(target, output, overwrite);
+      await writeTemplateFiles([{ path: target, data: output }], overwrite);
       return textResult(
         { sessionId, path: target, profile, certification, thumbnailFrame: renderedFrame },
         `Certified and exported ${target}`,

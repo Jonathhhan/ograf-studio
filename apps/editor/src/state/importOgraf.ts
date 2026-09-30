@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import { boundedZipEntry } from './boundedZipEntry';
 import {
   createAsset,
   createComposition,
@@ -929,13 +930,15 @@ function projectFromDescriptor(
 }
 
 async function entriesFromZip(data: ArrayBuffer | Uint8Array): Promise<Map<string, Uint8Array>> {
+  if (data.byteLength > MAX_PACKAGE_BYTES)
+    throw new Error('OGraf ZIP exceeds the 128 MB import limit.');
   const zip = await JSZip.loadAsync(data);
   const entries = new Map<string, Uint8Array>();
   let total = 0;
   for (const entry of Object.values(zip.files)) {
     if (entry.dir) continue;
     const path = normalizePackagePath(entry.name);
-    const bytes = await entry.async('uint8array');
+    const bytes = await boundedZipEntry(entry, MAX_PACKAGE_BYTES - total);
     total += bytes.byteLength;
     if (total > MAX_PACKAGE_BYTES)
       throw new Error('OGraf package expands beyond the 128 MB import limit.');
@@ -1049,6 +1052,8 @@ export async function importOgrafData(
 }
 
 async function importSelectedFiles(files: readonly File[]): Promise<OgrafImportResult> {
+  if (files.reduce((total, file) => total + file.size, 0) > MAX_PACKAGE_BYTES)
+    throw new Error('Selected OGraf files exceed the 128 MB import limit.');
   if (files.length === 1 && /\.zip$/i.test(files[0]!.name)) {
     return importOgrafData(files[0]!.name, await files[0]!.arrayBuffer());
   }

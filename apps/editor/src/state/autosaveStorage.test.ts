@@ -36,6 +36,49 @@ const unavailable: AutosaveBackend = {
 };
 
 describe('autosave recovery', () => {
+  it('restores the latest durable snapshot without loading the full durable history', async () => {
+    const project = createProject({ name: 'Latest durable' });
+    const recovery = createAutosaveStorage(
+      {
+        append: async () => {},
+        clear: async () => {},
+        list: async () => {
+          throw new Error('Full history must not be loaded at startup');
+        },
+        latest: async () => ({ id: 'latest', savedAt: 1, project }),
+      },
+      memoryStorage,
+    );
+    expect(await recovery.latest()).toEqual(project);
+  });
+  it('keeps pending status until the latest queued snapshot is durable', async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const persisted: string[] = [];
+    const recovery = createAutosaveStorage(
+      {
+        append: async (snapshot) => {
+          if (snapshot.project.name === 'Latest') await blocked;
+          persisted.push(snapshot.project.name);
+        },
+        list: async () => [],
+        clear: async () => {},
+      },
+      () => {
+        throw new Error('Quota full');
+      },
+    );
+    const first = recovery.save(createProject({ name: 'Earlier' }));
+    const latest = recovery.save(createProject({ name: 'Latest' }));
+    await first;
+    expect(persisted).toEqual(['Earlier']);
+    expect(useAutosaveStatus.getState().state).toBe('pending');
+    release();
+    await latest;
+    expect(useAutosaveStatus.getState().state).toBe('saved');
+  });
   it('retains bounded fallback snapshots and restores legacy browser saves', async () => {
     const local = memoryStorage();
     const original = createProject({ name: 'Legacy' });

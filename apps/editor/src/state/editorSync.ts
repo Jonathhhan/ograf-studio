@@ -25,6 +25,7 @@ export class EditorSync {
   beginConnection() {
     this.revision = null;
     this.inFlight = null;
+    this.conflict = null;
     this.hello = this.local;
   }
 

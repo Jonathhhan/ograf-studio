@@ -17,6 +17,17 @@ afterEach(async () => {
 });
 
 describe('paired template files', () => {
+  it('allows exactly one concurrent writer when overwrite is false', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'ograf-save-test-'));
+    folders.push(folder);
+    const path = join(folder, 'same.ogs');
+    const results = await Promise.allSettled(
+      ['first', 'second'].map((data) => writeTemplateFiles([{ path, data }], false)),
+    );
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'rejected']);
+    expect(await readFile(path, 'utf8')).toBe('first');
+    expect(await readdir(folder)).toEqual(['same.ogs']);
+  });
   it('writes and replaces both files without leaving staging files', async () => {
     const folder = await mkdtemp(join(tmpdir(), 'ograf-save-test-'));
     folders.push(folder);

@@ -486,6 +486,7 @@ export function useAgentBridge(): void {
         }
         status({ connected: true, authoritative: true, activity: 'Agent connected' });
         sync.beginConnection();
+        publishConflict();
         send({ type: 'editor.hello', project: useProjectStore.getState().project });
       });
       socket.addEventListener('message', async (event) => {

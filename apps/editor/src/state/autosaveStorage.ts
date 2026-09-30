@@ -18,19 +18,24 @@ export const useAutosaveStatus = create<{
 export interface AutosaveBackend {
   append(snapshot: AutosaveSnapshot): Promise<void>;
   list(): Promise<AutosaveSnapshot[]>;
+  latest?(): Promise<AutosaveSnapshot | undefined>;
   clear(): Promise<void>;
 }
 
 function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('ograf-editor-recovery', 1);
+    const request = indexedDB.open('ograf-editor-recovery', 2);
     let expired = false;
     const timer = setTimeout(() => {
       expired = true;
       reject(new Error('Recovery storage did not respond.'));
     }, 3000);
-    request.onupgradeneeded = () =>
-      request.result.createObjectStore('snapshots', { keyPath: 'id' });
+    request.onupgradeneeded = () => {
+      const store = request.result.objectStoreNames.contains('snapshots')
+        ? request.transaction!.objectStore('snapshots')
+        : request.result.createObjectStore('snapshots', { keyPath: 'id' });
+      if (!store.indexNames.contains('savedAt')) store.createIndex('savedAt', 'savedAt');
+    };
     request.onerror = () => {
       clearTimeout(timer);
       reject(request.error);
@@ -43,7 +48,10 @@ function database(): Promise<IDBDatabase> {
     request.onsuccess = () => {
       clearTimeout(timer);
       if (expired) request.result.close();
-      else resolve(request.result);
+      else {
+        request.result.onversionchange = () => request.result.close();
+        resolve(request.result);
+      }
     };
   });
 }
@@ -82,14 +90,22 @@ const indexedDbBackend: AutosaveBackend = {
   append: (snapshot) =>
     transaction<void>('readwrite', (store, done) => {
       store.put(snapshot);
-      const request = store.getAll();
+      const request = store.index('savedAt').openKeyCursor(null, 'prev');
+      let retained = 0;
       request.onsuccess = () => {
-        for (const old of newestFirst(request.result as AutosaveSnapshot[]).slice(
-          MAX_AUTOSAVE_SNAPSHOTS,
-        ))
-          store.delete(old.id);
-        done();
+        const cursor = request.result;
+        if (!cursor) {
+          done();
+          return;
+        }
+        if (++retained > MAX_AUTOSAVE_SNAPSHOTS) store.delete(cursor.primaryKey);
+        cursor.continue();
       };
+    }),
+  latest: () =>
+    transaction<AutosaveSnapshot | undefined>('readonly', (store, done) => {
+      const request = store.index('savedAt').openCursor(null, 'prev');
+      request.onsuccess = () => done(request.result?.value as AutosaveSnapshot | undefined);
     }),
   list: () =>
     transaction<AutosaveSnapshot[]>('readonly', (store, done) => {
@@ -136,7 +152,7 @@ export function createAutosaveStorage(
       return null;
     }
   };
-  const list = async (): Promise<AutosaveSnapshot[]> => {
+  const list = async (latestOnly = false): Promise<AutosaveSnapshot[]> => {
     const local = localHistory();
     try {
       const current = JSON.parse(storage().getItem(CURRENT_KEY) ?? 'null');
@@ -145,7 +161,10 @@ export function createAutosaveStorage(
       /* Use durable history when the mirror is unavailable. */
     }
     try {
-      const remote = await backend.list();
+      const remote =
+        latestOnly && backend.latest
+          ? [await backend.latest()].filter((entry): entry is AutosaveSnapshot => Boolean(entry))
+          : await backend.list();
       const snapshots = newestFirst([
         ...new Map([...local, ...remote].map((entry) => [entry.id, entry])).values(),
       ]);
@@ -160,16 +179,20 @@ export function createAutosaveStorage(
     }
   };
   const save = (project: Project): Promise<void> => {
+    const generation = ++sequence;
+    const status = (value: ReturnType<typeof useAutosaveStatus.getState>) => {
+      if (generation === sequence) useAutosaveStatus.setState(value);
+    };
     let snapshot: AutosaveSnapshot;
     try {
       const savedAt = Date.now();
       snapshot = {
-        id: `${savedAt}-${String(++sequence).padStart(8, '0')}-${crypto.randomUUID()}`,
+        id: `${savedAt}-${String(generation).padStart(8, '0')}-${crypto.randomUUID()}`,
         savedAt,
-        project: JSON.parse(JSON.stringify(project)) as Project,
+        project: structuredClone(project),
       };
     } catch {
-      useAutosaveStatus.setState({
+      status({
         state: 'error',
         message:
           'Autosave failed: the project could not be serialized. Save Project to keep your work.',
@@ -184,12 +207,12 @@ export function createAutosaveStorage(
     } catch {
       /* IndexedDB can still save larger projects. */
     }
-    useAutosaveStatus.setState({ state: 'pending', message: 'Saving recovery snapshot…' });
+    status({ state: 'pending', message: 'Saving recovery snapshot…' });
     queue = queue
       .then(async () => {
         try {
           await backend.append(snapshot);
-          useAutosaveStatus.setState({ state: 'saved', message: 'Recovery snapshot saved' });
+          status({ state: 'saved', message: 'Recovery snapshot saved' });
         } catch {
           try {
             // One atomic write retains previous versions if quota is exhausted.
@@ -197,12 +220,12 @@ export function createAutosaveStorage(
               HISTORY_KEY,
               JSON.stringify([snapshot, ...localHistory()].slice(0, MAX_AUTOSAVE_SNAPSHOTS)),
             );
-            useAutosaveStatus.setState({
+            status({
               state: 'saved',
               message: 'Recovery saved in browser fallback storage',
             });
           } catch {
-            useAutosaveStatus.setState({
+            status({
               state: 'error',
               message: mirrored
                 ? 'Only the latest autosave was saved; recovery history is unavailable. Save Project for a backup.'
@@ -212,7 +235,7 @@ export function createAutosaveStorage(
         }
       })
       .catch(() => {
-        useAutosaveStatus.setState({
+        status({
           state: 'error',
           message: 'Autosave failed. Save Project now to keep your work.',
         });
@@ -222,8 +245,8 @@ export function createAutosaveStorage(
   return {
     save,
     load,
-    list,
-    latest: async () => (await list())[0]?.project ?? load(),
+    list: () => list(),
+    latest: async () => (await list(true))[0]?.project ?? load(),
     clear: async () => {
       await queue;
       storage().removeItem(LEGACY_KEY);
