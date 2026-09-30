@@ -3,6 +3,7 @@ dist/
 dist-ssr/
 release/
 *.bun-build
+.bun-cache/
 *.local
 
 .vscode/*

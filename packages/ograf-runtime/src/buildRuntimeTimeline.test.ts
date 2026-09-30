@@ -168,7 +168,7 @@ describe('runtime timeline boundary seeking', () => {
     }
   });
 
-  it('samples authored values and local bounds at fractional seconds without evaluating expressions', () => {
+  it('samples own authored values and other expression results at fractional seconds', () => {
     const compiled = descriptor();
     const layer = compiled.layers[0]!;
     layer.name = 'Title';
@@ -192,7 +192,7 @@ describe('runtime timeline boundary seeking', () => {
     const diagnostics: Parameters<typeof resolveFrameExpressions>[3] = [];
     expect(
       resolveFrameExpressions(compiled, states, {}, diagnostics).get('layer')!.transform,
-    ).toMatchObject({ x: 50, y: 25, width: 150, height: 50 });
+    ).toMatchObject({ x: 50, y: 50, width: 150, height: 50 });
     expect(diagnostics).toEqual([]);
     expect(JSON.stringify(states.get('layer'))).toBe(before);
     compiled.scripting = {

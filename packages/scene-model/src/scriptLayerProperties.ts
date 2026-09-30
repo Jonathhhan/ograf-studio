@@ -204,7 +204,7 @@ export function scriptLayerReference(
     visuals: ScriptLayerVisuals | undefined,
     applyVisualWrites: (sampledVisuals: ScriptLayerVisuals) => ScriptLayerVisuals,
     applyTransformWrites: (sampledTransform: LayerTransform) => LayerTransform,
-  ) => unknown,
+  ) => object,
 ): { reference: object; finish: () => ScriptLayerVisuals | undefined } {
   let draft: ScriptLayerVisuals | undefined;
   const transformWrites: Partial<LayerTransform> = {};
@@ -364,13 +364,27 @@ export function scriptLayerReference(
     Object.defineProperty(target, 'sourceRectAtTime', {
       value: (seconds?: number, includeExtents?: boolean) => {
         assertActive();
-        return measureSourceRect(
+        const currentVisuals = draft ?? visuals;
+        if (currentVisuals?.element.type === 'text') {
+          // A script may be midway through editing a gradient. Paint is irrelevant to
+          // measurement; validate only the source/layout that the renderer will consume.
+          const { fill: _fill, strokePaint: _strokePaint, ...layout } = currentVisuals.element;
+          validateScriptElement({
+            ...layout,
+            fill: '#000000',
+            color: '#000000',
+            strokeColor: '#000000',
+          });
+        }
+        const bounds = measureSourceRect(
           seconds,
           includeExtents,
           draft ?? visuals,
           applyVisualWrites,
           applyTransformWrites,
         );
+        // A measurement is a snapshot, not a mutable renderer/cache object.
+        return Object.freeze({ ...bounds });
       },
     });
   }

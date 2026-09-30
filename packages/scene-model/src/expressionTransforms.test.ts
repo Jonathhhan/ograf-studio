@@ -28,6 +28,196 @@ function layer(
 }
 
 describe('resolveExpressionTransforms', () => {
+  it('samples other expressions and their dependencies at the requested time', () => {
+    const a = layer('A', { x: 'value + time * 10', y: 'frame' });
+    const b = layer('B', { x: "layer('A').x + layer('A').y" });
+    for (const target of [a, b])
+      target.sampleTransform = (t) => ({ ...target.transform, x: t * 100 });
+    const follower = layer('Follower', { x: "layerById('B').property('x').valueAtTime(2)" });
+    const errors: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms(
+      [follower, b, a],
+      { time: 5, frame: 250 },
+      errors,
+      1,
+      undefined,
+      (time) => ({ time, frame: time * 50 }),
+    );
+    expect(errors).toEqual([]);
+    expect(result.get('Follower')?.x).toBe(320);
+  });
+
+  it('keeps self samples authored and evaluates other properties on the same layer', () => {
+    const a = layer('A', {
+      x: "valueAtTime(2) + thisLayer.property('y').valueAtTime(2)",
+      y: 'time * 3',
+    });
+    a.sampleTransform = (t) => ({ ...a.transform, x: t * 100 });
+    const errors: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms([a], { time: 5 }, errors);
+    expect(errors).toEqual([]);
+    expect(result.get('A')?.x).toBe(206);
+  });
+
+  it('treats aliases of the current vector as self samples', () => {
+    const a = layer('A', {
+      position: "[layerById('A').property('x').valueAtTime(2), valueAtTime(3)[1]]",
+    });
+    a.sampleTransform = (t) => ({ ...a.transform, x: t * 100, y: t * 10 });
+    const b = layer('B', { position: "layer('A').property('position').valueAtTime(1)" });
+    const errors: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms([b, a], { time: 0 }, errors);
+    expect(errors).toEqual([]);
+    expect(result.get('B')).toMatchObject({ x: 200, y: 30 });
+  });
+
+  it('evaluates a sampled property once per time and does not replay Comp', () => {
+    const a = layer('A', { x: 'counter.next()' });
+    a.sampleTransform = () => a.transform;
+    const b = layer('B', {
+      x: "const p = layer('A').property('x'); return p.valueAtTime(2) - p.valueAtTime(2);",
+    });
+    const errors: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms([b, a], { time: 0 }, errors, 1, {
+      enabled: true,
+      modules: [
+        { fileName: 'counter.js', source: 'let n = 0; export function next() { return ++n; }' },
+      ],
+      source: "layer('A').x = 999; layer('B').y = layer('A').property('x').valueAtTime(2);",
+    });
+    expect(errors).toEqual([]);
+    expect(result.get('B')).toMatchObject({ x: 0, y: 10 });
+    expect(result.get('A')?.x).toBe(999);
+  });
+
+  it('detects cycles across different times', () => {
+    const a = layer('A', { x: "layer('B').property('x').valueAtTime(1)" });
+    const b = layer('B', { x: "layer('A').property('x').valueAtTime(0)" });
+    for (const target of [a, b]) target.sampleTransform = () => target.transform;
+    const errors: ExpressionDiagnostic[] = [];
+    resolveExpressionTransforms([a, b], { time: 0 }, errors);
+    expect(errors[0]?.message).toContain('A.x -> B.x@1 -> A.x');
+  });
+
+  it('runs expressions once before sequential Comp writes without refreshing dependents', () => {
+    const diagnostics: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms(
+      [
+        layer('Title'),
+        layer('Box', { width: "layer('Title').width + 20" }),
+        layer('Follower', { x: "layer('Box').width" }),
+      ],
+      {},
+      diagnostics,
+      1,
+      {
+        enabled: true,
+        modules: [],
+        source: `
+          layer('Title').width = 200;
+          if (layer('Box').width !== 120) throw Error('Expression unexpectedly refreshed');
+          layer('Box').width = layer('Title').width + 20;
+          layer('Title').width = 300;
+          if (layer('Box').width !== 220) throw Error('Sequential assignment changed');
+        `,
+      },
+    );
+    expect(diagnostics).toEqual([]);
+    expect(result.get('Title')?.width).toBe(300);
+    expect(result.get('Box')?.width).toBe(220);
+    expect(result.get('Follower')?.x).toBe(120);
+  });
+
+  it('honors sequential text/box writes, retains snapshots, and keeps authored time samples separate', () => {
+    const authored = createTextLayer();
+    const title = layer('Title');
+    title.scriptVisuals = {
+      element: authored.element,
+      effects: authored.effects,
+      isVisible: true,
+      blendMode: 'normal',
+    };
+    title.sampleTransform = () => ({ ...title.transform, width: 80 });
+    title.sampleScriptVisualsAtTime = () => title.scriptVisuals!;
+    title.sourceRectAtTimeWithVisuals = (_at, _extents, visuals, pose) => {
+      if (visuals.element.type !== 'text') throw Error('Expected text');
+      return {
+        left: 0,
+        top: 0,
+        width: Math.min(pose!.width, visuals.element.content.length * visuals.element.fontSize),
+        height: visuals.element.fontSize,
+      };
+    };
+    const diagnostics: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms([title, layer('Box')], { time: 1 }, diagnostics, 1, {
+      enabled: true,
+      modules: [],
+      source: `
+        const title = layer('Title');
+        const width = title.property('width');
+        title.content = 'Hello';
+        title.fontSize = 20;
+        title.width = 300;
+        const first = title.sourceRectAtTime();
+        if (!Object.isFrozen(first) || first.width !== 100) throw Error('Invalid initial snapshot');
+        title.element.fontSize = 40;
+        title.size[0] = 150;
+        if (width.value !== 150 || width.valueAtTime(0) !== 80) throw Error('Incorrect current/authored reads');
+        const second = title.sourceRectAtTime();
+        if (first.width !== 100 || second.width !== 150) throw Error('Snapshot changed');
+        const past = title.sourceRectAtTime(0);
+        if (past.width !== 150 || past.height !== 40) throw Error('Earlier writes missing in timed bounds');
+        layer('Box').width = second.width + 24;
+        layer('Box').height = second.height + 12;
+      `,
+    });
+    expect(diagnostics).toEqual([]);
+    expect(result.get('Box')).toMatchObject({ width: 174, height: 52 });
+    expect(title.transform.width).toBe(100);
+    expect(title.scriptVisuals.element).toEqual(authored.element);
+  });
+
+  it('evicts old authored time samples without changing their results', () => {
+    const title = layer('Title');
+    const sample = vi.fn((time: number) => ({ ...title.transform, x: time }));
+    title.sampleTransform = sample;
+    const diagnostics: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms([title], { time: 0 }, diagnostics, 1, {
+      enabled: true,
+      modules: [],
+      source: `
+        const x = layer('Title').property('x');
+        for (let i = 0; i < 140; i++) x.valueAtTime(i);
+        if (x.valueAtTime(139) !== 139) throw Error('Recent sample changed');
+        layer('Title').x = x.valueAtTime(0);
+      `,
+    });
+    expect(diagnostics).toEqual([]);
+    expect(result.get('Title')!.x).toBe(0);
+    expect(sample).toHaveBeenCalledTimes(141);
+  });
+
+  it('rejects invalid text writes before calling the renderer and rolls back the script', () => {
+    const authored = createTextLayer();
+    const title = layer('Title');
+    title.scriptVisuals = {
+      element: authored.element,
+      effects: authored.effects,
+      isVisible: true,
+      blendMode: 'normal',
+    };
+    const measure = vi.fn(() => ({ left: 0, top: 0, width: 1, height: 1 }));
+    title.sourceRectAtTimeWithVisuals = measure;
+    const diagnostics: ExpressionDiagnostic[] = [];
+    const result = resolveExpressionTransforms([title], { time: 0 }, diagnostics, 1, {
+      enabled: true,
+      modules: [],
+      source: `const title = layer('Title'); title.x = 900; title.fontSize = 'invalid'; title.sourceRectAtTime();`,
+    });
+    expect(diagnostics).toHaveLength(1);
+    expect(measure).not.toHaveBeenCalled();
+    expect(result.get('Title')!.x).toBe(10);
+  });
   it('shares authored samples across stages without re-running expressions or leaking between evaluations', () => {
     const target = layer('Title', {
       x: 'helpers.tick(); return valueAtTime(1) + 100;',

@@ -44,9 +44,21 @@ export function measureExpressionText(
   if (typeof document === 'undefined' || !document.body)
     throw new Error('Text bounds require a browser renderer.');
   // Paint is excluded both from the key and the probe; it cannot change text layout.
-  const { strokePaint: _strokePaint, fill: _fill, color: _color, ...text } = element;
+  const {
+    strokePaint: _strokePaint,
+    strokeColor: _strokeColor,
+    fill: _fill,
+    color: _color,
+    ...text
+  } = element;
   const cache = measurementCache(document);
-  const key = JSON.stringify([text, Math.max(0, transform.width), Math.max(0, transform.height)]);
+  const key = JSON.stringify([
+    Object.keys(text)
+      .sort()
+      .map((property) => [property, text[property as keyof typeof text]]),
+    Math.max(0, transform.width),
+    Math.max(0, transform.height),
+  ]);
   const cached = cache.get(key);
   if (cached && document.fonts?.status !== 'loading') {
     cache.delete(key);
@@ -66,7 +78,12 @@ export function measureExpressionText(
   document.body.appendChild(probe);
   try {
     // Paint does not affect layout; avoid creating shader/GPU resources for measurement.
-    renderElementContent(probe, { ...text, fill: '#000000', color: '#000000' });
+    renderElementContent(probe, {
+      ...text,
+      strokeColor: '#000000',
+      fill: '#000000',
+      color: '#000000',
+    });
     const content = probe.firstElementChild;
     if (!content) throw new Error('Text content could not be measured.');
     const range = document.createRange();

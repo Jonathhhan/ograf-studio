@@ -23,6 +23,12 @@ import type { CompositionScripting, Layer, LayerTransform, LayerExpressionProper
 export { EXPRESSION_PROPERTIES } from './expressions';
 type ExpressionProperty = (typeof EXPRESSION_PROPERTIES)[number];
 
+/** Script loops may sample many times; retain only a bounded working set per evaluation. */
+function cacheSample<K, V>(cache: Map<K, V>, key: K, value: V): void {
+  if (!cache.has(key) && cache.size >= 128) cache.delete(cache.keys().next().value!);
+  cache.set(key, value);
+}
+
 export interface ExpressionDiagnostic {
   layerId: string;
   property: LayerExpressionProperty | 'script';
@@ -138,7 +144,7 @@ export function resolveExpressionTransforms(
     styling.add(key);
     try {
       const result = styleTextVisuals(layer, base, seconds);
-      samples.set(seconds, result);
+      cacheSample(samples, seconds, result);
       return result;
     } finally {
       styling.delete(key);
@@ -158,7 +164,7 @@ export function resolveExpressionTransforms(
         let transform = transforms.get(seconds);
         if (!transform) {
           transform = { ...layer.sampleTransform(seconds) };
-          transforms.set(seconds, transform);
+          cacheSample(transforms, seconds, transform);
         }
         return transform;
       },
@@ -183,7 +189,7 @@ export function resolveExpressionTransforms(
         if (!layer.sourceRectAtTime)
           throw new Error('Content bounds are unavailable for this layer.');
         let atTime = bounds.get(seconds);
-        if (!atTime) bounds.set(seconds, (atTime = new Map()));
+        if (!atTime) cacheSample(bounds, seconds, (atTime = new Map()));
         let rect = atTime.get(includeExtents);
         if (!rect) {
           rect = Object.freeze({ ...layer.sourceRectAtTime(seconds, includeExtents) });
@@ -195,63 +201,85 @@ export function resolveExpressionTransforms(
     samplers.set(layer, sampler);
     return sampler;
   };
-  const contextFor = (layer: ExpressionLayerState): ExpressionScope => {
-    let context = contexts.get(layer.id);
+  const poseAt = (layer: ExpressionLayerState, seconds: number) =>
+    seconds === currentTime ? layer.transform : sampling(layer).transformAtTime!(seconds);
+  const expressionSampling = (
+    owner: ExpressionLayerState,
+    property: LayerExpressionProperty,
+    target: ExpressionLayerState,
+  ): ExpressionLayerSampling => ({
+    ...sampling(target),
+    valueAtTime: (component, seconds) => {
+      const field = expressionFieldForProperty(component);
+      const targetProperty = field && target.expressions?.[field]?.trim() ? field : component;
+      if (owner.id === target.id && property === targetProperty)
+        return sampling(target).valueAtTime(component, seconds);
+      return readReference(target, component, seconds);
+    },
+  });
+  const contextFor = (layer: ExpressionLayerState, seconds: number): ExpressionScope => {
+    const key = JSON.stringify([layer.id, seconds]);
+    let context = contexts.get(key);
     if (!context) {
       context = Object.create(null) as ExpressionScope;
       for (const [name, value] of Object.entries({
         ...scope,
         ...layer.scope,
-        ...layer.transform,
+        ...(seconds === currentTime ? {} : (sampleScopeAtTime?.(seconds) ?? { time: seconds })),
+        ...poseAt(layer, seconds),
       }))
         Object.defineProperty(context, name, { value, configurable: true, enumerable: true });
-      contexts.set(layer.id, context);
+      contexts.set(key, context);
     }
     return context;
   };
-  const resolve = (id: string, property: LayerExpressionProperty): ExpressionValue => {
-    const key = id + ':' + property;
+  const resolve = (
+    id: string,
+    property: LayerExpressionProperty,
+    seconds = currentTime,
+  ): ExpressionValue => {
+    const key = JSON.stringify([id, property, seconds]);
     if (values.has(key)) return values.get(key)!;
     if (failures.has(key)) throw failures.get(key);
     const layer = byId.get(id)!;
     const expression = layer.expressions?.[property];
+    const pose = poseAt(layer, seconds);
     const authored = isScriptVectorName(property)
-      ? readScriptVector(
-          property,
-          (component) => layer.transform[component as keyof LayerTransform],
-        )
-      : layer.transform[property as keyof LayerTransform];
+      ? readScriptVector(property, (component) => pose[component as keyof LayerTransform])
+      : pose[property as keyof LayerTransform];
     if (!expression?.trim() || layer.expressionsEnabled?.[property] === false) return authored;
     if (visiting.has(key)) {
       const path = [...visiting, key];
       const start = path.indexOf(key);
       const labels = path.slice(start).map((entry) => {
-        const split = entry.lastIndexOf(':');
-        const target = byId.get(entry.slice(0, split));
-        return (target?.name || target?.id || entry.slice(0, split)) + '.' + entry.slice(split + 1);
+        const [targetId, targetProperty, at] = JSON.parse(entry) as [string, string, number];
+        const target = byId.get(targetId);
+        return (
+          (target?.name || targetId) + '.' + targetProperty + (at === currentTime ? '' : '@' + at)
+        );
       });
       throw new Error('Circular expression dependency: ' + labels.join(' -> '));
     }
     if (visiting.size >= 128) throw new Error('Expression dependency chain is too deep.');
     visiting.add(key);
     try {
-      const context = contextFor(layer);
+      const context = contextFor(layer, seconds);
       const options = {
         apiVersion,
         modules,
         expressionSources: layer.expressions!,
         currentLayer: metadata(layer),
-        currentSampling: sampling(layer),
+        currentSampling: expressionSampling(layer, property, layer),
         resolveLayerSampling: (reference: string, byId: boolean) =>
-          sampling(findLayer(layer, reference, byId)),
+          expressionSampling(layer, property, findLayer(layer, reference, byId)),
         currentProperty: { name: property, value: authored, layerId: layer.id },
         resolveLayerMetadata: (reference: string, byId: boolean) =>
           metadata(findLayer(layer, reference, byId)),
         resolveLayerById: (targetId: string, targetProperty: string) =>
-          readReference(findLayer(layer, targetId, true), targetProperty),
+          readReference(findLayer(layer, targetId, true), targetProperty, seconds),
       };
       const resolver = (name: string, component: string) =>
-        readReference(findLayer(layer, name), component);
+        readReference(findLayer(layer, name), component, seconds);
       const value = isScriptVectorName(property)
         ? evaluateExpression(expression, context, resolver, { ...options, resultType: 'vector' })
         : evaluateExpression(expression, context, resolver, options);
@@ -269,17 +297,21 @@ export function resolveExpressionTransforms(
       visiting.delete(key);
     }
   };
-  const readReference = (layer: ExpressionLayerState, property: string): number => {
+  const readReference = (
+    layer: ExpressionLayerState,
+    property: string,
+    seconds = currentTime,
+  ): number => {
     const field = expressionFieldForProperty(property);
     if (field && isScriptVectorName(field) && layer.expressions?.[field]?.trim()) {
-      const vector = resolve(layer.id, field) as readonly [number, number];
+      const vector = resolve(layer.id, field, seconds) as readonly [number, number];
       const axis =
         property === 'x' || property === 'width' || property === 'transformOriginX' ? 0 : 1;
       return vector[axis];
     }
     return property === 'transformOriginX' || property === 'transformOriginY'
-      ? layer.transform[property]
-      : (resolve(layer.id, property as ExpressionProperty) as number);
+      ? poseAt(layer, seconds)[property]
+      : (resolve(layer.id, property as ExpressionProperty, seconds) as number);
   };
   function styleTextVisuals(
     layer: ExpressionLayerState,
@@ -302,7 +334,7 @@ export function resolveExpressionTransforms(
     ) as ExpressionScope;
     // A text expression can measure its own authored source without recursively evaluating itself.
     const textSampling = (target: ExpressionLayerState): ExpressionLayerSampling => {
-      const sample = sampling(target);
+      const sample = expressionSampling(layer, 'text', target);
       if (target !== layer) return sample;
       return {
         ...sample,
@@ -326,7 +358,7 @@ export function resolveExpressionTransforms(
     evaluateExpression(
       source,
       context,
-      (name, property) => readReference(findLayer(layer, name), property),
+      (name, property) => readReference(findLayer(layer, name), property, seconds),
       {
         apiVersion,
         modules,
@@ -336,7 +368,7 @@ export function resolveExpressionTransforms(
         resolveLayerSampling: (reference, byId) => textSampling(findLayer(layer, reference, byId)),
         resolveLayerMetadata: (reference, byId) => metadata(findLayer(layer, reference, byId)),
         resolveLayerById: (targetId, targetProperty) =>
-          readReference(findLayer(layer, targetId, true), targetProperty),
+          readReference(findLayer(layer, targetId, true), targetProperty, seconds),
         currentProperty: { name: 'text', value: text, layerId: layer.id },
         text,
         resultType: 'text',

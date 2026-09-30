@@ -264,7 +264,11 @@ valueAtTime(time - 0.2);
 ```
 
 Use `layer("Title").property("x").valueAtTime(time - 0.2)` for another property.
-`property(name).value` reads that reference's current value; `valueAtTime` always reads authored
+`property(name).value` reads that reference's current value. In expressions, `valueAtTime` reads the
+authored value for the property hosting the expression; another property is evaluated including
+its expression and dependencies at the requested time. This also applies to another property on
+the same layer. Scalar components of the hosting vector count as that same property. Comp-script
+time queries continue to read authored
 animation. The six scalar transform properties and the three vector aliases are available.
 For example, `layer("Title").property("position").valueAtTime(time - 0.2)[0]` samples X.
 Sampling `transformOrigin` returns the normalized origin from the requested time. Sampling does not
@@ -303,21 +307,60 @@ Each evaluation starts from the current animation and bound data, resolves prope
 then runs the composition script, and finally renders the result. Composition-script writes take
 precedence over expression results for the same property. They do not change authored project values.
 
-| Read                                                    | State returned                                                                          |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Expression `value`, `thisProperty.value`, `thisLayer.x` | Current sampled value before expressions.                                               |
-| Expression `layer('Title').x`                           | Referenced layer's expression result, resolved as a dependency.                         |
-| Composition-script `layer('Title').x`                   | Expression result plus earlier writes in this script.                                   |
-| `property('x').valueAtTime(t)`                          | Authored animation at `t`, before expressions and composition scripts.                  |
-| `sourceRectAtTime(t)`                                   | Source geometry at `t` after text expressions and earlier writes in the current script. |
+| Read                                                    | State returned                                                                               |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Expression `value`, `thisProperty.value`, `thisLayer.x` | Current sampled value before expressions.                                                    |
+| Expression `layer('Title').x`                           | Referenced layer's expression result, resolved as a dependency.                              |
+| Composition-script `layer('Title').x`                   | Expression result plus earlier writes in this script.                                        |
+| Expression `property('x').valueAtTime(t)`               | Own property: authored animation. Other property: its expression result at `t`, before Comp. |
+| Comp `property('x').valueAtTime(t)`                     | Authored animation at `t`, before expressions and Comp writes.                               |
+| `sourceRectAtTime(t)`                                   | Source geometry at `t` after text expressions and earlier writes in the current script.      |
 
-Time arguments are seconds. Animation sampling with `valueAtTime` does not rerun expressions.
+Time arguments are seconds. An expression's `valueAtTime` on another property evaluates that
+property with the sampled time, animation and timeline scope. Successful expression results are
+shared per property and requested time within one evaluation. Cyclic time dependencies are errors;
+chains deeper than 128 property evaluations are rejected. Time queries never replay Comp or
+retrieve historical operator data; they use the data supplied to the current evaluation.
 Bounds queries can evaluate text expressions at the requested time, including helpers they call;
 neither query reruns the composition script. Repeated successful queries share samples within one evaluation; the next
 evaluation starts fresh, including when the timestamp is unchanged but data or fonts have changed.
 Changing text or its box in a composition script changes later `sourceRectAtTime()` calls in that
 script. Time queries do not run the script again, so writes that occur later in the script are not
 visible to an earlier measurement.
+
+### Sequential text layout in one composition script
+
+Keep the operations in the order in which you want them to take effect:
+
+```js
+const title = layer('Title');
+const background = layer('Background');
+
+title.content = data.headline ?? 'Headline';
+title.fontSize = 64;
+title.width = 600; // Layout box, not measured glyph width.
+
+const bounds = title.sourceRectAtTime(); // Sees all three preceding writes.
+background.x = title.x + bounds.left - 24;
+background.y = title.y + bounds.top - 12;
+background.width = bounds.width + 48;
+background.height = bounds.height + 24;
+```
+
+This positioning example assumes unrotated layers in the same coordinate system. Each returned
+rectangle is a detached, read-only snapshot: later writes cannot change it. Measure again after
+changing text, font or box dimensions. Invalid text-layout values are rejected before measurement;
+the existing composition-script transaction rolls back the frame's script writes on failure.
+
+`title.property('width').value` observes earlier writes, while
+`title.property('width').valueAtTime(t)` still samples authored animation, even if `t === time`.
+`sourceRectAtTime(t)` samples text at `t` and then overlays earlier explicit writes from this script;
+it does not replay the script at `t` or retrieve past input data.
+
+Text measurement reuses geometry when only position, rotation, opacity, fill, text color or outline
+color changes. Object-property ordering in imported text settings does not invalidate the cache.
+Changes to layout or loaded fonts do invalidate it. Time-sampling caches retain at most 128 entries
+per layer/cache in an evaluation; evicted samples are recomputed when requested again.
 
 Module variables persist within a playback instance. Seeking, changing playback direction and
 repeating the same timestamp do not reset them. A failed composition script rolls back its layer

@@ -49,6 +49,18 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.unstubAllGlobals());
 
 describe('expression text measurement cache', () => {
+  it('ignores outline color and serialized property order, but still invalidates geometry', () => {
+    const { measure } = fakeDocument();
+    const original = { ...text, strokeWidth: 2, strokeColor: '#fff' };
+    measureExpressionText(original, transform);
+    const reordered = Object.fromEntries(
+      Object.entries(original).reverse(),
+    ) as unknown as TextElement;
+    measureExpressionText({ ...reordered, strokeColor: '#f00' }, transform);
+    expect(measure).toHaveBeenCalledTimes(1);
+    measureExpressionText({ ...reordered, fontSize: 72 }, transform);
+    expect(measure).toHaveBeenCalledTimes(2);
+  });
   it('reuses geometry across moving/fading frames and returns detached bounds', () => {
     const { measure, remove } = fakeDocument();
     const first = measureExpressionText(text, transform);
