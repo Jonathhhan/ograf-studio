@@ -1,3 +1,13 @@
+.layer-list-section-content {
+  padding: 4px 0;
+}
+
+.layer-list-section-content > .panel-placeholder,
+.layer-list-section-content > .layer-list-drag-hint {
+  margin: 0;
+  padding: 3px 6px;
+}
+
 .layer-list {
   list-style: none;
   margin: 0;

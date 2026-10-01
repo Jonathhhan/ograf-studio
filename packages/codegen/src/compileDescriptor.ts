@@ -3,9 +3,13 @@ import {
   computeKeyframeFrames,
   compositionWithShaderParameterFields,
   getResolvedLayerAnimationTracks,
+  normalizeLayerAutoLayout,
+  normalizeTextAnimation,
   resolveElementAssetReferences,
+  resolveAssetValue,
   resolvePatternElement,
   type Composition,
+  type VisualRuleCondition,
 } from '@ograf-editor/scene-model';
 import type {
   CompiledGraphicDescriptor,
@@ -13,6 +17,7 @@ import type {
   CompiledLayer,
   CompiledPaintOrderEntry,
   CompiledRuntimeCollection,
+  CompiledVisualRuleCondition,
 } from '@ograf-editor/ograf-types';
 
 export type {
@@ -50,19 +55,95 @@ export function compileDescriptor(
     .filter((keyframe) => keyframe.role === 'step')
     .map((keyframe) => keyframe.id);
 
+  const compiledLayerIds = new Set(
+    composition.layers
+      .filter((layer) => options.includeGuides || !layer.isGuide)
+      .map((layer) => layer.id),
+  );
+  const compileRuleCondition = (
+    condition: VisualRuleCondition,
+  ): CompiledVisualRuleCondition | null => {
+    const dataKey = fieldKeyById.get(condition.fieldId);
+    if (dataKey === undefined) return null;
+    const compareDataKey = condition.compareFieldId
+      ? fieldKeyById.get(condition.compareFieldId)
+      : undefined;
+    return {
+      dataKey,
+      sourcePath: [...condition.sourcePath],
+      operator: condition.operator,
+      ...(condition.value !== undefined ? { value: structuredClone(condition.value) } : {}),
+      ...(compareDataKey !== undefined
+        ? { compareDataKey, compareSourcePath: [...(condition.compareSourcePath ?? [])] }
+        : {}),
+      ...(condition.ignoreCase ? { ignoreCase: true } : {}),
+    };
+  };
+
   const compileLayer = (layer: Composition['layers'][number]): CompiledLayer => {
+    const autoLayout = normalizeLayerAutoLayout(layer.autoLayout);
     const animationTracks = getResolvedLayerAnimationTracks(layer);
     const clipParent = layer.parentId
       ? composition.layers.find(
           (candidate) => candidate.id === layer.parentId && candidate.clipChildren,
         )
       : undefined;
+    const layoutParent = layer.parentId
+      ? composition.layers.find(
+          (candidate) =>
+            candidate.id === layer.parentId &&
+            normalizeLayerAutoLayout(candidate.autoLayout).direction !== 'none',
+        )
+      : undefined;
+    const mediaCue = composition.mediaCues.find(
+      (candidate) => candidate.visual.targetLayerId === layer.id,
+    );
+    const activeMediaSource = mediaCue?.sources.find(
+      (source) => source.id === mediaCue.activeSourceId,
+    );
+    const mediaTriggerFrame =
+      mediaCue?.trigger.type === 'timeline'
+        ? mediaCue.trigger.startFrame
+        : mediaCue?.trigger.type === 'lifecycle'
+          ? (frameByKeyframeId.get(mediaCue.trigger.keyframeId) ?? 0)
+          : 0;
+    const element =
+      mediaCue &&
+      activeMediaSource &&
+      !(activeMediaSource.kind === 'clip' && activeMediaSource.mediaType === 'audio') &&
+      'fill' in layer.element
+        ? {
+            ...layer.element,
+            fill: {
+              type: 'media' as const,
+              source:
+                activeMediaSource.kind === 'clip'
+                  ? { kind: 'clip' as const, src: activeMediaSource.src }
+                  : {
+                      kind: 'live' as const,
+                      tag: activeMediaSource.tag,
+                      ...(activeMediaSource.fallback
+                        ? { fallback: activeMediaSource.fallback }
+                        : {}),
+                    },
+              fit: mediaCue.visual.fit,
+              positionX: mediaCue.visual.positionX,
+              positionY: mediaCue.visual.positionY,
+              loop: mediaCue.loop,
+              speed: mediaCue.speed,
+              offsetMs: mediaCue.trimStartMs,
+              trimEndMs: mediaCue.trimEndMs,
+              timelineStartMs: (mediaTriggerFrame / composition.frameRate) * 1000,
+              muted: true as const,
+            },
+          }
+        : layer.element;
     return {
       id: layer.id,
       isVisible: layer.isVisible,
       blendMode: layer.blendMode,
       element: resolvePatternElement(
-        resolveElementAssetReferences(migrateShaderElement(layer.element), composition.assets),
+        resolveElementAssetReferences(migrateShaderElement(element), composition.assets),
         composition.patterns,
       ),
       effects: layer.effects,
@@ -116,7 +197,49 @@ export function compileDescriptor(
               },
             ];
       }),
+      visualRules: (layer.visualRules ?? []).flatMap((rule) => {
+        const isData = !rule.trigger || rule.trigger === 'data';
+        const primary = compileRuleCondition(rule);
+        if (isData && !primary) return [];
+        const conditions = (rule.conditions ?? []).flatMap((condition) => {
+          const compiled = compileRuleCondition(condition);
+          return compiled ? [compiled] : [];
+        });
+        const actions = structuredClone(rule.actions).filter(
+          (action) =>
+            !('targetLayerId' in action) ||
+            !action.targetLayerId ||
+            compiledLayerIds.has(action.targetLayerId),
+        );
+        if (actions.length === 0) return [];
+        return [
+          {
+            id: rule.id,
+            name: rule.name,
+            enabled: rule.enabled,
+            ...(rule.trigger ? { trigger: rule.trigger } : {}),
+            ...(primary && isData
+              ? primary
+              : { dataKey: '', sourcePath: [], operator: rule.operator }),
+            ...(conditions.length ? { conditions } : {}),
+            ...(rule.match ? { match: rule.match } : {}),
+            ...(rule.eventId ? { eventId: rule.eventId } : {}),
+            ...(rule.delayFrames ? { delayFrames: rule.delayFrames } : {}),
+            actions,
+          },
+        ];
+      }),
       clipParentId: clipParent?.id ?? null,
+      layoutParentId: layoutParent?.id ?? null,
+      autoLayout,
+      updateTransition: structuredClone(
+        layer.updateTransition ?? { style: 'inherit', durationFrames: 0, distance: 24 },
+      ),
+      motionPath:
+        layer.motionPath &&
+        composition.layers.some((candidate) => candidate.id === layer.motionPath!.sourceLayerId)
+          ? structuredClone(layer.motionPath)
+          : null,
       isMaskOnly: layer.isMaskOnly,
       mask: layer.mask ? { ...layer.mask } : null,
     };
@@ -156,6 +279,11 @@ export function compileDescriptor(
         offsetPerItem: { ...collection.offsetPerItem },
         capacity: collection.capacity,
         overflow: collection.overflow,
+        itemKeyPath: [...(collection.itemKeyPath ?? [])],
+        sortPath: [...(collection.sortPath ?? [])],
+        sortDirection: collection.sortDirection ?? 'none',
+        pageSize: collection.pageSize ?? 0,
+        page: collection.page ?? 0,
       };
     },
   );
@@ -181,6 +309,7 @@ export function compileDescriptor(
     backgroundColor: composition.backgroundColor,
     frameRate: composition.frameRate,
     updateTransitionFrames: composition.updateTransitionFrames,
+    updateInterruption: composition.updateInterruption ?? 'queue',
     fonts: composition.assets
       .filter((asset) => asset.kind === 'font')
       .map((asset) => ({
@@ -190,6 +319,19 @@ export function compileDescriptor(
         weight: asset.fontWeight || '100 900',
         style: asset.fontStyle || 'normal',
       })),
+    mediaCues: composition.mediaCues.map((cue) => ({
+      ...structuredClone(cue),
+      sources: cue.sources.map((source) =>
+        source.kind === 'clip'
+          ? { ...source, src: resolveAssetValue(source.src, composition.assets) }
+          : {
+              ...source,
+              ...(source.fallback
+                ? { fallback: resolveAssetValue(source.fallback, composition.assets) }
+                : {}),
+            },
+      ),
+    })),
     layers,
     collections,
     paintOrder,
@@ -204,6 +346,39 @@ export function compileDescriptor(
     stepCount: stepKeyframeIds.length,
     startKeyframeId,
     endKeyframeId,
-    customActions: composition.customActions.map((a) => ({ id: a.actionId, name: a.name })),
+    customActions: composition.customActions.map((action) => ({
+      id: action.actionId,
+      name: action.name,
+      durationFrames: Math.max(
+        composition.layers.reduce((longest, layer) => {
+          if (layer.element.type === 'text') {
+            const textAnimation = normalizeTextAnimation(layer.element.textAnimation);
+            if (textAnimation.type !== 'none' && textAnimation.customActionId === action.actionId) {
+              longest = Math.max(longest, textAnimation.durationFrames);
+            }
+          }
+          const loop = layer.loop;
+          if (
+            loop?.activation.type !== 'customAction' ||
+            loop.activation.customActionId !== action.actionId
+          ) {
+            return longest;
+          }
+          return Math.max(longest, loop.durationFrames * (loop.repeatCount ?? 1));
+        }, 0),
+        ...composition.mediaCues
+          .filter(
+            (cue) =>
+              cue.trigger.type === 'customAction' && cue.trigger.actionId === action.actionId,
+          )
+          .map((cue) => cue.transition.durationFrames),
+        ...composition.mediaCues
+          .filter(
+            (cue) =>
+              cue.trigger.type === 'customAction' && cue.trigger.actionId === action.actionId,
+          )
+          .map((cue) => cue.durationFrames ?? 0),
+      ),
+    })),
   };
 }

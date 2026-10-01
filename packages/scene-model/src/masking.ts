@@ -1,5 +1,6 @@
 import type { Composition, ElementType, Layer, LayerMask, LayerTransform } from './types';
 import { getElementShaderPaint } from './shader';
+import { getElementMediaPaint } from './mediaPaint';
 import { effectEnabled, getEffectStack } from './effectStack';
 
 export const ALPHA_MASK_SOURCE_TYPES: readonly ElementType[] = [
@@ -20,6 +21,7 @@ export function maskSourceSupportsMode(source: Layer, mode: LayerMask['mode']): 
   if (
     mode === 'alpha' &&
     (getElementShaderPaint(source.element) ||
+      getElementMediaPaint(source.element) ||
       getEffectStack(source.effects).some(
         (effect) => effect.type === 'shader' && effectEnabled(effect, source.effects),
       ))
@@ -54,10 +56,11 @@ export function layerMaskErrors(composition: Composition): string[] {
       errors.push(
         mode === 'alpha' &&
           (getElementShaderPaint(source.element) ||
+            getElementMediaPaint(source.element) ||
             getEffectStack(source.effects).some(
               (effect) => effect.type === 'shader' && effectEnabled(effect, source.effects),
             ))
-          ? `Layer "${layer.name}" cannot use shader-rendered "${source.name}" as an alpha-mask source; use a geometric path mask.`
+          ? `Layer "${layer.name}" cannot use ${getElementMediaPaint(source.element) ? 'media-rendered' : 'shader-rendered'} "${source.name}" as an alpha-mask source; use a geometric path mask.`
           : `Layer "${layer.name}" ${mode} mask does not support ${source.element.type} source "${source.name}".`,
       );
     if (owner.get(layer.id) !== owner.get(source.id))

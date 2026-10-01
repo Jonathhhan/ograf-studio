@@ -27,6 +27,7 @@ import {
   clipPathSvgForParentBounds,
   roundedRectangleSvgPath,
   resolveElementAssetReferences,
+  textAnimationVisibleText,
   valueAtSourcePath,
   type Composition,
   type Element,
@@ -69,14 +70,15 @@ function elementSvg(
     case 'text': {
       const paint = svgPaint(getElementFill(element)!, width, height, `${svgId}-text-fill`);
       const paintDefs = paint.defs ? `<defs>${paint.defs}</defs>` : '';
+      const visibleText = textAnimationVisibleText(element, frame);
       const transformed =
         element.textTransform === 'uppercase'
-          ? element.content.toUpperCase()
+          ? visibleText.toUpperCase()
           : element.textTransform === 'lowercase'
-            ? element.content.toLowerCase()
+            ? visibleText.toLowerCase()
             : element.textTransform === 'capitalize'
-              ? element.content.replace(/\b\p{L}/gu, (character) => character.toUpperCase())
-              : element.content;
+              ? visibleText.replace(/\b\p{L}/gu, (character) => character.toUpperCase())
+              : visibleText;
       const lines = transformed.split(/\r?\n/);
       const anchor =
         element.textAlign === 'center' ? 'middle' : element.textAlign === 'right' ? 'end' : 'start';
@@ -131,6 +133,9 @@ function elementSvg(
       // The authoritative DOM/canvas capture path renders the exact Lottie frame. This lightweight
       // pure-SVG authoring overview cannot run a Canvas2D player, so retain the layer bounds.
       return `<rect width="${width}" height="${height}" fill="transparent"/>`;
+    case 'audio':
+      // Audio has no diagnostic SVG pixels. Playback is handled by the authoritative browser runtime.
+      return '';
   }
 }
 

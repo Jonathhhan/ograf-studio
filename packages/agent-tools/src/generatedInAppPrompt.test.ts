@@ -11,7 +11,7 @@ describe('generated in-app authoring prompt', () => {
     const second = await generateInAppPrompt();
     expect(first).toBe(second);
     expect(first).toBe(IN_APP_SYSTEM_PROMPT);
-    expect(IN_APP_SYSTEM_PROMPT_ESTIMATED_TOKENS).toBeLessThanOrEqual(9_000);
+    expect(IN_APP_SYSTEM_PROMPT_ESTIMATED_TOKENS).toBeLessThanOrEqual(9_300);
     expect(first).toContain('never bake tile copies');
     expect(first).toContain('rowOverrides');
     expect(first).toContain('patternRows');

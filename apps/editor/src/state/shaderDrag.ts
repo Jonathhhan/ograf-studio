@@ -1,4 +1,4 @@
-import type { Project, ShaderPaint } from '@ograf-editor/scene-model';
+import type { EffectPatch, Project, ShaderPaint } from '@ograf-editor/scene-model';
 import {
   resolveShaderResource,
   shaderResourceTarget,
@@ -96,4 +96,17 @@ export function shaderPaintFromResourceDrag(project: Project, payload: string): 
   if (reference.projectId !== project.id)
     throw new Error('This shader resource belongs to a different project.');
   return structuredClone(resolveShaderResource(project, reference.target).paint);
+}
+
+/** A stack drop consumes the existing layer result as iChannel0, never the resource's static input. */
+export function shaderEffectPatchFromResourceDrag(project: Project, payload: string): EffectPatch {
+  const paint = shaderPaintFromResourceDrag(project, payload);
+  const { inputImage: _inputImage, ...shader } = paint;
+  return {
+    name: paint.name?.trim() || 'Shader',
+    enabled: true,
+    blendMode: 'normal',
+    blendOpacity: 1,
+    shader,
+  };
 }

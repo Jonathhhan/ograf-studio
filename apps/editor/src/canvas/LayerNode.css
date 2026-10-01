@@ -7,6 +7,10 @@
   outline: 1px solid var(--accent);
 }
 
+.layer-node.inline-text-editing {
+  outline: 1px solid var(--accent);
+}
+
 .layer-node.guide {
   outline: 1px dashed #ffb020;
 }
@@ -20,6 +24,28 @@
   outline-color: #ffb74d;
 }
 
+.layer-content-host :is([data-inline-text-editor='true']) {
+  cursor: text;
+  outline: 2px solid #ff3b7a;
+  caret-color: #ff3b7a;
+  caret-shape: block;
+  pointer-events: auto;
+  user-select: text;
+}
+
+.layer-inline-text-badge {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  z-index: 5;
+  padding: 2px 5px;
+  background: var(--accent);
+  color: #071018;
+  font: 11px/1.25 sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /*
  * Container the shared runtime renderer (`renderElementContent`) draws into. React deliberately
  * never renders children here — the runtime owns this subtree — so the two can't fight over it.
@@ -29,6 +55,15 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+/* Studio chrome fixes all #root descendants to the compact UI font. Typewriter text introduces
+ * nested spans, so explicitly restore authored typography at that renderer-owned boundary. Inline
+ * mixed-run font overrides still win over these inherited values. */
+#root .layer-content-host [data-ograf-text-flow],
+#root .layer-content-host [data-ograf-text-flow] * {
+  font-family: inherit;
+  font-size: inherit;
 }
 
 /* Editor-only affordance for elements with nothing to draw yet — never part of broadcast output. */

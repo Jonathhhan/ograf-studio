@@ -15,20 +15,122 @@ import {
   type LayerEffects,
   type TilingPattern,
   valueAtSourcePath,
+  collectVisualRuleStates,
+  mergeVisualRuleEffects,
+  visualRuleValue,
   type Asset,
   type Element,
   type ElementType,
   type FieldDefinition,
   type Layer,
+  type LayerVisualRule,
+  type VisualRuleCondition,
+  type VisualRuleEffect,
+  type VisualRuleEngine,
 } from '@ograf-editor/scene-model';
 import type { TestValue } from './testDataStore';
+
+export type EditorVisualRuleEngine = VisualRuleEngine<
+  VisualRuleCondition,
+  LayerVisualRule,
+  Record<string, TestValue>
+>;
+
+/**
+ * Rule evaluation over Studio test values, keyed by field id. Array fields read their first item,
+ * matching how the canvas previews bindings and runtime-collection prototypes.
+ */
+export function editorVisualRuleEngine(
+  layers: readonly Layer[],
+  dataFields: readonly FieldDefinition[],
+): EditorVisualRuleEngine {
+  const fields = new Map(dataFields.map((field) => [field.id, field]));
+  const layerIds = new Set(layers.map((layer) => layer.id));
+  const root = (fieldId: string, values: Record<string, TestValue>) => {
+    const field = fields.get(fieldId);
+    const value = Object.hasOwn(values, fieldId) ? values[fieldId] : field?.defaultValue;
+    return field?.type === 'array' && Array.isArray(value) ? value[0] : value;
+  };
+  return {
+    hosts: layers
+      .filter((layer) => layer.visualRules?.length)
+      .map((layer) => ({ layerId: layer.id, rules: layer.visualRules })),
+    reader: {
+      read: (condition, _host, values) =>
+        visualRuleValue(root(condition.fieldId, values), condition.sourcePath),
+      readCompare: (condition, _host, values) =>
+        condition.compareFieldId
+          ? {
+              value: visualRuleValue(
+                root(condition.compareFieldId, values),
+                condition.compareSourcePath ?? [],
+              ),
+            }
+          : null,
+    },
+    resolveTarget: (target) => (layerIds.has(target) ? [target] : []),
+  };
+}
+
+let effectsMemo: {
+  layers: readonly Layer[];
+  dataFields: readonly FieldDefinition[];
+  values: Record<string, TestValue>;
+  overrides: Readonly<Record<string, VisualRuleEffect>>;
+  result: ReadonlyMap<string, VisualRuleEffect>;
+} | null = null;
+
+/**
+ * Rule output for every layer of a composition: state rules from test values, with simulated or
+ * data-change event results on top. Memoized on input identity, so every canvas node shares one
+ * evaluation per edit.
+ */
+export function editorVisualRuleEffects(
+  layers: readonly Layer[],
+  dataFields: readonly FieldDefinition[],
+  values: Record<string, TestValue>,
+  overrides: Readonly<Record<string, VisualRuleEffect>> = {},
+): ReadonlyMap<string, VisualRuleEffect> {
+  if (
+    effectsMemo &&
+    effectsMemo.layers === layers &&
+    effectsMemo.dataFields === dataFields &&
+    effectsMemo.values === values &&
+    effectsMemo.overrides === overrides
+  )
+    return effectsMemo.result;
+  const states = collectVisualRuleStates(editorVisualRuleEngine(layers, dataFields), values);
+  const result = new Map<string, VisualRuleEffect>();
+  for (const layerId of new Set([...states.keys(), ...Object.keys(overrides)])) {
+    const merged = mergeVisualRuleEffects(states.get(layerId), overrides[layerId]);
+    if (merged) result.set(layerId, merged);
+  }
+  effectsMemo = { layers, dataFields, values, overrides, result };
+  return result;
+}
+
+/** A layer's own rules, for callers that preview one layer without its composition. */
+function ownVisualRuleEffect(
+  layer: Layer,
+  testValues: Record<string, TestValue>,
+  dataFields: readonly FieldDefinition[],
+): VisualRuleEffect | undefined {
+  if (!layer.visualRules?.length) return undefined;
+  return collectVisualRuleStates(editorVisualRuleEngine([layer], dataFields), testValues).get(
+    layer.id,
+  );
+}
+
+function isEffectRuleProperty(property: string): boolean {
+  return property === 'dropShadowColor' || Boolean(parseEffectProperty(property));
+}
 
 interface BindableProperty {
   value: string;
   label: string;
 }
 
-/** Layer properties a data field can drive — deliberately just the "content" surface of each element type. */
+/** Layer properties a data field can drive through Studio's binding controls. */
 export const BINDABLE_PROPERTIES: Record<ElementType, BindableProperty[]> = {
   text: [
     { value: 'content', label: 'Text Content' },
@@ -55,6 +157,7 @@ export const BINDABLE_PROPERTIES: Record<ElementType, BindableProperty[]> = {
   // An image sequence's frame list isn't a sensible single-value data-binding target (v1 scope).
   'image-sequence': [],
   lottie: [],
+  audio: [],
   shader: [],
 };
 
@@ -69,8 +172,9 @@ export function resolveEffectiveElement(
   assets: Asset[] = [],
   dataFields: FieldDefinition[] = [],
   patterns: TilingPattern[] = [],
+  ruleEffect: VisualRuleEffect | undefined = ownVisualRuleEffect(layer, testValues, dataFields),
 ): Element {
-  const element = layer.bindings.reduce<Element>((resolved, binding) => {
+  let element = layer.bindings.reduce<Element>((resolved, binding) => {
     const hasTestValue = Object.prototype.hasOwnProperty.call(testValues, binding.fieldId);
     const rootValue = hasTestValue
       ? testValues[binding.fieldId]
@@ -83,7 +187,19 @@ export function resolveEffectiveElement(
     const mapped = binding.valueMap?.[String(value)] ?? value;
     return applyElementDataValue(resolved, binding.targetProperty, mapped);
   }, layer.element);
+  for (const [property, value] of Object.entries(ruleEffect?.properties ?? {})) {
+    if (!isEffectRuleProperty(property)) element = applyElementDataValue(element, property, value);
+  }
   return resolvePatternElement(resolveElementAssetReferences(element, assets), patterns);
+}
+
+export function resolveEffectiveVisibility(
+  layer: Layer,
+  testValues: Record<string, TestValue>,
+  dataFields: FieldDefinition[],
+  ruleEffect: VisualRuleEffect | undefined = ownVisualRuleEffect(layer, testValues, dataFields),
+): boolean {
+  return ruleEffect?.visibility ?? layer.isVisible;
 }
 
 export function bindableProperties(element: Element, effects?: LayerEffects): BindableProperty[] {
@@ -133,6 +249,7 @@ export function resolveEffectiveEffects(
   effects: LayerEffects,
   testValues: Record<string, TestValue>,
   dataFields: FieldDefinition[],
+  ruleEffect: VisualRuleEffect | undefined = ownVisualRuleEffect(layer, testValues, dataFields),
 ): LayerEffects {
   let resolved = effects;
   for (const binding of layer.bindings) {
@@ -155,6 +272,16 @@ export function resolveEffectiveEffects(
         binding.targetProperty === 'dropShadowColor'
           ? { ...resolved, dropShadowColor: String(mapped) }
           : withEffectParameter(resolved, binding.targetProperty, mapped);
+    }
+  }
+  for (const [property, value] of Object.entries(ruleEffect?.properties ?? {})) {
+    if (property === 'dropShadowColor') resolved = { ...resolved, dropShadowColor: String(value) };
+    else if (parseEffectProperty(property)) {
+      try {
+        resolved = withEffectParameter(resolved, property, value);
+      } catch {
+        // The effect was removed after the rule was written.
+      }
     }
   }
   return resolved;

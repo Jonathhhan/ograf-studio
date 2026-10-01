@@ -1,18 +1,71 @@
 .inspector {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+}
+
+.properties-filter {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  min-height: var(--ui-header-height);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px;
+  box-sizing: border-box;
+  padding: 2px 5px;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-header);
+  color: var(--text-dim);
+}
+
+.properties-filter input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ui-control-height);
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-canvas);
+  color: var(--text);
+}
+
+.properties-filter input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.properties-filter button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.properties-filter button:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+[data-property-filter-hidden='true'],
+.inspector [hidden] {
+  display: none !important;
 }
 
 .paint-editor {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .paint-stops {
   display: grid;
   gap: 6px;
-  padding: 8px;
+  padding: 4px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
 }
@@ -262,6 +315,16 @@
   color: var(--accent-focus);
 }
 
+.inspector-playout-warning {
+  margin: 0;
+  padding: 7px 8px;
+  border-left: 3px solid #ffb86b;
+  background: color-mix(in srgb, #ffb86b 10%, transparent);
+  color: #ffcb8c;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .inspector-evaluated-pose {
   display: flex;
   flex-direction: column;
@@ -313,12 +376,27 @@
 /* RealityHub-style configuration table: one stable label column and one value column. */
 .inspector {
   display: block;
-  margin: -8px -10px;
+  margin: 0 -6px -4px;
+}
+
+.inspector .collapsible-section-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Nested property editors must participate in the same flush row table as direct controls. */
+.inspector .paint-editor {
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border-bottom: 0;
 }
 
 .inspector > .panel-placeholder,
 .inspector > .inspector-error,
 .inspector > .inspector-hint,
+.inspector > .inspector-playout-warning,
 .inspector > .inspector-evaluated-pose,
 .inspector > .inspector-font-preview,
 .inspector > .inspector-binding-list,
@@ -330,12 +408,27 @@
   border-bottom: 1px solid var(--border);
 }
 
+.inspector .collapsible-section-content > .panel-placeholder,
+.inspector .collapsible-section-content > .inspector-error,
+.inspector .collapsible-section-content > .inspector-hint,
+.inspector .collapsible-section-content > .inspector-playout-warning,
+.inspector .collapsible-section-content > .inspector-evaluated-pose,
+.inspector .collapsible-section-content > .inspector-font-preview,
+.inspector .collapsible-section-content > .inspector-binding-list,
+.inspector .collapsible-section-content > .inspector-frame-list,
+.inspector .collapsible-section-content > .inspector-button-row,
+.inspector .collapsible-section-content > .paint-editor {
+  margin: 0;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
 .inspector-section {
-  min-height: 30px;
+  min-height: var(--ui-row-height);
   display: flex;
   align-items: center;
   margin: 0;
-  padding: 0 8px;
+  padding: 0 5px;
   border-top: 0;
   border-bottom: 1px solid var(--border);
   background: #252525;
@@ -355,7 +448,7 @@
 
 .inspector-row,
 .inspector-row-stacked {
-  min-height: 30px;
+  min-height: var(--ui-row-height);
   display: grid;
   grid-template-columns: var(--property-label-width, minmax(118px, 42%)) minmax(0, 1fr);
   align-items: stretch;
@@ -363,6 +456,11 @@
   padding: 0;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
+}
+
+.inspector-row:not(.inspector-row-stacked):not(:has(textarea)) {
+  height: var(--ui-row-height);
+  box-sizing: border-box;
 }
 
 .inspector-row:hover {
@@ -373,7 +471,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 5px;
   overflow: hidden;
   border-right: 1px solid var(--border);
   color: var(--text);
@@ -382,11 +480,17 @@
 }
 
 .inspector-row > :is(input, select, textarea, button, .inspector-z-order-control) {
-  width: calc(100% - 12px);
+  width: calc(100% - 8px);
   min-width: 0;
   align-self: center;
   justify-self: stretch;
-  margin: 3px 6px;
+  margin: 1px 4px;
+}
+
+.inspector-row > :is(input:not([type='range']):not([type='checkbox']), select, button) {
+  height: var(--ui-control-height);
+  box-sizing: border-box;
+  padding: 1px 5px;
 }
 
 .inspector-row > textarea {
@@ -403,16 +507,16 @@
 
 .inspector-row input[type='color'] {
   width: 42px;
-  height: 24px;
+  height: var(--ui-control-height);
   justify-self: start;
 }
 
 .inspector-alpha-control {
-  min-height: 32px;
+  min-height: var(--ui-row-height);
   grid-template-columns: var(--property-label-width, minmax(118px, 42%)) minmax(0, 1fr) 72px;
-  gap: 6px;
+  gap: 4px;
   margin: 0;
-  padding: 0 6px 0 0;
+  padding: 0 4px 0 0;
   border: 0;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
@@ -423,7 +527,7 @@
   height: 100%;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 5px;
   border-right: 1px solid var(--border);
   color: var(--text);
 }
@@ -432,4 +536,60 @@
 .paint-stops {
   background: #292929;
   border-color: var(--border-strong);
+}
+
+.inspector > .inspector-button-row,
+.inspector .collapsible-section-content > .inspector-button-row,
+.inspector .media-paint-import,
+.inspector .shader-source-actions {
+  min-height: var(--ui-row-height);
+  box-sizing: border-box;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 4px;
+}
+
+.inspector :is(.inspector-button-row, .shader-source-actions) button {
+  height: var(--ui-control-height);
+  box-sizing: border-box;
+  padding: 1px 6px;
+}
+
+.inspector-rule-summary {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 2px;
+  list-style: none;
+}
+
+.inspector-rule-summary li {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.inspector-rule-summary li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-rule-summary small {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.inspector-rule-summary li.is-disabled {
+  opacity: 0.5;
+}
+
+.inspector-advanced > .collapsible-section-content {
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
 }

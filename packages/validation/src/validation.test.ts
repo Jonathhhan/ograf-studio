@@ -8,15 +8,163 @@ import {
   createLayerKeyframe,
   createLayerOfKind,
   createLayerPropertyKeyframe,
+  createMediaPaint,
+  createMediaCue,
   createProject,
+  createLayerVisualRule,
   createTransition,
   defaultTransformForRole,
   syncShaderParameterFields,
+  createAsset,
 } from '@ograf-editor/scene-model';
 import { validateManifest } from './validateManifest';
 import { validateProject } from './validateProject';
 
 describe('canonical OGraf validation', () => {
+  it('allows pointer-triggered rules without a data field', () => {
+    const project = createProject();
+    const layer = createLayerOfKind('rectangle');
+    layer.visualRules = [
+      createLayerVisualRule({
+        trigger: 'click',
+        fieldId: '',
+        actions: [{ type: 'visibility', visible: false }],
+      }),
+    ];
+    project.compositions[0]!.layers.push(layer);
+    expect(
+      validateProject(project).errors.some((error) =>
+        error.includes('visual rule references a missing data field'),
+      ),
+    ).toBe(false);
+  });
+  it('reports broken rule targets, comparisons, triggers, and state-only misuse', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const field = createFieldDefinition('integer', { key: 'score' });
+    composition.dataFields.push(field);
+    const layer = createLayerOfKind('rectangle');
+    layer.visualRules = [
+      createLayerVisualRule({
+        name: 'Target',
+        fieldId: field.id,
+        actions: [{ type: 'visibility', visible: true, targetLayerId: 'missing-layer' }],
+      }),
+      createLayerVisualRule({ name: 'Compare', fieldId: field.id, compareFieldId: 'missing' }),
+      createLayerVisualRule({ name: 'Range', fieldId: field.id, operator: 'between', value: 'x' }),
+      createLayerVisualRule({ name: 'Action', trigger: 'custom-action', eventId: 'missing' }),
+      createLayerVisualRule({
+        name: 'Toggle',
+        fieldId: field.id,
+        delayFrames: 5,
+        actions: [{ type: 'toggle-visibility' }],
+      }),
+    ];
+    composition.layers.push(layer);
+    const errors = validateProject(project).errors.join('\n');
+    expect(errors).toContain('"Target" targets a missing layer');
+    expect(errors).toContain('"Compare" compares with a missing data field');
+    expect(errors).toContain('"Range" needs a [min, max] pair');
+    expect(errors).toContain('"Action" must name an existing custom action');
+    expect(errors).toContain('"Toggle" delay applies only to event triggers');
+    expect(errors).toContain('"Toggle" can toggle visibility only on an event trigger');
+  });
+
+  it('validates media clip assets and keeps live sources realtime-only', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const layer = createLayerOfKind('rectangle');
+    layer.keyframes = composition.keyframes.map((keyframe, index) =>
+      createLayerKeyframe(
+        computeKeyframeFrames(composition)[index]!.frame,
+        defaultTransformForRole('rectangle', keyframe.role),
+      ),
+    );
+    const clip = createAsset({
+      id: 'clip',
+      kind: 'media',
+      mimeType: 'video/mp4',
+      dataUri: 'data:video/mp4;base64,AAAA',
+    });
+    composition.assets.push(clip);
+    if (!('fill' in layer.element)) throw new Error('Expected fill');
+    layer.element.fill = createMediaPaint({ source: { kind: 'clip', src: 'asset:clip' } });
+    composition.layers.push(layer);
+    expect(validateProject(project).errors.join(' ')).toContain(
+      'initial runtime is real-time-only',
+    );
+    project.supportsNonRealTime = false;
+    expect(validateProject(project).errors).toEqual([]);
+
+    layer.element.fill = createMediaPaint({ source: { kind: 'live', tag: 'camera.program' } });
+    expect(validateProject(project).errors).toEqual([]);
+  });
+
+  it('validates first-class audio assets, trim ranges, and realtime-only playback', () => {
+    const project = createProject();
+    const composition = project.compositions[0]!;
+    const asset = createAsset({
+      id: 'audio',
+      kind: 'audio',
+      mimeType: 'audio/mpeg',
+      dataUri: 'data:audio/mpeg;base64,AAAA',
+    });
+    const layer = createLayerOfKind('audio');
+    if (layer.element.type !== 'audio') throw new Error('Expected audio');
+    layer.element.src = 'asset:audio';
+    layer.element.trimStartMs = 250;
+    layer.element.trimEndMs = 1_250;
+    layer.element.timelineStartMs = 2_000;
+    layer.keyframes = composition.keyframes.map((keyframe, index) =>
+      createLayerKeyframe(
+        computeKeyframeFrames(composition)[index]!.frame,
+        defaultTransformForRole('audio', keyframe.role),
+      ),
+    );
+    composition.assets.push(asset);
+    composition.layers.push(layer);
+    expect(validateProject(project).errors.join(' ')).toContain(
+      'uses audio, which is real-time-only',
+    );
+    project.supportsNonRealTime = false;
+    expect(validateProject(project).errors).toEqual([]);
+    layer.element.trimEndMs = 100;
+    expect(validateProject(project).errors.join(' ')).toContain('invalid trim/timeline values');
+  });
+
+  it('validates Media Cue sources, triggers, transitions, and real-time profile', () => {
+    const project = createProject({ supportsNonRealTime: false });
+    const composition = project.compositions[0]!;
+    composition.assets.push(
+      createAsset({
+        id: 'clip',
+        kind: 'media',
+        mimeType: 'video/mp4',
+        dataUri: 'data:video/mp4;base64,AAAA',
+      }),
+    );
+    composition.mediaCues.push(
+      createMediaCue({
+        name: 'Program',
+        sources: [
+          { id: 'source', name: 'Clip', kind: 'clip', mediaType: 'video', src: 'asset:clip' },
+        ],
+        activeSourceId: 'source',
+        transition: {
+          type: 'crossfade',
+          durationFrames: 12,
+          audio: 'follow-picture',
+          onFailure: 'keep-current',
+        },
+      }),
+    );
+    expect(validateProject(project).errors).toEqual([]);
+    project.supportsNonRealTime = true;
+    expect(validateProject(project).errors.join(' ')).toContain('uses Media Cues');
+    project.supportsNonRealTime = false;
+    composition.mediaCues[0]!.activeSourceId = 'missing';
+    expect(validateProject(project).errors.join(' ')).toContain('active source does not exist');
+  });
   it('accepts typed vector object bindings and rejects mismatched shader parameter field types', () => {
     const project = createProject();
     const composition = project.compositions[0]!;

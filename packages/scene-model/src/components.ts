@@ -6,6 +6,7 @@ import {
   sortLayerPropertyKeyframes,
 } from './layerAnimation';
 import { cloneFieldDefinitionWithFreshIds } from './fieldSchema';
+import { isVisualRuleStateAction, remapVisualRule, visualRuleFieldIds } from './visualRules';
 import type { ComponentDefinition, Composition, FieldDefinition, Layer } from './types';
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -44,10 +45,17 @@ export function buildComponentDefinition(
   for (const layer of layers) {
     if (layer.mask && !wanted.has(layer.mask.sourceLayerId))
       throw new Error(`Include the mask source when saving component layer "${layer.name}".`);
+    if (layer.motionPath && !wanted.has(layer.motionPath.sourceLayerId))
+      throw new Error(`Include the motion path when saving component layer "${layer.name}".`);
   }
   const missing = layerIds.filter((layerId) => !layers.some((layer) => layer.id === layerId));
   if (missing.length > 0) throw new Error(`Component layers not found: ${missing.join(', ')}`);
-  const fieldIds = new Set(layers.flatMap((layer) => layer.bindings.map((item) => item.fieldId)));
+  const fieldIds = new Set(
+    layers.flatMap((layer) => [
+      ...layer.bindings.map((item) => item.fieldId),
+      ...(layer.visualRules ?? []).flatMap(visualRuleFieldIds),
+    ]),
+  );
   const dataFields = composition.dataFields.filter((field) => fieldIds.has(field.id)).map(clone);
   if (dataFields.length !== fieldIds.size) {
     throw new Error('Component selection contains a binding to an unknown data field.');
@@ -59,6 +67,16 @@ export function buildComponentDefinition(
       const layer = clone(source);
       if (layer.parentId && !wanted.has(layer.parentId)) layer.parentId = null;
       layer.componentLink = null;
+      // A component is portable, so rule actions may only drive layers inside it.
+      layer.visualRules = (layer.visualRules ?? []).flatMap((rule) => {
+        const actions = rule.actions.filter(
+          (action) =>
+            !isVisualRuleStateAction(action) ||
+            !action.targetLayerId ||
+            wanted.has(action.targetLayerId),
+        );
+        return actions.length ? [{ ...rule, actions }] : [];
+      });
       return layer;
     }),
     dataFields,
@@ -101,6 +119,13 @@ export function instantiateComponentDefinition(
       : null;
     layer.parentId =
       source.parentId && sourceIds.has(source.parentId) ? layerIds[source.parentId]! : null;
+    layer.motionPath = source.motionPath
+      ? {
+          ...source.motionPath,
+          sourceLayerId:
+            layerIds[source.motionPath.sourceLayerId] ?? source.motionPath.sourceLayerId,
+        }
+      : null;
     layer.mask = source.mask
       ? {
           ...source.mask,
@@ -160,6 +185,12 @@ export function instantiateComponentDefinition(
       fieldId: fieldIds[binding.fieldId]!,
       ...(binding.valueMap ? { valueMap: { ...binding.valueMap } } : {}),
     }));
+    layer.visualRules = (layer.visualRules ?? []).map((rule) =>
+      remapVisualRule(rule, {
+        layerIds: new Map(Object.entries(layerIds)),
+        fieldIds: new Map(Object.entries(fieldIds)),
+      }),
+    );
     return layer;
   });
   return { instanceId, groupId, layers, dataFields, layerIds, fieldIds };
@@ -215,14 +246,14 @@ export function refreshComponentInstances(
             y: getLayerTransformAtFrame(reference, 0).y - getLayerTransformAtFrame(source, 0).y,
           }
         : { x: 40, y: 40 };
-    const oldFieldIds = new Set(
-      oldLayers.flatMap((layer) => layer.bindings.map((binding) => binding.fieldId)),
-    );
+    const readFieldIds = (layer: Layer) => [
+      ...layer.bindings.map((binding) => binding.fieldId),
+      ...(layer.visualRules ?? []).flatMap(visualRuleFieldIds),
+    ];
+    const oldFieldIds = new Set(oldLayers.flatMap(readFieldIds));
     assertMaskSourcesRemovable(composition, oldIds);
     composition.layers = composition.layers.filter((layer) => !oldIds.has(layer.id));
-    const stillUsedFieldIds = new Set(
-      composition.layers.flatMap((layer) => layer.bindings.map((binding) => binding.fieldId)),
-    );
+    const stillUsedFieldIds = new Set(composition.layers.flatMap(readFieldIds));
     const removedFieldIds = [...oldFieldIds].filter((fieldId) => !stillUsedFieldIds.has(fieldId));
     composition.dataFields = composition.dataFields.filter(
       (field) => !removedFieldIds.includes(field.id),

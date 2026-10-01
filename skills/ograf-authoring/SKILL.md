@@ -1,6 +1,6 @@
 ---
 name: ograf-authoring
-description: Create, inspect, animate, review, validate, certify, save, and export editable EBU OGraf-compatible broadcast graphics through OGraf Studio MCP. Use for lower thirds, scoreboards, tickers, Lottie layers, shader paints and exposed shader animation, procedural pattern presets, composable effects stacks, semantic scene authoring, Brand Kits, finite repeaters, runtime GDD collections, reusable components, HTML5 broadcast templates, .ogs source, .ograf.zip packages, per-property animation, data binding, and OGraf compliance work.
+description: Create, inspect, animate, review, validate, certify, save, and export editable EBU OGraf-compatible broadcast graphics through OGraf Studio MCP. Use for lower thirds, scoreboards, tickers, Lottie layers, shader and Media paints, exposed shader animation, procedural pattern presets, composable effects stacks, semantic scene authoring, Brand Kits, finite repeaters, runtime GDD collections, reusable components, HTML5 broadcast templates, .ogs source, .ograf.zip packages, per-property animation, Animate In/Out motion, data binding, interactive visual rules, and OGraf compliance work.
 ---
 
 # OGraf Authoring
@@ -109,6 +109,7 @@ Use `edit_path` for rectangle/ellipse conversion and static anchor/handle edits.
 `d` as `edit.expectedD` and zero-based contour/node indices; re-read after inserting or removing
 points. Shape edits apply across the whole animation. See
 [references/path-editing.md](./references/path-editing.md) for conversion boundaries and examples.
+Use path `stretchInsets` to preserve fixed-edge art during resize.
 
 ## Lottie layers
 
@@ -130,25 +131,21 @@ After Effects, HbbTV, or other target-renderer parity, so report those separatel
 ## Composable effects
 
 Use `add_effect`, `update_effect`, `duplicate_effect`, `remove_effect`, and `reorder_effects` inside
-revision-checked batches. Discover `elements` capabilities for the parameter catalog. New effects
-start bypassed. Select a `blendMode` to enable; `blendOpacity` mixes 0..1 with the input. Existing
-effects without blend settings retain Normal/100%. Effects run
-top-to-bottom; repeated types are allowed. Returned effect IDs and `results.properties` are stable
-through reorder. Animate exact `effects.ID.PARAM` paths using normal tracks or local loops; bind
-color/number tokens or runtime fields to those paths. Runtime data overrides sampled parameters.
-`update_effect` accepts `patch: {name?,enabled?,blendMode?,blendOpacity?,params?,shader?}`; numeric edits default to authored lifecycle
-frames, or use `scope:"frame"` with `frame`. Bypass/reorder preserve keys. Duplicate copies only the
-selected effect's keys and links; remove deletes those keys/links while keeping fields. Old blur
-and shadow use reorderable compatibility slots and retain old tracks/bindings. Read
+revision-checked batches; discover the `elements` parameter catalog. New effects start bypassed;
+`blendMode` enables them and `blendOpacity` mixes 0..1. Effects run top-to-bottom, repeated types
+are allowed, and returned IDs remain stable. Animate `effects.ID.PARAM` paths; runtime data
+overrides sampled values. `update_effect` accepts
+`patch: {name?,enabled?,blendMode?,blendOpacity?,params?,shader?}`; numeric edits affect authored
+frames unless `scope:"frame"` is used. Bypass/reorder preserve keys; duplicate/remove own only that
+entry's keys and links. Legacy blur/shadow retain their tracks and bindings. Read
 [effects-stack.md](./references/effects-stack.md) for examples and limits.
 
-A `shader` effect, authored with `add_effect effectType:"shader"`, is an ordered WebGL 2
-post-process pass: `iChannel0` is the flattened result after preceding effects, and its blended
-output feeds later effects. Its complete
-`shader` paint stores `fragmentSource`, `speed`, `resolutionScale`, and pragma parameters; do not set
-`inputImage` because the incoming stack owns `iChannel0`. Source and static controls are editable in
-the effect disclosure. SVG-only projections cannot reproduce shader-effect pixels; require browser
-capture/certification for visual proof. Shader-rendered layers cannot serve as alpha-mask sources.
+A `shader` effect is an ordered WebGL 2 pass: `iChannel0` is prior stack output. Store its source
+and controls in the complete `shader` paint; never set `inputImage`. SVG projections omit shader
+pixels, so use browser capture/certification. Shader layers cannot be alpha-mask sources.
+
+A complete persistent-group selection exposes a synchronized Group effects stack. Studio
+materializes shared entries onto ordinary member layers, preserving standard OGraf export.
 
 ## Shader paints and animation
 
@@ -265,6 +262,11 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
   or parked at one Step. Local keys use `0..durationFrames`, retain independent easing per property,
   and never become lifecycle markers. Keep repeat seams equal unless a masked ticker intentionally
   wraps offscreen. Use `repeatCount: null` for infinite motion. Loops must never invoke OGraf actions.
+- For a one-shot trigger, use `activation: {type:"customAction",customActionId}` and finite repeats.
+  Its payload updates data before matching clips play and settle; the manifest publishes duration.
+- Use `add_media_cue` with an audio clip source and `trigger:{type:"customAction",actionId}` for
+  action-triggered sound. In Studio choose Audio → Create Playback Cue, then select the Custom
+  Action under Resources → Media. Add at Playhead remains the simpler timeline Sound Event path.
 - Use `update_transform`/`update_effects` with their default `scope: "authored"` for base layout;
   use `scope: "frame"` plus `frame` only when intentionally authoring animation at one frame.
 - Use exact `layerName` and `fieldKey` selectors when they reduce UUID payload; ambiguity is an
@@ -278,25 +280,60 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
 - Use `set_layer_bindings` when one layer exposes more than one data-driven property. Each binding
   accepts a stable `fieldId` or unique `fieldKey`, and each target property may appear only once.
   `set_layer_binding` remains a legacy single-binding replacement and clears any additional rows.
+  In the Studio Properties UI, **+ Add Binding** creates a field seeded from the next unbound
+  property's current value and connects it in one undoable edit; the Field menu can then retarget
+  that binding to an existing field. MCP operations still require explicit field creation.
 - Treat the data schema as the operator contract. Author meaningful field `description`, select
   `options`, file extensions, and JSON Schema constraints through `add_data_field` or
   `update_data_field`; every compiled field emits `gddType`. Give bound on-air text a realistic
   `maxLength` so Reality Hub/Form Builder can prevent unusable values before playout. Object
   `properties` and array `items` use the same recursive field shape; keep property keys unique and
   defaults valid. A runtime collection requires array `items.fieldType: "object"`, and its capacity
-  is emitted as `maxItems`.
+  is emitted as `maxItems`. Use `itemKeyPath`, sorting, and page/pageSize for ranking tables whose
+  stable items must animate between ordered slots.
 - Use `duplicate_group` for independent repeated cells. Animate the source before duplication if
   its animation must be copied. A positive `frameOffset` shifts non-lifecycle authored keys only;
   Start/Step/End compatibility keys remain anchored. Ensure headroom for the shifted authored keys;
   genuine out-of-range results are rejected rather than clamped.
 - Use `set_composition_layout` and canvas-guide operations for editor layout aids. Use
-  `set_layer_layout` for locking, persistent groups, parenting, and responsive constraints. These
-  fields are authoring-only except `clipChildren`: setting it on a parent compiles a deterministic
+  `set_layer_layout` for locking, persistent groups, parenting, responsive constraints, and
+  `autoLayout`. Horizontal/vertical flow uses paint order, gap, four-sided padding, alignment,
+  optional width/height hugging, minimum/maximum hugged width, and hidden-item collapse. Auto-size
+  text contributes its measured bound content size. These fields are authoring-only except
+  `clipChildren` and `autoLayout`: setting clipping on a parent compiles a deterministic
   animated rectangular mask for direct children. Constraint and ordinary parent translation edits
   still bake their visual results into regular property tracks. `dimOutsideCanvas` adds the Studio
   viewport's solid 20% gray surround outside the composition only. `presentationBackground` can
-  use the bundled video or an editor-only still-image URL; local still-image embedding is available
-  in Canvas Layout. Never recreate these authoring aids as exported layers or backgrounds.
+  use the bundled video, an editor-only still image, or a permissioned local webcam; none exports.
+- `set_layer_visual_rules` replaces a layer's ordered rules; Studio **+ Add Rule** creates the
+  first field automatically. Rules combine conditions, compare fields, drive other layers
+  (`targetLayerId`), and fire from data, hover/pointer, or playout (`play`, `step`, `stop`,
+  `custom-action`). Later matching state actions win; hidden results collapse from Auto layout when
+  `collapseHidden` is enabled. See [visual rules](./references/visual-rules.md).
+- Data Connections are UI-authored preview adapters for JSON/CSV URLs or imported text. They map
+  into Test Data only and never add a proprietary connector dependency to exported OGraf output.
+- Author designed data changes with `set_composition.updateTransitionFrames/updateInterruption` and
+  `set_layer_layout.updateTransition`. Layers support inherit, none, crossfade, and four slide styles
+  with duration/distance overrides; unbound backgrounds remain stationary.
+- Use `retime_animation_phase` to fit IN, on-air, OUT, or the entire sequence to a target frame
+  count. It scales contained property keys proportionally, shifts later keys, and leaves local loops unchanged.
+- `set_layer_layout.motionPath` attaches a layer to an editable path. Animate
+  `motionPathProgress` from 0..1 on the Timeline or a local 0→1→0 loop; orientation follows the
+  tangent when enabled.
+- Timeline exposes a value graph for every selected numeric property track; graph drags remain
+  ordinary key frame/value edits and preserve the existing incoming easing/Bézier contract.
+- Text supports ordered `runs` with color/weight/style/font overrides plus explicit `direction` and
+  BCP 47 `language`. Keep run text concatenated exactly to `content`; runtime content bindings clear
+  runs and produce plain operator text.
+- Text `textAnimation` supports deterministic `typewriter`, `fade`, `rise`, `pop`, and
+  `word-reveal` presets without character layers. Patch the complete object through
+  `update_element`: `split` is `grapheme|word`, `durationFrames` is positive, and word reveal
+  always uses word segmentation. Typewriter alone uses `cursor:none|bar|block` and positive
+  `cursorBlinkFrames`. `replayOnUpdate` responds to changed Content bindings;
+  `customActionId` references an existing OGraf custom action. The initial animation begins at
+  frame zero; keep its duration inside IN when text must be complete at the first Step. Grapheme
+  mode preserves emoji and combining marks. Playback and cursor blinking remain frame-sampled
+  under backward `goToTime()` seeks.
 - Treat the exposed action/title safe bounds as EBU R 95 16:9 geometry: action safe is inset 3.5%
   per axis and title/graphics safe is inset 5% per axis, with pixel margins rounded to the nearest
   integer. At 1920x1080 this is 67/38 px and 96/54 px; at 3840x2160 it is 134/76 px and 192/108 px.
@@ -348,7 +385,8 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
 - Omitted easing on newly authored generic keys and transitions is linear. Recipes must specify any
   intentional non-linear entrance, exit, update, or loop motion explicitly.
 - Preserve Start and End lifecycle states. Only Step states are pausable OGraf steps.
-- Do not encode editor-only automation or cross-timeline triggers into output. Compile only deterministic OGraf lifecycle, schedule, data, and animation behavior.
+- Do not encode editor-only automation or cross-timeline triggers into output. Pointer rules are
+  real-time HTML interactions, not deterministic non-real-time scheduled actions.
 - Use `ograf_undo` to reverse the last agent transaction. Direct browser edits retain their own browser history.
 - Use `ograf_get_changes` after a revision conflict to distinguish browser edits from agent edits.
 - Use `ograf_reset_project` with explicit confirmation for a genuinely fresh visible session; the
@@ -364,3 +402,9 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
 - Read [references/examples.md](./references/examples.md) for a compact lower-third transaction pattern.
 - Read [references/setup.md](./references/setup.md) only for local startup, connection recovery,
   Claude Desktop configuration, or workspace confinement.
+- Read [references/media-paints.md](./references/media-paints.md) for packaged clips, live tags,
+  realtime limits, fallbacks, and renderer requirements.
+- Read [references/visual-rules.md](./references/visual-rules.md) before authoring rules: triggers,
+  conditions, cross-layer targets, delays, and transitions.
+- Read [references/layer-motion.md](./references/layer-motion.md) for Animate In/Out presets and
+  their ordinary-keyframe MCP operation.

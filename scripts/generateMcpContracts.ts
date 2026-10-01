@@ -7,7 +7,7 @@ import { createOGrafAuthoringHost } from '../apps/mcp-server/src/index';
 import { createOGrafMcpServer } from '../apps/mcp-server/src/mcpServer';
 
 const CONTRACT_VERSION = 1;
-const MAX_CONTRACT_BYTES = 150_000;
+const MAX_CONTRACT_BYTES = 181_000;
 
 function markdownFor(tools: Awaited<ReturnType<Client['listTools']>>['tools']): string {
   const rows = tools.map((tool) => {

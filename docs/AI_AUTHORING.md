@@ -163,6 +163,72 @@ MCP uses explicit vector definitions and ordinary create/relink operations for t
 See the [shader and pattern authoring reference](../skills/ograf-authoring/references/shaders-and-patterns.md)
 for operation examples, shader animation/data precedence, and the current UI/MCP boundaries.
 
+## Entrance and exit motion through MCP
+
+`set_layer_motion` matches Studio's **Animate In / Out** controls. It bakes Fade, Slide, Fly, or
+Focus into ordinary timeline keys; it does not add a playout-only preset. Choose `side: "in"` or
+`"out"`, provide a positive `durationFrames` that fits between the relevant lifecycle markers,
+and optionally add direction, distance, or easing. Focus requires the target's built-in blur effect.
+Set `spec: null` to clear that side and hold the on-air pose.
+
+```json
+{
+  "type": "set_layer_motion",
+  "layerName": "Headline",
+  "side": "in",
+  "spec": {
+    "style": "slide",
+    "direction": "left",
+    "distance": 80,
+    "durationFrames": 12,
+    "easing": "cubic-out"
+  }
+}
+```
+
+See the [motion workflow](../skills/ograf-authoring/references/layer-motion.md) for key replacement
+and lifecycle-window limits.
+
+## Interactive visual rules through MCP
+
+`set_layer_visual_rules` replaces one layer's ordered rules. `trigger: "data"` (or no trigger) needs
+an existing Data field; `hover`, `click`, `double-click`, `pointer-enter`, and `pointer-leave` react
+to the pointer; `play`, `step`, `stop`, and `custom-action` react to playout. `conditions` adds more
+comparisons (`match: "all" | "any"`), `compareFieldId` compares two fields, and visibility,
+`toggle-visibility`, and property actions accept `targetLayerId` to drive another layer. For example,
+after creating a rectangle named `Tab A` and a panel named `Panel A`, add this operation:
+
+```json
+{
+  "type": "set_layer_visual_rules",
+  "layerName": "Tab A",
+  "rules": [
+    {
+      "id": "tab-a-open",
+      "name": "Open panel A",
+      "enabled": true,
+      "trigger": "click",
+      "actions": [
+        {
+          "type": "visibility",
+          "visible": true,
+          "targetLayerId": "<Panel A id>",
+          "transitionFrames": 8
+        },
+        { "type": "property", "targetProperty": "fill", "value": "#2680ff" }
+      ]
+    }
+  ]
+}
+```
+
+Pointer rules run in an interactive real-time HTML renderer; Studio canvas clicks still select and
+edit objects. Playout triggers, `delayFrames`, and `transitionFrames` replay deterministically in
+non-real-time schedules; pointer input does not, so use an OGraf custom action for a remote or
+deterministic trigger. The authoring skill's
+[rule workflow](../skills/ograf-authoring/references/tool-workflows.md) covers state versus event
+rules, conditions, and action references.
+
 ## Claude Desktop configuration on Windows
 
 The server uses Streamable HTTP, while `claude_desktop_config.json` launches local stdio processes.

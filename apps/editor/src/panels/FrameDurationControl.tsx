@@ -66,7 +66,7 @@ export function FrameDurationControl({
       title={compact ? `${label}: ${explanation}` : undefined}
     >
       <PropertyRow
-        help={`${label === 'Update crossfade' ? 'Duration of transitions when new playback data is applied.' : 'Duration of the incoming lifecycle transition.'} Enter an exact frame count; the milliseconds value follows the composition frame rate.`}
+        help={`${label === 'Data change fade' ? 'How long the fade lasts when new playout data changes the graphic.' : 'Duration of the incoming lifecycle transition.'} Enter an exact frame count; the milliseconds value follows the composition frame rate.`}
         resizable={propertyColumns}
         title={compact ? `${label} in frames` : undefined}
       >
@@ -81,7 +81,7 @@ export function FrameDurationControl({
         />
       </PropertyRow>
       <PropertyRow
-        help={`${label === 'Update crossfade' ? 'Duration of transitions when new playback data is applied.' : 'Duration of the incoming lifecycle transition.'} Enter milliseconds. If the value falls between frames, choose a rounding option to keep the timeline frame-aligned.`}
+        help={`${label === 'Data change fade' ? 'How long the fade lasts when new playout data changes the graphic.' : 'Duration of the incoming lifecycle transition.'} Enter milliseconds. If the value falls between frames, choose a rounding option to keep the timeline frame-aligned.`}
         resizable={propertyColumns}
         className="frame-duration-milliseconds"
         title={compact ? `${label} in milliseconds` : undefined}

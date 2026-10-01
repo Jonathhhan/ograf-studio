@@ -1,4 +1,5 @@
-import type { Asset, Composition, Element, FieldDefinition, FieldValue } from './types';
+import type { Asset, Composition, Element, FieldDefinition, FieldValue, Paint } from './types';
+import { isMediaPaint, mediaPaintAssetReferences, normalizeMediaPaint } from './mediaPaint';
 
 const ASSET_PREFIX = 'asset:';
 
@@ -15,12 +16,38 @@ export function resolveAssetValue(value: string, assets: Asset[]): string {
 }
 
 export function resolveElementAssetReferences(element: Element, assets: Asset[]): Element {
+  const resolvePaint = (paint: Paint | undefined): Paint | undefined => {
+    if (!isMediaPaint(paint)) return paint;
+    const source =
+      paint.source.kind === 'clip'
+        ? { ...paint.source, src: resolveAssetValue(paint.source.src, assets) }
+        : {
+            ...paint.source,
+            ...(paint.source.fallback
+              ? { fallback: resolveAssetValue(paint.source.fallback, assets) }
+              : {}),
+          };
+    return normalizeMediaPaint({ ...paint, source });
+  };
   if (element.type === 'image') {
-    return element.src ? { ...element, src: resolveAssetValue(element.src, assets) } : element;
+    return {
+      ...element,
+      ...(element.src ? { src: resolveAssetValue(element.src, assets) } : {}),
+      ...(element.fill ? { fill: resolvePaint(element.fill) as typeof element.fill } : {}),
+    };
+  }
+  if (element.type === 'audio') {
+    return { ...element, ...(element.src ? { src: resolveAssetValue(element.src, assets) } : {}) };
   }
   if (element.type === 'image-sequence') {
-    return { ...element, frames: element.frames.map((frame) => resolveAssetValue(frame, assets)) };
+    return {
+      ...element,
+      frames: element.frames.map((frame) => resolveAssetValue(frame, assets)),
+      ...(element.fill ? { fill: resolvePaint(element.fill) as typeof element.fill } : {}),
+    };
   }
+  if ('fill' in element && element.fill)
+    return { ...element, fill: resolvePaint(element.fill) as typeof element.fill } as Element;
   return element;
 }
 
@@ -28,6 +55,7 @@ export interface AssetConsumers {
   layerIds: string[];
   fieldIds: string[];
   fontLayerIds: string[];
+  mediaCueIds: string[];
 }
 
 /** Finds every direct source-model use before an asset is renamed or removed. */
@@ -37,7 +65,9 @@ export function findAssetConsumers(composition: Composition, asset: Asset): Asse
     .filter(
       (layer) =>
         (layer.element.type === 'image' && layer.element.src === reference) ||
-        (layer.element.type === 'image-sequence' && layer.element.frames.includes(reference)),
+        (layer.element.type === 'audio' && layer.element.src === reference) ||
+        (layer.element.type === 'image-sequence' && layer.element.frames.includes(reference)) ||
+        mediaPaintAssetReferencesFromElement(layer.element).includes(reference),
     )
     .map((layer) => layer.id);
   const usesReference = (field: FieldDefinition, value: FieldValue): boolean => {
@@ -74,7 +104,14 @@ export function findAssetConsumers(composition: Composition, asset: Asset): Asse
           )
           .map((layer) => layer.id)
       : [];
-  return { layerIds, fieldIds, fontLayerIds };
+  const mediaCueIds = (composition.mediaCues ?? [])
+    .filter((cue) =>
+      cue.sources.some((source) =>
+        source.kind === 'clip' ? source.src === reference : source.fallback === reference,
+      ),
+    )
+    .map((cue) => cue.id);
+  return { layerIds, fieldIds, fontLayerIds, mediaCueIds };
 }
 
 export function isSafePackagePath(path: string): boolean {
@@ -113,7 +150,15 @@ export function findMissingAssetReferences(composition: Composition): string[] {
   };
   for (const layer of composition.layers) {
     if (layer.element.type === 'image') check(layer.element.src);
+    else if (layer.element.type === 'audio') check(layer.element.src);
     else if (layer.element.type === 'image-sequence') layer.element.frames.forEach(check);
+    mediaPaintAssetReferencesFromElement(layer.element).forEach(check);
+  }
+  for (const cue of composition.mediaCues ?? []) {
+    for (const source of cue.sources) {
+      if (source.kind === 'clip') check(source.src);
+      else check(source.fallback);
+    }
   }
   for (const field of composition.dataFields) {
     const visit = (node: FieldDefinition, value: FieldValue) => {
@@ -135,4 +180,9 @@ export function findMissingAssetReferences(composition: Composition): string[] {
     visit(field, field.defaultValue);
   }
   return [...missing].sort();
+}
+
+function mediaPaintAssetReferencesFromElement(element: Element): string[] {
+  const fill = 'fill' in element ? element.fill : undefined;
+  return isMediaPaint(fill) ? mediaPaintAssetReferences(fill) : [];
 }

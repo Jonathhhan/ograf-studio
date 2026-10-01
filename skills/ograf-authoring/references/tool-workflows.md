@@ -115,17 +115,18 @@ Supported operation discriminators:
 - Shared patterns: `set_tiling_pattern`, `remove_tiling_pattern`, `set_layer_lighting`; inspect through
   `ograf_get_project include: ["patterns"]` and `ograf_inspect_scene`
 - Content/style: `update_element`, `update_transform`, `update_effects`, `add_effect`,
-  `update_effect`, `duplicate_effect`, `remove_effect`, `reorder_effects`
+  `update_effect`, `duplicate_effect`, `remove_effect`, `reorder_effects`; effect operations accept
+  one layer selector or a persistent canvas `groupId`
 - Compositing: `set_layer_mask`; `set_layer_flags.isMaskOnly` controls source-only output
 - Timeline: `set_property_key`, `set_property_track`, `stagger_property_track`,
   `move_property_key`, `remove_property_key`, `set_property_key_easing`, `set_transition`,
-  `set_layer_loop`, `set_loop_property_track`, `remove_layer_loop`
+  `set_layer_loop`, `set_loop_property_track`, `remove_layer_loop`, `set_layer_motion`
 - Data: `add_data_field`, `update_data_field`, `remove_data_field`, `set_layer_bindings`,
   `set_layer_binding` (legacy single-binding replace), `create_runtime_collection`,
   `update_runtime_collection`, `remove_runtime_collection`
 - Actions: `add_custom_action`, `update_custom_action`, `remove_custom_action`
 
-`add_layer.kind` supports `rectangle`, `ellipse`, `text`, `image`, `path`, `pattern`, `image-sequence`, and `lottie`. It returns the generated layer ID in `summary.generatedIds`. For Lottie, pass a complete self-contained Bodymovin JSON object in `element.animationData`, then inspect the layer's derived `lottieInspection` warnings.
+`add_layer.kind` supports `rectangle`, `ellipse`, `text`, `image`, `path`, `pattern`, `image-sequence`, and `lottie`. It returns the generated layer ID in `summary.generatedIds`. For Lottie, pass a complete self-contained Bodymovin JSON object in `element.animationData`, then inspect its warnings. Audio/video/live playback uses composition-level Media Cues, never canvas Audio layers.
 
 When `transform` is omitted, rectangle and ellipse layers begin at 200 × 200 as a square/circle.
 Pass explicit width and height for a panel or oval; later edits remain independent.
@@ -153,8 +154,10 @@ and returns complete mappings. It is an authoring recipe, not a runtime collecti
 `fieldId` or unique `fieldKey`; select one contiguous persistent-group prototype with `groupId`,
 ordered `layerIds`, or exact `layerNames`; and provide `offsetPerItem`, capacity 1..100, and truncate
 overflow. Bind prototype layers to the array field with item-relative `sourcePath` segment arrays.
-Capacity is mirrored to field `maxItems`. Updates are index-based snapshot replacement with the
-composition update crossfade; instances never infer identity, timing, scroll, or pagination. Remove
+Capacity is mirrored to field `maxItems`. Optional `itemKeyPath` gives stable identity; `sortPath`
+plus `sortDirection` orders items deterministically; `pageSize` and zero-based `page` select a bounded
+window. Bindings still resolve the original array item, and keyed items animate between changed
+slots. Remove
 the runtime collection before deleting or ungrouping prototype layers. `create_repeater` remains the
 right tool when the row count itself should be authored as ordinary editable layers and fields.
 
@@ -169,6 +172,10 @@ Use `scope: "frame"` and a required `frame` for one-frame animation changes.
 For a post-process shader use `add_effect effectType:"shader"` with complete `patch.shader`; its
 `iChannel0` is the preceding stack output, so omit `inputImage`. Update by returned effect ID. See
 [effects-stack.md](./effects-stack.md#shader-effect).
+
+Pass `groupId` instead of `layerId`/`layerName` to any effect operation for a persistent canvas
+group. One stable effect ID is materialized on every member; member-only effects remain independent,
+and group reorder changes only shared entries.
 
 `set_layer_flags.blendMode` accepts `normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`,
 `color-dodge`, `color-burn`, `hard-light`, `soft-light`, `difference`, or `exclusion`. The value is a
@@ -233,9 +240,10 @@ each stop and shadow link under Brand Kit. Text accepts both `strokeColor` and `
 consumer's ordinary element value. Removing a used token requires `force: true` to clear links while
 preserving the last materialized values.
 
-Custom actions are declarative OGraf manifest entries. Use `add_custom_action`,
-`update_custom_action`, and `remove_custom_action` with unique public `actionId` values; they do not
-authorize arbitrary JavaScript payloads.
+Manage unique public IDs with the custom-action operations.
+A finite layer clip may activate from `{type:"customAction",customActionId}`; its object payload
+updates data fields before matching clips play and settle. The manifest publishes their longest
+duration. This is declarative and does not authorize arbitrary JavaScript.
 
 `duplicate_group` accepts `source.groupId`, `source.parentId`, or raw `source.layerIds`. It creates
 independent copies with fresh groups and returns source→copy layer/field mappings. Transform offsets
@@ -263,7 +271,11 @@ authoring bounds, and overflow preview. For a still image, set
 `presentationBackgroundImageSource` to an image URL; local file selection and embedding are
 available in the visible Studio Canvas Layout settings. Canvas guides are `{axis: "vertical"|"horizontal",
 position}` and receive stable generated IDs. `set_layer_layout` accepts `isLocked`, `groupId`,
-`parentId`, `clipChildren`, and horizontal/vertical constraints. When `clipChildren: true`, direct
+`parentId`, `clipChildren`, horizontal/vertical constraints, and `autoLayout`. Auto layout accepts
+`direction: none|horizontal|vertical`, non-negative `gap` and four padding values,
+`align: start|center|end|stretch`, `hugWidth`, `hugHeight`, `minWidth`, `maxWidth`, and
+`collapseHidden`; auto-size text contributes its measured bound content size, and direct children
+flow in paint order in Studio and exported playback. When `clipChildren: true`, direct
 children pointing at that layer are clipped to its animated transformed bounds; parent rotation and
 transform origin produce diagonal masks, and rectangle `borderRadius` rounds the transformed mask.
 Use `{ topLeft, topRight, bottomRight, bottomLeft }` for independent corners; a number remains a
@@ -272,6 +284,14 @@ Children retain their independent world-space rotation. This relation compiles d
 and is remapped by `duplicate_group`. Parent translation and composition resize otherwise bake into
 regular tracks.
 Unlock a layer before attempting content, transform, binding, effect, or timeline mutations.
+
+`set_layer_visual_rules` replaces ordered rules. Data rules (default `trigger`) need an existing
+`fieldId`; compare with `value` or `compareFieldId`, and add `conditions` combined by `match`.
+`data`/`hover` are states that revert; pointer (`click`, `double-click`, `pointer-enter`,
+`pointer-leave`) and playout (`play`, `step`, `stop`, `custom-action` with `eventId`) triggers are
+events whose results persist, optionally after `delayFrames`. Visibility, toggle-visibility and
+property actions take `targetLayerId` and `transitionFrames`. Details:
+[visual rules](./visual-rules.md).
 
 `create_timeline_group` accepts at least two existing `layerIds`, plus optional `name` and
 `#RRGGBB` `color`, and returns a stable timeline-group ID. Prefer one named/color-coded group for

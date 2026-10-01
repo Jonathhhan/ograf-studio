@@ -1,5 +1,11 @@
 import type { CompiledGraphicDescriptor, OGrafManifest } from '@ograf-editor/ograf-types';
-import { templateThumbnailName, type Composition, type Project } from '@ograf-editor/scene-model';
+import {
+  isMediaPaint,
+  templateThumbnailName,
+  type Composition,
+  type Paint,
+  type Project,
+} from '@ograf-editor/scene-model';
 import { validateManifest, validateProject } from '@ograf-editor/validation';
 import { assembleManifest } from './assembleManifest';
 import { compileDescriptor } from './compileDescriptor';
@@ -26,6 +32,11 @@ const EXTENSION_BY_MIME: Record<string, string> = {
   'image/gif': 'gif',
   'image/webp': 'webp',
   'image/svg+xml': 'svg',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/ogg': 'ogg',
   'font/ttf': 'ttf',
   'font/otf': 'otf',
   'font/woff': 'woff',
@@ -57,7 +68,20 @@ function exportedResourceUrl(value) {
 }
 const exportedLayers = [...exportedDescriptor.layers, ...(exportedDescriptor.collections ?? []).flatMap((collection) => collection.prototypeLayers)];
 const exportedImageBindings = [];
+for (const cue of exportedDescriptor.mediaCues ?? []) {
+  cue.sources = cue.sources.map((source) => source.kind === 'clip'
+    ? { ...source, src: exportedResourceUrl(source.src) }
+    : { ...source, ...(source.fallback ? { fallback: exportedResourceUrl(source.fallback) } : {}) });
+}
+function exportedPaintResources(paint) {
+  if (!paint || typeof paint !== 'object' || paint.type !== 'media') return paint;
+  if (paint.source?.kind === 'clip') return { ...paint, source: { ...paint.source, src: exportedResourceUrl(paint.source.src) } };
+  if (paint.source?.kind === 'live' && paint.source.fallback) return { ...paint, source: { ...paint.source, fallback: exportedResourceUrl(paint.source.fallback) } };
+  return paint;
+}
 for (const layer of exportedLayers) {
+  if (layer.element && typeof layer.element === 'object' && 'fill' in layer.element)
+    layer.element.fill = exportedPaintResources(layer.element.fill);
   if (layer.element.type === 'image') {
     layer.element.src = exportedResourceUrl(layer.element.src);
     for (const binding of layer.bindings ?? (layer.binding ? [layer.binding] : [])) {
@@ -65,6 +89,8 @@ for (const layer of exportedLayers) {
       exportedImageBindings.push(binding);
       if (binding.valueMap) binding.valueMap = Object.fromEntries(Object.entries(binding.valueMap).map(([key, value]) => [key, exportedResourceUrl(value)]));
     }
+  } else if (layer.element.type === 'audio') {
+    layer.element.src = exportedResourceUrl(layer.element.src);
   } else if (layer.element.type === 'image-sequence') {
     layer.element.frames = layer.element.frames.map(exportedResourceUrl);
   }
@@ -173,16 +199,53 @@ function packageDescriptorResources(
     return path;
   };
 
+  const packagePaint = (paint: Paint | undefined): Paint | undefined => {
+    if (!isMediaPaint(paint)) return paint;
+    return paint.source.kind === 'clip'
+      ? { ...paint, source: { ...paint.source, src: packageUri(paint.source.src) } }
+      : {
+          ...paint,
+          source: {
+            ...paint.source,
+            ...(paint.source.fallback ? { fallback: packageUri(paint.source.fallback) } : {}),
+          },
+        };
+  };
+
   const packagedLayers = [
     ...packaged.layers,
     ...(packaged.collections ?? []).flatMap((collection) => collection.prototypeLayers),
   ];
   for (const layer of packagedLayers) {
+    if ('fill' in layer.element && layer.element.fill)
+      layer.element.fill = packagePaint(layer.element.fill) as typeof layer.element.fill;
     if (layer.element.type === 'image' && layer.element.src) {
+      layer.element.src = packageUri(layer.element.src);
+    } else if (layer.element.type === 'audio' && layer.element.src) {
       layer.element.src = packageUri(layer.element.src);
     } else if (layer.element.type === 'image-sequence') {
       layer.element.frames = layer.element.frames.map(packageUri);
     }
+  }
+  for (const cue of packaged.mediaCues ?? []) {
+    cue.sources = cue.sources.map((source) =>
+      source.kind === 'clip'
+        ? { ...source, src: packageUri(source.src) }
+        : {
+            ...source,
+            ...(source.fallback ? { fallback: packageUri(source.fallback) } : {}),
+          },
+    );
+  }
+  for (const cue of packagedComposition.mediaCues) {
+    cue.sources = cue.sources.map((source) =>
+      source.kind === 'clip'
+        ? { ...source, src: packageUri(source.src) }
+        : {
+            ...source,
+            ...(source.fallback ? { fallback: packageUri(source.fallback) } : {}),
+          },
+    );
   }
   for (const font of packaged.fonts ?? []) {
     font.source = packageUri(font.source);
