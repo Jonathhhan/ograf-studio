@@ -4,6 +4,7 @@ import {
   getLayerEffectsAtFrame,
   effectEnabled,
   getEffectStack,
+  hasElementMediaPaint,
   hasElementShaderPaint,
   shaderParameterTarget,
   type Element,
@@ -28,11 +29,23 @@ import {
   setLottieDeterministicRendering,
   waitForElementContentReady,
 } from '@ograf-editor/ograf-runtime';
-import { resolveEffectiveElement, resolveEffectiveEffects } from '../state/dataBinding';
+import {
+  editorVisualRuleEffects,
+  resolveEffectiveElement,
+  resolveEffectiveEffects,
+  resolveEffectiveVisibility,
+} from '../state/dataBinding';
+import { useActiveComposition } from '../state/projectStore';
 import { useTestDataStore } from '../state/testDataStore';
 import { useTimelineStore } from '../state/timelineStore';
 import type { ShaderPreviewClock } from './shaderPreviewClock';
 import { useShaderParameterPreviewStore } from '../state/shaderParameterPreviewStore';
+import {
+  inlineTextEditTarget,
+  inlineTextValue,
+  placeInlineTextCaret,
+  type InlineTextCaretPoint,
+} from './inlineTextEditing';
 import './LayerNode.css';
 
 interface LayerNodeProps {
@@ -47,6 +60,16 @@ interface LayerNodeProps {
   compositionFrameRate: number;
   shaderPreviewClock: ShaderPreviewClock;
   patterns: TilingPattern[];
+  onCommitInlineText: (layer: Layer, value: string) => void;
+  onInlineTextEditingChange: (
+    layerId: string,
+    editing: boolean,
+    caretPoint?: InlineTextCaretPoint,
+  ) => void;
+  allowInlineTextEditing: boolean;
+  editingInlineText: boolean;
+  inlineTextCaretPoint?: InlineTextCaretPoint;
+  onPreviewInlineText: (layer: Layer, value: string) => void;
 }
 
 /**
@@ -59,6 +82,7 @@ function emptyContentLabel(element: Element): string | null {
   if (element.type === 'image' && !element.src) return 'Image';
   if (element.type === 'image-sequence' && element.frames.length === 0) return 'Sequence';
   if (element.type === 'lottie' && !element.animationData) return 'Lottie';
+  if (element.type === 'audio' && !element.src) return 'Audio';
   return null;
 }
 
@@ -74,16 +98,41 @@ export function LayerNode({
   compositionFrameRate,
   shaderPreviewClock,
   patterns,
+  onCommitInlineText,
+  onInlineTextEditingChange,
+  allowInlineTextEditing,
+  editingInlineText,
+  inlineTextCaretPoint,
+  onPreviewInlineText,
 }: LayerNodeProps) {
   const testValues = useTestDataStore((s) => s.values);
+  const ruleOverrides = useTestDataStore((s) => s.visualRuleStateOverrides);
+  const compositionLayers = useActiveComposition().layers;
+  // Rules on any layer may drive this one; one shared evaluation serves every canvas node.
+  const ruleEffect = editorVisualRuleEffects(
+    compositionLayers,
+    dataFields,
+    testValues,
+    ruleOverrides,
+  ).get(layer.id);
   const contentRef = useRef<HTMLDivElement>(null);
   const readinessGeneration = useRef(0);
   const [contentError, setContentError] = useState<string | null>(null);
+  const inlineTarget = inlineTextEditTarget(layer, dataFields);
+  const initialInlineText = useRef('');
+  const finishingInlineText = useRef(false);
 
   const lastEffectiveElement = useRef<Element>(layer.element);
   const resolvedContent = useMemo(() => {
     try {
-      const next = resolveEffectiveElement(layer, testValues, assets, dataFields, patterns);
+      const next = resolveEffectiveElement(
+        layer,
+        testValues,
+        assets,
+        dataFields,
+        patterns,
+        ruleEffect,
+      );
       lastEffectiveElement.current = next;
       return { element: next, error: null };
     } catch (error) {
@@ -92,9 +141,11 @@ export function LayerNode({
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }, [assets, dataFields, layer, testValues, patterns]);
+  }, [assets, dataFields, layer, testValues, patterns, ruleEffect]);
   const element = resolvedContent.element;
+  const effectiveVisible = resolveEffectiveVisibility(layer, testValues, dataFields, ruleEffect);
   const hasShaderPaint = hasElementShaderPaint(element);
+  const hasMediaPaint = hasElementMediaPaint(element);
   const lottieBackingSize = useMemo(() => lottieBackingSizeForLayer(layer), [layer]);
   const shaderBackingSize = useMemo(() => shaderBackingSizeForLayer(layer), [layer]);
   const shaderStrokePadding = useMemo(() => shaderStrokePaddingForLayer(layer), [layer]);
@@ -112,6 +163,68 @@ export function LayerNode({
     );
   }, []);
 
+  useLayoutEffect(() => {
+    if (!editingInlineText) return;
+    const text = contentRef.current?.firstElementChild as HTMLElement | null;
+    if (!text) return;
+    initialInlineText.current =
+      element.type === 'text'
+        ? element.runs.length
+          ? element.runs.map((run) => run.text).join('')
+          : element.content
+        : text.innerText;
+    text.textContent = initialInlineText.current;
+    text.contentEditable = 'plaintext-only';
+    text.spellcheck = false;
+    text.dataset.inlineTextEditor = 'true';
+    const finish = (commit: boolean) => {
+      if (finishingInlineText.current) return;
+      finishingInlineText.current = true;
+      if (commit) onCommitInlineText(layer, inlineTextValue(text));
+      else text.innerText = initialInlineText.current;
+      onInlineTextEditingChange(layer.id, false);
+      text.blur();
+      finishingInlineText.current = false;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        finish(true);
+      }
+    };
+    const onBlur = () => finish(true);
+    const onInput = () => onPreviewInlineText(layer, inlineTextValue(text));
+    const stop = (event: Event) => event.stopPropagation();
+    text.addEventListener('keydown', onKeyDown);
+    text.addEventListener('blur', onBlur);
+    text.addEventListener('input', onInput);
+    text.addEventListener('mousedown', stop);
+    text.addEventListener('dblclick', stop);
+    text.focus();
+    placeInlineTextCaret(text, inlineTextCaretPoint);
+    return () => {
+      text.removeEventListener('keydown', onKeyDown);
+      text.removeEventListener('blur', onBlur);
+      text.removeEventListener('input', onInput);
+      text.removeEventListener('mousedown', stop);
+      text.removeEventListener('dblclick', stop);
+      text.removeAttribute('contenteditable');
+      delete text.dataset.inlineTextEditor;
+    };
+  }, [
+    editingInlineText,
+    element,
+    layer,
+    onCommitInlineText,
+    onInlineTextEditingChange,
+    onPreviewInlineText,
+    inlineTextCaretPoint,
+  ]);
+
   // THE canvas render path — deliberately the exact same `renderElementContent` the OGraf runtime
   // uses for both the preview harness and every exported package, so the design canvas cannot
   // drift from broadcast output. (It previously had its own parallel JSX switch, which had already
@@ -119,28 +232,33 @@ export function LayerNode({
   // Hooks must run unconditionally, so this sits above the `isVisible` early return; the ref is
   // null when hidden and the effect simply no-ops.
   useLayoutEffect(() => {
+    if (editingInlineText) return;
     const host = contentRef.current;
     if (host) {
       renderElementContent(host, element, 0, {
+        frameRate: compositionFrameRate,
         ...(element.type === 'lottie' ? { lottieBackingSize } : {}),
-        ...(hasShaderPaint ? { shaderBackingSize, shaderStrokePadding } : {}),
+        ...(hasShaderPaint || hasMediaPaint ? { shaderBackingSize, shaderStrokePadding } : {}),
       });
       applyAnimatedPaint(host, layer.animationTracks, useTimelineStore.getState().currentFrame);
-      if (element.type === 'lottie' || hasShaderPaint) watchContentReadiness(host);
+      if (element.type === 'lottie' || hasShaderPaint || hasMediaPaint) watchContentReadiness(host);
       else setContentError(null);
     }
     return () => {
       readinessGeneration.current += 1;
     };
   }, [
+    compositionFrameRate,
     element,
     hasShaderPaint,
+    hasMediaPaint,
     layer.animationTracks,
-    layer.isVisible,
+    effectiveVisible,
     lottieBackingSize,
     shaderBackingSize,
     shaderStrokePadding,
     watchContentReadiness,
+    editingInlineText,
   ]);
 
   useLayoutEffect(() => {
@@ -148,7 +266,7 @@ export function LayerNode({
     return () => {
       if (host) disposeLayerEffects(host);
     };
-  }, [layer.isVisible]);
+  }, [effectiveVisible]);
 
   useLayoutEffect(() => {
     const host = contentRef.current;
@@ -171,6 +289,7 @@ export function LayerNode({
         previewing = true;
       } else if (previewing) {
         renderElementContent(host, element, 0, {
+          frameRate: compositionFrameRate,
           shaderBackingSize,
           shaderStrokePadding,
         });
@@ -181,6 +300,7 @@ export function LayerNode({
     applyPreview(useShaderParameterPreviewStore.getState().preview);
     return useShaderParameterPreviewStore.subscribe((state) => applyPreview(state.preview));
   }, [
+    compositionFrameRate,
     element,
     hasShaderPaint,
     layer.animationTracks,
@@ -196,10 +316,10 @@ export function LayerNode({
     return () => {
       if (host) disposeElementContent(host);
     };
-  }, [layer.isVisible]);
+  }, [effectiveVisible]);
 
   useLayoutEffect(() => {
-    if (hasShaderPaint) {
+    if (hasShaderPaint || hasMediaPaint) {
       let animationFrame: number | null = null;
       const render = () => {
         animationFrame = null;
@@ -211,13 +331,14 @@ export function LayerNode({
           // The master timeline and Stage's local-loop sampler own animated uniforms. This
           // independent clock advances iTime only, so a held loop's values are never replaced.
           renderAnimatedElementAtTime(host, element, shaderPreviewClock.sample(performance.now()));
-          if (!shaderPreviewClock.running) watchContentReadiness(host);
+          if (!shaderPreviewClock.running && !hasMediaPaint) watchContentReadiness(host);
         } catch (error) {
           setContentError(error instanceof Error ? error.message : String(error));
           // A restored context can resume itself. Compilation/draw failures await a source edit.
           if (!(error instanceof Error) || error.name !== 'ShaderContextLostError') return;
         }
-        if (shaderPreviewClock.running) animationFrame = requestAnimationFrame(render);
+        if (shaderPreviewClock.running || hasMediaPaint)
+          animationFrame = requestAnimationFrame(render);
       };
       const sync = () => {
         if (animationFrame !== null) cancelAnimationFrame(animationFrame);
@@ -256,7 +377,8 @@ export function LayerNode({
     compositionFrameRate,
     element,
     hasShaderPaint,
-    layer.isVisible,
+    hasMediaPaint,
+    effectiveVisible,
     lottieBackingSize,
     shaderBackingSize,
     shaderPreviewClock,
@@ -271,6 +393,7 @@ export function LayerNode({
       getLayerEffectsAtFrame(layer, useTimelineStore.getState().currentFrame),
       testValues,
       dataFields,
+      ruleEffect,
     );
     const shaderEffect = getEffectStack(effects).some(
       (effect) => effect.type === 'shader' && effectEnabled(effect, effects),
@@ -283,7 +406,8 @@ export function LayerNode({
     const render = () => {
       animationFrame = null;
       apply();
-      if (shaderPreviewClock.running) animationFrame = requestAnimationFrame(render);
+      if (shaderPreviewClock.running || hasMediaPaint)
+        animationFrame = requestAnimationFrame(render);
     };
     const sync = () => {
       if (animationFrame !== null) cancelAnimationFrame(animationFrame);
@@ -294,9 +418,18 @@ export function LayerNode({
       unsubscribe();
       if (animationFrame !== null) cancelAnimationFrame(animationFrame);
     };
-  }, [layer, testValues, dataFields, transform.width, transform.height, shaderPreviewClock]);
+  }, [
+    layer,
+    testValues,
+    dataFields,
+    ruleEffect,
+    transform.width,
+    transform.height,
+    shaderPreviewClock,
+    hasMediaPaint,
+  ]);
 
-  if (!layer.isVisible) return null;
+  if (!effectiveVisible) return null;
 
   const style: CSSProperties = {
     position: 'absolute',
@@ -322,6 +455,7 @@ export function LayerNode({
       className={[
         'layer-node',
         isSelected && 'selected',
+        editingInlineText && 'inline-text-editing',
         layer.isGuide && 'guide',
         layer.isLocked && 'locked',
       ]
@@ -330,11 +464,22 @@ export function LayerNode({
       onMouseDown={(e) => {
         if (e.button !== 0) return;
         e.stopPropagation();
+        if (editingInlineText) return;
         onSelect(e.ctrlKey || e.metaKey);
+      }}
+      onDoubleClick={(event) => {
+        if (!allowInlineTextEditing || !inlineTarget || editingInlineText) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onSelect(false);
+        onInlineTextEditingChange(layer.id, true, { x: event.clientX, y: event.clientY });
       }}
       style={style}
     >
       <div className="layer-content-host" ref={contentRef} />
+      {editingInlineText && inlineTarget?.type === 'test-data' ? (
+        <div className="layer-inline-text-badge">Editing field: {inlineTarget.label}</div>
+      ) : null}
       {visibleError ? (
         <div className="layer-content-placeholder" title={visibleError} role="alert">
           Render error: {visibleError}

@@ -1,10 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTimelineStore } from '../state/timelineStore';
 import {
+  collectTimelineKeyframeFrames,
   handleTimelinePlaybackKey,
+  jumpTimelineKeyframe,
   stepTimelineFrame,
   timelineFrameDirection,
+  timelineKeyframeDirection,
 } from './timelineFrameNavigation';
+import {
+  createComposition,
+  createLayerKeyframe,
+  createLayerLoopClip,
+  createLayerOfKind,
+  createLayerPropertyKeyframe,
+  defaultTransformFor,
+} from '@ograf-editor/scene-model';
 
 const arrows = {
   key: 'ArrowRight',
@@ -31,6 +42,57 @@ describe('Timeline frame navigation', () => {
     for (const key of ['altKey', 'ctrlKey', 'metaKey', 'shiftKey', 'isComposing'])
       expect(timelineFrameDirection({ ...arrows, [key]: true })).toBeNull();
     expect(timelineFrameDirection({ ...arrows, key: 'ArrowDown' })).toBeNull();
+  });
+
+  it('recognizes Ctrl/Cmd arrows only for keyframe jumps', () => {
+    expect(timelineKeyframeDirection({ ...arrows, ctrlKey: true })).toBe(1);
+    expect(timelineKeyframeDirection({ ...arrows, key: 'ArrowLeft', metaKey: true })).toBe(-1);
+    expect(timelineKeyframeDirection(arrows)).toBeNull();
+    expect(timelineKeyframeDirection({ ...arrows, ctrlKey: true, shiftKey: true })).toBeNull();
+    expect(timelineKeyframeDirection({ ...arrows, ctrlKey: true, key: 'ArrowDown' })).toBeNull();
+  });
+
+  it('collects distinct lifecycle, layer, and property frames but excludes local-loop keys', () => {
+    const composition = createComposition();
+    const layer = createLayerOfKind('rectangle');
+    layer.keyframes = [
+      createLayerKeyframe(5, defaultTransformFor('rectangle')),
+      createLayerKeyframe(20, defaultTransformFor('rectangle')),
+    ];
+    layer.animationTracks.x = [createLayerPropertyKeyframe(12, 42)];
+    layer.loop = createLayerLoopClip({
+      durationFrames: 10,
+      tracks: { x: [createLayerPropertyKeyframe(7, 1)] },
+    });
+    composition.layers = [layer];
+    const frames = collectTimelineKeyframeFrames(composition);
+    expect(frames).toEqual(expect.arrayContaining([0, 5, 12, 20]));
+    expect(frames).not.toContain(7);
+    expect(frames).toEqual([...new Set(frames)].sort((left, right) => left - right));
+  });
+
+  it('jumps to adjacent distinct keyframes, pauses, and does not wrap at the ends', () => {
+    const seek = vi.fn((frame: number) => useTimelineStore.getState().setCurrentFrame(frame));
+    const pause = vi.fn(() => useTimelineStore.getState().setPlaying(false));
+    useTimelineStore.setState({
+      currentFrame: 10,
+      isPlaying: true,
+      previewLoopLayerId: 'loop',
+      controller: { seek, pause, play: vi.fn(), stop: vi.fn() },
+    });
+    expect(jumpTimelineKeyframe([0, 10, 24, 40], 1)).toBe(true);
+    expect(jumpTimelineKeyframe([0, 10, 24, 40], 1)).toBe(true);
+    expect(jumpTimelineKeyframe([0, 10, 24, 40], -1)).toBe(true);
+    expect(seek.mock.calls).toEqual([[24], [40], [24]]);
+    expect(useTimelineStore.getState()).toMatchObject({
+      currentFrame: 24,
+      isPlaying: false,
+      previewLoopLayerId: null,
+    });
+    useTimelineStore.getState().setCurrentFrame(40);
+    expect(jumpTimelineKeyframe([0, 10, 24, 40], 1)).toBe(true);
+    expect(seek.mock.calls).toHaveLength(3);
+    expect(pause).toHaveBeenCalledTimes(4);
   });
 
   it('pauses and advances once per event using the latest playhead', () => {

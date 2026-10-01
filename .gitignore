@@ -16,6 +16,11 @@ npm-debug.log*
 
 *.tsbuildinfo
 
+# Local Studio authoring/export output and imported test media.
+/Exports/
+/Projects/
+/assets/whatsapp-video-ed285c2d.mp4
+
 # Keep internal planning and agent-session documents out of the community repository.
 /AGENTS.md
 /CLAUDE.md

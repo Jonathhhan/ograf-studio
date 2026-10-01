@@ -18,6 +18,7 @@ import type {
   LayerTransform,
   LayerLoopClip,
   GradientPaint,
+  MediaCue,
 } from '@ograf-editor/scene-model';
 
 export interface CompiledLayerBinding {
@@ -27,6 +28,30 @@ export interface CompiledLayerBinding {
   /** Runtime-expanded collection item index; absent for ordinary/object bindings. */
   itemIndex?: number;
   valueMap?: Record<string, string | number | boolean | GradientPaint>;
+}
+
+/** A data comparison with field ids resolved to the runtime data keys. */
+export interface CompiledVisualRuleCondition {
+  dataKey: string;
+  sourcePath: string[];
+  operator: import('@ograf-editor/scene-model').VisualRuleOperator;
+  value?: unknown;
+  compareDataKey?: string;
+  compareSourcePath?: string[];
+  ignoreCase?: boolean;
+}
+
+export interface CompiledLayerVisualRule extends CompiledVisualRuleCondition {
+  id: string;
+  name: string;
+  enabled: boolean;
+  trigger?: import('@ograf-editor/scene-model').VisualRuleTrigger;
+  conditions?: CompiledVisualRuleCondition[];
+  match?: import('@ograf-editor/scene-model').VisualRuleMatch;
+  eventId?: string;
+  delayFrames?: number;
+  /** Action targets are compiled layer ids; guide and other omitted targets are dropped. */
+  actions: import('@ograf-editor/scene-model').VisualRuleAction[];
 }
 
 export interface CompiledFontResource {
@@ -58,12 +83,31 @@ export interface CompiledLayer {
   bindings: CompiledLayerBinding[];
   /** Legacy editor-generated descriptors before document v11. */
   binding?: CompiledLayerBinding | null;
+  visualRules?: CompiledLayerVisualRule[];
   /** Runtime-only clipping relation; general authoring parent metadata remains compiled away. */
   clipParentId?: string | null;
+  /** Runtime flow relation retained only when the parent owns Auto layout. */
+  layoutParentId?: string | null;
+  autoLayout?: import('@ograf-editor/scene-model').LayerAutoLayout;
+  updateTransition?: import('@ograf-editor/scene-model').LayerUpdateTransition;
+  motionPath?: import('@ograf-editor/scene-model').LayerMotionPath | null;
   isMaskOnly?: boolean;
   mask?: import('@ograf-editor/scene-model').LayerMask | null;
   /** Runtime-only visibility/data identity for one bounded collection slot. */
-  collectionItem?: { collectionId: string; dataKey: string; index: number };
+  collectionItem?: {
+    collectionId: string;
+    dataKey: string;
+    slot: number;
+    capacity: number;
+    itemKeyPath: string[];
+    sortPath: string[];
+    sortDirection: 'none' | 'ascending' | 'descending';
+    pageSize: number;
+    page: number;
+    offsetPerItem: { x: number; y: number };
+    /** Authored layer this row copies; rules aimed at the prototype drive every row. */
+    prototypeLayerId?: string;
+  };
 }
 
 export interface CompiledRuntimeCollection {
@@ -75,6 +119,11 @@ export interface CompiledRuntimeCollection {
   offsetPerItem: { x: number; y: number };
   capacity: number;
   overflow: 'truncate';
+  itemKeyPath: string[];
+  sortPath: string[];
+  sortDirection: 'none' | 'ascending' | 'descending';
+  pageSize: number;
+  page: number;
 }
 
 export type CompiledPaintOrderEntry =
@@ -113,6 +162,8 @@ export interface CompiledCustomActionRef {
   /** The OGraf customAction id (FieldDefinition/CustomActionDefinition's `actionId`, resolved). */
   id: string;
   name: string;
+  /** Longest authored custom-action clip, used for manifest scheduling metadata. */
+  durationFrames: number;
 }
 
 /** A flattened, runtime-ready representation of a Composition — what `GraphicElement` interprets. */
@@ -122,7 +173,9 @@ export interface CompiledGraphicDescriptor {
   backgroundColor: string;
   frameRate: number;
   updateTransitionFrames?: number;
+  updateInterruption?: 'queue' | 'replace';
   fonts?: CompiledFontResource[];
+  mediaCues?: MediaCue[];
   layers: CompiledLayer[];
   /** Bounded array-driven prototypes expanded by the packaged runtime. */
   collections?: CompiledRuntimeCollection[];

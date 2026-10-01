@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type DragEvent } from 'react';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useSelectionStore } from '../state/selectionStore';
 import { Panel } from './Panel';
+import { CollapsibleSection } from '../components/CollapsibleSection';
 import { selectionIdsForLayer } from '../canvas/groupSelection';
 import {
   canAssignLayerParent,
@@ -68,157 +69,163 @@ export function LayerListPanel() {
 
   return (
     <Panel title="Layers">
-      {layers.length === 0 ? (
-        <p className="panel-placeholder">No layers yet. Add one from the canvas toolbar.</p>
-      ) : (
-        <>
-          <p className="layer-list-drag-hint">
-            Row centre parents · edges reorder · drop in AI Assistant to reference
-          </p>
-          <ul className="layer-list">
-            {layers.map((layer) => {
-              const depth = layerIndentDepth(composition.layers, layer.id);
-              const parent = layer.parentId
-                ? composition.layers.find((candidate) => candidate.id === layer.parentId)
-                : null;
-              const targetIntent = dropTarget?.layerId === layer.id ? dropTarget.intent : null;
-              return (
-                <li
-                  key={layer.id}
-                  draggable
-                  className={[
-                    selectedLayerIds.includes(layer.id) && 'active',
-                    layer.id === draggedId && 'dragging',
-                    targetIntent && draggedId && draggedId !== layer.id && `drop-${targetIntent}`,
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                  onClick={(event) => {
-                    const selectionIds = selectionIdsForLayer(composition, layer.id);
-                    if (event.ctrlKey || event.metaKey) toggleManyLayerSelection(selectionIds);
-                    else selectMany(selectionIds);
-                  }}
-                  onDragStart={(e: DragEvent<HTMLLIElement>) => {
-                    e.dataTransfer.effectAllowed = layer.isLocked ? 'copy' : 'copyMove';
-                    e.dataTransfer.setData(
-                      AGENT_LAYER_REFERENCE_MIME,
-                      encodeAgentLayerReference({
-                        layerId: layer.id,
-                        name: layer.name,
-                        elementType: layer.element.type,
-                      }),
-                    );
-                    if (!layer.isLocked) {
-                      e.dataTransfer.setData('text/plain', layer.id);
-                      setDraggedId(layer.id);
-                    }
-                  }}
-                  onDragOver={(e: DragEvent<HTMLLIElement>) => {
-                    e.preventDefault();
-                    if (!draggedId || draggedId === layer.id) {
-                      e.dataTransfer.dropEffect = 'none';
+      <CollapsibleSection
+        sectionId="layers.stack"
+        title={`Layer stack (${layers.length})`}
+        contentClassName="layer-list-section-content"
+      >
+        {layers.length === 0 ? (
+          <p className="panel-placeholder">No layers yet. Add one from the canvas toolbar.</p>
+        ) : (
+          <>
+            <p className="layer-list-drag-hint">
+              Drag onto a row to parent · onto a row edge to reorder · into AI Assistant to mention
+            </p>
+            <ul className="layer-list">
+              {layers.map((layer) => {
+                const depth = layerIndentDepth(composition.layers, layer.id);
+                const parent = layer.parentId
+                  ? composition.layers.find((candidate) => candidate.id === layer.parentId)
+                  : null;
+                const targetIntent = dropTarget?.layerId === layer.id ? dropTarget.intent : null;
+                return (
+                  <li
+                    key={layer.id}
+                    draggable
+                    className={[
+                      selectedLayerIds.includes(layer.id) && 'active',
+                      layer.id === draggedId && 'dragging',
+                      targetIntent && draggedId && draggedId !== layer.id && `drop-${targetIntent}`,
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={(event) => {
+                      const selectionIds = selectionIdsForLayer(composition, layer.id);
+                      if (event.ctrlKey || event.metaKey) toggleManyLayerSelection(selectionIds);
+                      else selectMany(selectionIds);
+                    }}
+                    onDragStart={(e: DragEvent<HTMLLIElement>) => {
+                      e.dataTransfer.effectAllowed = layer.isLocked ? 'copy' : 'copyMove';
+                      e.dataTransfer.setData(
+                        AGENT_LAYER_REFERENCE_MIME,
+                        encodeAgentLayerReference({
+                          layerId: layer.id,
+                          name: layer.name,
+                          elementType: layer.element.type,
+                        }),
+                      );
+                      if (!layer.isLocked) {
+                        e.dataTransfer.setData('text/plain', layer.id);
+                        setDraggedId(layer.id);
+                      }
+                    }}
+                    onDragOver={(e: DragEvent<HTMLLIElement>) => {
+                      e.preventDefault();
+                      if (!draggedId || draggedId === layer.id) {
+                        e.dataTransfer.dropEffect = 'none';
+                        setDropTarget(null);
+                        return;
+                      }
+                      const bounds = e.currentTarget.getBoundingClientRect();
+                      const intent = layerDropIntent(e.clientY, bounds.top, bounds.height);
+                      if (
+                        intent === 'parent' &&
+                        !canAssignLayerParent(composition.layers, draggedId, layer.id)
+                      ) {
+                        e.dataTransfer.dropEffect = 'none';
+                        setDropTarget(null);
+                        return;
+                      }
+                      e.dataTransfer.dropEffect = 'move';
+                      setDropTarget({ layerId: layer.id, intent });
+                    }}
+                    onDragLeave={(event) => {
+                      if (
+                        isDomNode(event.relatedTarget) &&
+                        event.currentTarget.contains(event.relatedTarget)
+                      )
+                        return;
+                      setDropTarget((current) => (current?.layerId === layer.id ? null : current));
+                    }}
+                    onDrop={(e: DragEvent<HTMLLIElement>) => {
+                      e.preventDefault();
+                      const bounds = e.currentTarget.getBoundingClientRect();
+                      handleDrop(layer.id, layerDropIntent(e.clientY, bounds.top, bounds.height));
+                      setDraggedId(null);
                       setDropTarget(null);
-                      return;
-                    }
-                    const bounds = e.currentTarget.getBoundingClientRect();
-                    const intent = layerDropIntent(e.clientY, bounds.top, bounds.height);
-                    if (
-                      intent === 'parent' &&
-                      !canAssignLayerParent(composition.layers, draggedId, layer.id)
-                    ) {
-                      e.dataTransfer.dropEffect = 'none';
+                    }}
+                    onDragEnd={() => {
+                      setDraggedId(null);
                       setDropTarget(null);
-                      return;
-                    }
-                    e.dataTransfer.dropEffect = 'move';
-                    setDropTarget({ layerId: layer.id, intent });
-                  }}
-                  onDragLeave={(event) => {
-                    if (
-                      isDomNode(event.relatedTarget) &&
-                      event.currentTarget.contains(event.relatedTarget)
-                    )
-                      return;
-                    setDropTarget((current) => (current?.layerId === layer.id ? null : current));
-                  }}
-                  onDrop={(e: DragEvent<HTMLLIElement>) => {
-                    e.preventDefault();
-                    const bounds = e.currentTarget.getBoundingClientRect();
-                    handleDrop(layer.id, layerDropIntent(e.clientY, bounds.top, bounds.height));
-                    setDraggedId(null);
-                    setDropTarget(null);
-                  }}
-                  onDragEnd={() => {
-                    setDraggedId(null);
-                    setDropTarget(null);
-                  }}
-                >
-                  <span
-                    className="layer-list-drag-handle"
-                    title="Drag to parent/reorder, or drop in AI Assistant to reference this layer"
-                  >
-                    {'⠿'}
-                  </span>
-                  <button
-                    type="button"
-                    className={`layer-list-icon-btn layer-list-visibility-btn${layer.isVisible ? ' is-visible' : ''}`}
-                    title={layer.isVisible ? 'Hide layer' : 'Show layer'}
-                    aria-label={layer.isVisible ? 'Hide layer' : 'Show layer'}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleLayerVisibility(layer.id);
                     }}
                   >
-                    <LayerVisibilityIcon visible={layer.isVisible} />
-                  </button>
-                  <span
-                    className="layer-list-name"
-                    style={{ '--layer-depth': depth } as CSSProperties}
-                    title={parent ? `${layer.name} · child of ${parent.name}` : layer.name}
-                  >
-                    {layer.groupId ? '● ' : ''}
-                    {layer.name}
-                  </span>
-                  <button
-                    type="button"
-                    className={`layer-list-icon-btn${layer.isLocked ? ' active' : ''}`}
-                    title={layer.isLocked ? 'Unlock layer' : 'Lock layer'}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleLayerLock(layer.id);
-                    }}
-                  >
-                    {layer.isLocked ? '🔒' : '🔓'}
-                  </button>
-                  <button
-                    type="button"
-                    className={`layer-list-icon-btn${layer.isGuide ? ' active' : ''}`}
-                    title="Toggle guide layer (excluded from export)"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleLayerGuide(layer.id);
-                    }}
-                  >
-                    G
-                  </button>
-                  <button
-                    type="button"
-                    className="layer-list-icon-btn"
-                    title="Delete layer"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeLayer(layer.id);
-                      if (selectedLayerIds.includes(layer.id)) deselectLayer(layer.id);
-                    }}
-                  >
-                    {'✕'}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </>
-      )}
+                    <span
+                      className="layer-list-drag-handle"
+                      title="Drag to parent/reorder, or drop in AI Assistant to reference this layer"
+                    >
+                      {'⠿'}
+                    </span>
+                    <button
+                      type="button"
+                      className={`layer-list-icon-btn layer-list-visibility-btn${layer.isVisible ? ' is-visible' : ''}`}
+                      title={layer.isVisible ? 'Hide layer' : 'Show layer'}
+                      aria-label={layer.isVisible ? 'Hide layer' : 'Show layer'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleLayerVisibility(layer.id);
+                      }}
+                    >
+                      <LayerVisibilityIcon visible={layer.isVisible} />
+                    </button>
+                    <span
+                      className="layer-list-name"
+                      style={{ '--layer-depth': depth } as CSSProperties}
+                      title={parent ? `${layer.name} · child of ${parent.name}` : layer.name}
+                    >
+                      {layer.groupId ? '● ' : ''}
+                      {layer.name}
+                    </span>
+                    <button
+                      type="button"
+                      className={`layer-list-icon-btn${layer.isLocked ? ' active' : ''}`}
+                      title={layer.isLocked ? 'Unlock layer' : 'Lock layer'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleLayerLock(layer.id);
+                      }}
+                    >
+                      {layer.isLocked ? '🔒' : '🔓'}
+                    </button>
+                    <button
+                      type="button"
+                      className={`layer-list-icon-btn${layer.isGuide ? ' active' : ''}`}
+                      title="Toggle guide layer (excluded from export)"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleLayerGuide(layer.id);
+                      }}
+                    >
+                      G
+                    </button>
+                    <button
+                      type="button"
+                      className="layer-list-icon-btn"
+                      title="Delete layer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeLayer(layer.id);
+                        if (selectedLayerIds.includes(layer.id)) deselectLayer(layer.id);
+                      }}
+                    >
+                      {'✕'}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+      </CollapsibleSection>
     </Panel>
   );
 }

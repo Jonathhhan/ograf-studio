@@ -180,7 +180,7 @@ export function AddElementToolbar() {
       {selectedLayerIds.length > 0 && (
         <button
           type="button"
-          title="Materialize the selected item as a three-item horizontal data repeater"
+          title="Turn the selection into a data-driven row of three copies"
           onClick={() => {
             const repeater = addRepeater(selectedLayerIds);
             if (repeater) {
@@ -188,7 +188,7 @@ export function AddElementToolbar() {
             }
           }}
         >
-          Repeat ×3
+          Repeat selection ×3
         </button>
       )}
       <div className="element-tools" role="group" aria-label="Add element">

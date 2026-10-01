@@ -7,6 +7,12 @@ export { applyCompiledMasks } from './maskRendering';
 export { renderPatternAtElapsed } from './patternRendering';
 export { shaderStrokePaddingForLayer, updateShaderPaintUniforms } from './shaderPaintRendering';
 export {
+  disposeMediaPaintContent,
+  mediaFitRect,
+  renderMediaPaintAtTime,
+  waitForMediaPaintContentReady,
+} from './mediaPaintRendering';
+export {
   createShaderRenderer,
   shaderBackingSizeForLayer,
   shaderTimeSeconds,
@@ -34,6 +40,20 @@ export {
   sampleCompiledLayerVisualState,
   type CompiledLayerVisualState,
 } from './loopRendering';
+export { applyCompiledAutoLayout } from './autoLayoutRendering';
+export { applyCompiledMotionPaths } from './motionPathRendering';
+export { resolveMediaTimelinePosition } from './mediaTimeline';
+export { MediaCueRuntime, mediaCueAutomaticStartMs } from './mediaCueRuntime';
+export {
+  createRuntimeVisualRuleEngine,
+  layerHasRuntimeVisualInputs,
+  resolveVisualRuleEffects,
+  resolveVisualRuleElement,
+  RuntimeVisualRules,
+  visualRuleEffectFor,
+  visualRuleLayerVisible,
+  type RuntimeVisualRuleEffect,
+} from './runtimeVisualRules';
 export { expandRuntimeCollections, isRuntimeCollectionLayerActive } from './runtimeCollections';
 export { resolvePlayTarget, type LifecycleTarget } from './lifecycle';
 

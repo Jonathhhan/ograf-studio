@@ -1,4 +1,11 @@
 import { previewBindingData } from '../state/dataBinding';
+import {
+  copyLayers as copyLayerSelection,
+  deleteLayers as deleteLayerSelection,
+  groupLayers as groupLayerSelection,
+  pasteLayers as pasteLayerClipboard,
+  ungroupLayers as ungroupLayerSelection,
+} from '../state/layerCommands';
 import { useTestDataStore } from '../state/testDataStore';
 import {
   useCallback,
@@ -26,6 +33,7 @@ import {
   normalizeAuthoredTransformPatch,
   type Layer,
   type LayerTransform,
+  type TextElement,
 } from '@ograf-editor/scene-model';
 import { ContextMenu } from '../components/ContextMenu';
 import { useLayerClipboardStore } from '../state/layerClipboardStore';
@@ -35,6 +43,9 @@ import {
   applyCompiledClipPaths,
   applyCompiledMasks,
   applyCompiledLayerVisualState,
+  applyCompiledAutoLayout,
+  applyCompiledMotionPaths,
+  MediaCueRuntime,
   sampleCompiledLayerVisualState,
 } from '@ograf-editor/ograf-runtime';
 import { LayerNode } from './LayerNode';
@@ -72,6 +83,8 @@ import { ShaderPreviewClock } from './shaderPreviewClock';
 import { StageLoopPreviewClock } from './stageLoopPreviewClock';
 import { isInteractiveShortcutTarget } from '../state/keyboardShortcuts';
 import { duplicateLayerSelection } from '../state/editorShortcuts';
+import { inlineTextEditTarget } from './inlineTextEditing';
+import { measureAutoSizedText } from '../panels/textAutoSize';
 import './Stage.css';
 
 export function Stage({ style }: { style?: CSSProperties }) {
@@ -80,6 +93,15 @@ export function Stage({ style }: { style?: CSSProperties }) {
   const pathFrame = useTimelineStore((s) => (pathLayerId ? s.currentFrame : 0));
   const imagePlacement = useImagePlacement();
   const [draggingImages, setDraggingImages] = useState(false);
+  const [inlineTextEditingLayerId, setInlineTextEditingLayerId] = useState<string | null>(null);
+  const [inlineTextCaretPoint, setInlineTextCaretPoint] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [inlineTextPreview, setInlineTextPreview] = useState<{
+    layerId: string;
+    transform: Partial<LayerTransform>;
+  } | null>(null);
   const composition = useActiveComposition();
   const shaderClockRef = useRef<{
     compositionId: string;
@@ -104,28 +126,69 @@ export function Stage({ style }: { style?: CSSProperties }) {
   const loopPreviewClock = shaderClockRef.current.loopClock;
   const previewLoopLayerId = useTimelineStore((state) => state.previewLoopLayerId);
   const updateLayerTransform = useProjectStore((s) => s.updateLayerTransform);
-  const pasteLayers = useProjectStore((s) => s.pasteLayers);
+  const updateLayerElement = useProjectStore((s) => s.updateLayerElement);
+  const setTestValue = useTestDataStore((s) => s.setValue);
   const removeLayer = useProjectStore((s) => s.removeLayer);
   const removeLayerKeyframe = useProjectStore((s) => s.removeLayerKeyframe);
-  const groupLayers = useProjectStore((s) => s.groupLayers);
-  const ungroupLayers = useProjectStore((s) => s.ungroupLayers);
   const selectedLayerId = useSelectionStore((s) => s.selectedLayerId);
   const selectedLayerIds = useSelectionStore((s) => s.selectedLayerIds);
   const selectedLayerKeyframeId = useSelectionStore((s) => s.selectedLayerKeyframeId);
   const select = useSelectionStore((s) => s.select);
   const selectMany = useSelectionStore((s) => s.selectMany);
+  const deselectAll = useSelectionStore((s) => s.deselectAll);
   const toggleManyLayerSelection = useSelectionStore((s) => s.toggleManyLayerSelection);
   const clearLayerKeyframe = useSelectionStore((s) => s.clearLayerKeyframe);
   const setLiveTransform = useSelectionStore((s) => s.setLiveTransform);
   const clearLiveTransform = useSelectionStore((s) => s.clearLiveTransform);
   const clipboardLayers = useLayerClipboardStore((s) => s.layers);
-  const copyLayers = useLayerClipboardStore((s) => s.copy);
 
   const setCurrentFrame = useTimelineStore((s) => s.setCurrentFrame);
   const isPlaying = useTimelineStore((s) => s.isPlaying);
   const setPlaying = useTimelineStore((s) => s.setPlaying);
   const setDurationFrames = useTimelineStore((s) => s.setDurationFrames);
   const setController = useTimelineStore((s) => s.setController);
+
+  const commitInlineText = useCallback(
+    (layer: Layer, value: string) => {
+      const target = inlineTextEditTarget(layer, composition.dataFields);
+      if (!target) return;
+      if (target.type === 'test-data') {
+        setTestValue(target.fieldId, value, composition.layers, composition.dataFields);
+        return;
+      }
+      if (layer.element.type !== 'text') return;
+      const element: TextElement = { ...layer.element, content: value, runs: [] };
+      updateLayerElement(layer.id, { content: value, runs: [] });
+      if (element.autoFit === 'auto-size')
+        updateLayerTransform(
+          layer.id,
+          Math.round(useTimelineStore.getState().currentFrame),
+          measureAutoSizedText(element),
+        );
+    },
+    [
+      composition.dataFields,
+      composition.layers,
+      setTestValue,
+      updateLayerElement,
+      updateLayerTransform,
+    ],
+  );
+  const handleInlineTextEditingChange = useCallback(
+    (layerId: string, editing: boolean, caretPoint?: { x: number; y: number }) => {
+      setInlineTextEditingLayerId(editing ? layerId : null);
+      setInlineTextCaretPoint(editing ? (caretPoint ?? null) : null);
+      if (!editing) setInlineTextPreview(null);
+    },
+    [],
+  );
+  const previewInlineText = useCallback((layer: Layer, value: string) => {
+    if (layer.element.type !== 'text' || layer.element.autoFit !== 'auto-size') return;
+    setInlineTextPreview({
+      layerId: layer.id,
+      transform: measureAutoSizedText({ ...layer.element, content: value, runs: [] }),
+    });
+  }, []);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -318,25 +381,16 @@ export function Stage({ style }: { style?: CSSProperties }) {
       ])
     : undefined;
 
-  const snapshotLayers = (layerIds: string[]): Layer[] => {
-    const wanted = new Set(layerIds);
-    return composition.layers
-      .filter((layer) => wanted.has(layer.id))
-      .map((layer) => structuredClone(layer));
-  };
-
   const copyLayerIds = (layerIds: string[]) => {
-    copyLayers(snapshotLayers(layerIds));
+    copyLayerSelection(layerIds);
   };
 
   const deleteLayerIds = (layerIds: string[]) => {
-    for (const layerId of layerIds) removeLayer(layerId);
-    select(null);
+    deleteLayerSelection(layerIds);
   };
 
   const pasteClipboardLayers = () => {
-    if (clipboardLayers.length === 0) return;
-    selectMany(pasteLayers(clipboardLayers));
+    pasteLayerClipboard();
   };
 
   const handleCanvasContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -666,6 +720,12 @@ export function Stage({ style }: { style?: CSSProperties }) {
     const frameRate = composition.frameRate;
     const durationFrames = getTotalFrames(composition);
     const wasPlaying = useTimelineStore.getState().isPlaying;
+    const descriptor = compileDescriptor(composition, { includeGuides: true });
+    const mediaCueHost = document.createElement('div');
+    mediaCueHost.dataset.ografStudioMediaCues = 'true';
+    mediaCueHost.style.display = 'none';
+    document.body.appendChild(mediaCueHost);
+    const mediaCueRuntime = new MediaCueRuntime(mediaCueHost, descriptor);
 
     timelineRef.current?.kill();
     const tl = buildMasterTimeline(composition, layerRefs.current);
@@ -678,7 +738,11 @@ export function Stage({ style }: { style?: CSSProperties }) {
     const currentFrame = useTimelineStore.getState().currentFrame;
     tl.seek(currentFrame / frameRate, true);
 
-    tl.eventCallback('onUpdate', () => setCurrentFrame(tl.time() * frameRate));
+    tl.eventCallback('onUpdate', () => {
+      const timelineTimeMs = tl.time() * 1000;
+      setCurrentFrame(tl.time() * frameRate);
+      if (useTimelineStore.getState().isPlaying) mediaCueRuntime.renderAtTime(timelineTimeMs);
+    });
     tl.eventCallback('onComplete', () => {
       shaderPreviewClock.pause(performance.now());
       setPlaying(false);
@@ -691,6 +755,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
         segmentTween = null;
         tl.pause();
         setPlaying(false);
+        mediaCueRuntime.reset();
         tl.seek(Math.max(0, Math.min(durationFrames, frame)) / frameRate, true);
         setCurrentFrame(tl.time() * frameRate);
         shaderPreviewClock.seek(tl.time() * 1000);
@@ -699,10 +764,13 @@ export function Stage({ style }: { style?: CSSProperties }) {
         // GSAP remains at its completed position after reaching the end. A transport's Play
         // button is expected to start again, rather than appearing to do nothing.
         if (tl.time() >= tl.duration()) {
+          mediaCueRuntime.reset();
           tl.seek(0, true);
           setCurrentFrame(0);
           shaderPreviewClock.seek(0);
         }
+        mediaCueRuntime.resumeBlocked();
+        mediaCueRuntime.renderAtTime(tl.time() * 1000);
         shaderPreviewClock.play(performance.now());
         setPlaying(true);
         const current = tl.time() * frameRate;
@@ -729,6 +797,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
         segmentTween?.kill();
         segmentTween = null;
         tl.pause();
+        mediaCueRuntime.reset();
         shaderPreviewClock.pause(performance.now());
         setPlaying(false);
       },
@@ -736,6 +805,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
         segmentTween?.kill();
         segmentTween = null;
         tl.pause();
+        mediaCueRuntime.reset();
         tl.seek(0, true);
         setCurrentFrame(0);
         shaderPreviewClock.seek(0);
@@ -751,6 +821,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
     return () => {
       segmentTween?.kill();
       tl.kill();
+      mediaCueRuntime.dispose();
       if (useTimelineStore.getState().controller === controller) setController(null);
     };
   }, [
@@ -768,7 +839,13 @@ export function Stage({ style }: { style?: CSSProperties }) {
   useEffect(() => {
     const descriptor = compileDescriptor(composition, { includeGuides: true });
     const loopLayers = descriptor.layers.filter(
-      (layer) => layer.loop || layer.lighting || layer.element.type === 'pattern',
+      (layer) =>
+        layer.loop ||
+        layer.lighting ||
+        layer.element.type === 'pattern' ||
+        layer.layoutParentId ||
+        layer.autoLayout?.direction !== 'none' ||
+        layer.motionPath,
     );
     if (loopLayers.length === 0) return;
     const previewTimeline = timelineRef.current;
@@ -801,8 +878,18 @@ export function Stage({ style }: { style?: CSSProperties }) {
           previewBindingData(composition.dataFields, useTestDataStore.getState().values),
         );
         states.set(layer.id, state);
+      }
+      applyCompiledAutoLayout(
+        descriptor,
+        states,
+        previewBindingData(composition.dataFields, useTestDataStore.getState().values),
+        layerRefs.current,
+      );
+      applyCompiledMotionPaths(descriptor, states);
+      for (const layer of descriptor.layers) {
+        const state = states.get(layer.id);
         const element = layerRefs.current.get(layer.id);
-        if (element) applyCompiledLayerVisualState(element, state, contentTimeMs);
+        if (element && state) applyCompiledLayerVisualState(element, state, contentTimeMs);
       }
       applyCompiledClipPaths(descriptor, layerRefs.current, states);
       applyCompiledMasks(descriptor, layerRefs.current, states);
@@ -937,6 +1024,27 @@ export function Stage({ style }: { style?: CSSProperties }) {
               });
           }}
           onPointerDownCapture={beginViewportPan}
+          onDoubleClickCapture={(event) => {
+            if (isPlaying || editingPath) return;
+            const layer = [...composition.layers].reverse().find((candidate) => {
+              if (!inlineTextEditTarget(candidate, composition.dataFields)) return false;
+              const element = layerRefs.current.get(candidate.id);
+              if (!element) return false;
+              const bounds = element.getBoundingClientRect();
+              return (
+                event.clientX >= bounds.left &&
+                event.clientX <= bounds.right &&
+                event.clientY >= bounds.top &&
+                event.clientY <= bounds.bottom
+              );
+            });
+            if (!layer) return;
+            event.preventDefault();
+            event.stopPropagation();
+            selectMany(selectionIdsForLayer(composition, layer.id));
+            setInlineTextEditingLayerId(layer.id);
+            setInlineTextCaretPoint({ x: event.clientX, y: event.clientY });
+          }}
           onPointerMoveCapture={updateViewportPan}
           onPointerUpCapture={endViewportPan}
           onPointerCancelCapture={endViewportPan}
@@ -949,6 +1057,16 @@ export function Stage({ style }: { style?: CSSProperties }) {
           }}
           onAuxClick={(event) => {
             if (event.button === 1) event.preventDefault();
+          }}
+          onMouseDown={(event) => {
+            if (event.button !== 0 || editingPath) return;
+            const target = event.target as HTMLElement;
+            if (
+              target.closest?.('.canvas-stage-frame') ||
+              target.closest?.('.moveable-control-box')
+            )
+              return;
+            deselectAll();
           }}
           onContextMenu={handleCanvasContextMenu}
           onScroll={(event) => {
@@ -998,7 +1116,11 @@ export function Stage({ style }: { style?: CSSProperties }) {
               >
                 {composition.layers.map((layer) => {
                   const frame = useTimelineStore.getState().currentFrame;
-                  const pose = getLayerTransformAtFrame(layer, frame);
+                  const authoredPose = getLayerTransformAtFrame(layer, frame);
+                  const pose =
+                    inlineTextPreview?.layerId === layer.id
+                      ? { ...authoredPose, ...inlineTextPreview.transform }
+                      : authoredPose;
                   const parent = layer.parentId
                     ? composition.layers.find(
                         (candidate) => candidate.id === layer.parentId && candidate.clipChildren,
@@ -1044,6 +1166,16 @@ export function Stage({ style }: { style?: CSSProperties }) {
                       compositionFrameRate={composition.frameRate}
                       shaderPreviewClock={shaderPreviewClock}
                       patterns={composition.patterns}
+                      allowInlineTextEditing={!isPlaying && !editingPath}
+                      editingInlineText={inlineTextEditingLayerId === layer.id}
+                      inlineTextCaretPoint={
+                        inlineTextEditingLayerId === layer.id
+                          ? (inlineTextCaretPoint ?? undefined)
+                          : undefined
+                      }
+                      onCommitInlineText={commitInlineText}
+                      onPreviewInlineText={previewInlineText}
+                      onInlineTextEditingChange={handleInlineTextEditingChange}
                     />
                   );
                 })}
@@ -1056,7 +1188,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
               style={{ width: composition.width * zoom, height: composition.height * zoom }}
             />
           </div>
-          {moveableTarget && !isPlaying && !editingPath && (
+          {moveableTarget && !isPlaying && !editingPath && !inlineTextEditingLayerId && (
             <Moveable
               key={isGroupSelection ? 'group-selection' : 'single-selection'}
               ref={moveableRef}
@@ -1244,11 +1376,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
                     id: 'ungroup',
                     label: 'Ungroup',
                     separatorBefore: true,
-                    onSelect: () => {
-                      const primary = objectMenu.layerIds.at(-1) ?? null;
-                      ungroupLayers(objectMenu.layerIds);
-                      select(primary);
-                    },
+                    onSelect: () => ungroupLayerSelection(objectMenu.layerIds),
                   },
                 ]
               : [
@@ -1257,9 +1385,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
                     label: 'Group',
                     separatorBefore: true,
                     disabled: objectMenu.layerIds.length < 2,
-                    onSelect: () => {
-                      if (groupLayers(objectMenu.layerIds)) selectMany(objectMenu.layerIds);
-                    },
+                    onSelect: () => groupLayerSelection(objectMenu.layerIds),
                   },
                 ]),
             {

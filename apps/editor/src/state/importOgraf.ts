@@ -10,6 +10,7 @@ import {
   createTransition,
   defaultValueForFieldType,
   getResolvedLayerAnimationTracks,
+  isMediaPaint,
   isProjectSourcePath,
   migrateProject,
   PROJECT_DOCUMENT_VERSION,
@@ -122,6 +123,10 @@ function mimeTypeForPath(path: string): string {
       return 'image/webp';
     case 'svg':
       return 'image/svg+xml';
+    case 'mp4':
+      return 'video/mp4';
+    case 'webm':
+      return 'video/webm';
     default:
       return 'application/octet-stream';
   }
@@ -709,14 +714,19 @@ function makeAssetResolver(
       return source;
     }
     const mimeType = mimeTypeForPath(path);
-    if (!mimeType.startsWith('image/')) {
+    if (!mimeType.startsWith('image/') && !mimeType.startsWith('video/')) {
       warnings.push(
         `Resource "${path}" is not a supported editor image asset and was left unchanged.`,
       );
       return source;
     }
     const dataUri = `data:${mimeType};base64,${bytesToBase64(bytes)}`;
-    const asset = createAsset({ name: fileNameFromPath(path), dataUri, mimeType });
+    const asset = createAsset({
+      name: fileNameFromPath(path),
+      dataUri,
+      mimeType,
+      kind: mimeType.startsWith('video/') ? 'media' : 'image',
+    });
     assets.push(asset);
     const reference = `asset:${asset.id}`;
     referenceBySource.set(source, reference);
@@ -788,6 +798,28 @@ function projectFromDescriptor(
       element.src = resolveAsset(element.src, mainDirectory);
     if (element.type === 'image-sequence') {
       element.frames = element.frames.map((frame) => resolveAsset(frame, mainDirectory));
+    }
+    if ('fill' in element && isMediaPaint(element.fill)) {
+      element.fill =
+        element.fill.source.kind === 'clip'
+          ? {
+              ...element.fill,
+              source: {
+                ...element.fill.source,
+                src: resolveAsset(element.fill.source.src, mainDirectory),
+              },
+            }
+          : {
+              ...element.fill,
+              source: {
+                ...element.fill.source,
+                ...(element.fill.source.fallback
+                  ? {
+                      fallback: resolveAsset(element.fill.source.fallback, mainDirectory),
+                    }
+                  : {}),
+              },
+            };
     }
     const layer = createLayerOfKind(element.type);
     layer.id = compiled.id;

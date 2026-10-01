@@ -540,6 +540,7 @@ export function reviewCompositionDesign(composition: Composition): DesignQaRepor
 
   for (const layer of composition.layers) {
     if (!layer.loop) continue;
+    if (layer.loop.activation.type === 'customAction') continue;
     if (layer.semantics.tags.includes('qa:allow-loop-seam')) continue;
     for (const [property, keys] of Object.entries(layer.loop.tracks)) {
       if (!keys || keys.length < 2) continue;

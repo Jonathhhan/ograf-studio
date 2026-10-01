@@ -83,8 +83,12 @@ export function hasElementShaderPaint(element: Element): boolean {
 }
 
 export function shaderPaintConflictsWithBinding(element: Element, target: string): boolean {
+  const fill = getElementFill(element);
+  const dynamicFill =
+    isShaderPaint(fill) ||
+    (!!fill && typeof fill === 'object' && 'type' in fill && fill.type === 'media');
   return (
-    (!!getElementShaderPaint(element) && (target === 'fill' || target.startsWith('fill.stops['))) ||
+    (dynamicFill && (target === 'fill' || target.startsWith('fill.stops['))) ||
     (!!getElementShaderPaint(element, 'stroke') && target === 'strokePaint')
   );
 }

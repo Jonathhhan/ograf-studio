@@ -1,7 +1,7 @@
 .resources-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .resources-panel button {
@@ -58,8 +58,8 @@
 
 .resources-tree-branch > summary {
   gap: 6px;
-  min-height: 28px;
-  padding: 2px 7px;
+  min-height: var(--ui-row-height);
+  padding: 1px 5px;
   color: var(--text-heading);
   font-size: 11px;
   font-weight: 600;
@@ -104,8 +104,8 @@
 
 .resources-tree-group {
   display: grid;
-  gap: 5px;
-  padding: 5px;
+  gap: 3px;
+  padding: 3px;
   border-top: 1px solid var(--border);
 }
 
@@ -130,6 +130,27 @@
   padding-left: 10px;
 }
 
+.resources-media-cues {
+  display: grid;
+  gap: 2px;
+  padding: 3px 0 4px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.resources-media-cues-heading {
+  color: var(--text-dim);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.resources-audio-drag-source {
+  cursor: grab;
+}
+
+.resources-audio-drag-source:active {
+  cursor: grabbing;
+}
+
 .resources-tree-item {
   min-width: 0;
   border-left: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
@@ -137,7 +158,7 @@
 
 .resources-tree-item > summary {
   gap: 5px;
-  min-height: 27px;
+  min-height: var(--ui-control-height);
   padding: 2px 4px;
   border-radius: var(--radius-control);
 }
@@ -304,6 +325,11 @@
   border-radius: var(--radius-control);
   border: 1px solid var(--border);
   background: var(--bg-canvas);
+}
+
+.resources-media-thumb {
+  object-fit: cover;
+  background: #111;
 }
 
 .resources-asset-name {

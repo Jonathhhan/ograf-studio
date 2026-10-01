@@ -1,9 +1,9 @@
 .menubar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 40px;
-  padding: 0 10px;
+  gap: 6px;
+  height: 30px;
+  padding: 0 6px;
   background: var(--bg-header);
   border-bottom: 1px solid var(--border);
 }
@@ -64,7 +64,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  padding: 7px 9px;
+  padding: 4px 7px;
   color: var(--text);
   text-align: left;
 }
@@ -152,6 +152,35 @@
   text-align: center;
 }
 
+.menubar-build-info {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  margin-top: 2px;
+  padding: 5px 6px 3px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: var(--ui-font-size-compact);
+  white-space: nowrap;
+}
+
+.menubar-build-info time {
+  display: block;
+  color: color-mix(in srgb, var(--text-dim) 72%, transparent);
+  font: inherit;
+}
+
+.menubar-build-info a {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.menubar-build-info a:is(:hover, :focus-visible) {
+  color: var(--accent-focus);
+  text-decoration: underline;
+  outline: none;
+}
+
 .menubar-status {
   color: var(--text-dim);
   font-size: 11px;
@@ -184,11 +213,11 @@
 }
 
 .menubar-actions button {
-  height: 32px;
+  height: 24px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 2px;
-  padding: 0 10px;
+  padding: 0 6px;
   cursor: pointer;
 }
 
@@ -352,5 +381,26 @@
 
 .remote-project-url-field input:focus {
   border-color: var(--accent);
+  outline: none;
+}
+
+.menubar-menu-separator {
+  height: 1px;
+  margin: 2px 4px;
+  background: var(--border);
+}
+
+.menubar-actions .menubar-window-menu .menubar-menu-link {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.menubar-actions .menubar-window-menu .menubar-menu-link:is(:hover, :focus-visible) {
+  background: var(--bg-hover, rgb(255 255 255 / 6%));
   outline: none;
 }
