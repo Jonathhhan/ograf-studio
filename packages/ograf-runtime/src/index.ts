@@ -5,6 +5,13 @@ export { GraphicElement } from './GraphicElement';
 export { buildRuntimeTimeline } from './buildRuntimeTimeline';
 export { applyCompiledMasks } from './maskRendering';
 export { renderPatternAtElapsed } from './patternRendering';
+export { shaderStrokePaddingForLayer, updateShaderPaintUniforms } from './shaderPaintRendering';
+export {
+  createShaderRenderer,
+  shaderBackingSizeForLayer,
+  shaderTimeSeconds,
+  updateShaderParameters,
+} from './shaderRendering';
 export {
   applyAnimatedPaint,
   disposeElementContent,
@@ -56,3 +63,8 @@ export function registerGraphicElement(descriptor: CompiledGraphicDescriptor): s
   customElements.define(tagName, createGraphicClass(descriptor));
   return tagName;
 }
+export {
+  applyLayerEffectsFilter,
+  disposeLayerEffects,
+  waitForLayerEffectsReady,
+} from './effectCompositing';

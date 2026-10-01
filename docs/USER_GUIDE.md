@@ -116,6 +116,142 @@ A small compatible animation is included at `examples/lottie/pulse.json`. Marker
 playback, dynamic Lottie text/data binding and renderer selection are not supported. Test your
 exported graphic in the intended playout environment.
 
+### Procedural patterns
+
+Choose **Resources → Patterns → Add pattern**, or the pattern tool above the canvas. Pick a
+visual preset—Dots, Stripes, Chevrons, Diamonds, Checkerboard, or Monogram—and choose **Create
+pattern**. Leave **Add to canvas** enabled to place it immediately, or disable it to keep a
+reusable resource for later.
+
+To start from your artwork, select rectangles, ellipses, or paths before opening the picker and
+choose **Use selected shapes**. Their vector silhouettes become the repeating sequence; the
+original objects remain unchanged. In the pattern editor, symbol previews let you replace a
+shape, use a selected vector, or import an SVG silhouette. Text, images, and artwork with unsupported
+SVG features need conversion to plain vector paths first. Source colors belong to the pattern
+layer's fill, so imported symbols supply geometry rather than separate paints.
+
+Adjust size, rows, spacing, row offset, and variation while watching the preview. **Shuffle**
+changes the arrangement's seed. Enable **Animate**, choose a direction and loop duration in
+seconds, and use **Play preview** to inspect motion without moving the main timeline. The
+exported pattern moves while the graphic is on-air and keeps its seamless loop. Detailed SVG
+source, per-row overrides, and shared lighting remain under **Advanced**.
+
+Resources shows each pattern's preview and usage count. **Add to canvas** creates another linked
+layer; **Duplicate** creates a separate resource. Editing shared symbols, layout, or motion updates
+every linked instance. Each layer keeps its own fill, outline, transform, and effects. Choose
+**Make independent** in a pattern layer's Properties to give it its own editable copy. Existing
+patterns retain their original settings until you edit them or choose a preset.
+
+### Blending effects
+
+In **Properties → Effects stack**, new effects start in **Bypass**. Choose **Normal**, **Screen**,
+**Add**, **Multiply**, **Overlay**, **Darken**, or **Lighten** to activate an effect. **Effect opacity**
+sets how much its result contributes. Effects run top-to-bottom: each blends against the result
+entering that effect, while the layer's blend mode still combines the completed layer with the
+composition underneath. Glow and shadow blend only their generated contribution; blur and color
+adjustments blend their processed image. Normal at 100% keeps the original effect behavior.
+
+**Shader** adds a true WebGL 2 post-process pass. Its `iChannel0` is the layer result after every
+preceding stack entry; the Shader output is blended by that entry's Blend and Effect opacity, then
+passed to later effects. Expand the effect to edit or load its `mainImage` source and exposed
+controls. The effect cannot attach a separate `inputImage`, because `iChannel0` is reserved for the
+incoming stack image.
+
+Bypass retains settings and animation. When all effects are bypassed, the object uses its ordinary
+rendering path without effect passes. Existing projects keep their enabled effects and appearance.
+Effect parameters remain animatable; blend mode and effect opacity are static settings.
+
+### Shader fills
+
+Choose **Shader** in an object's **Fill** selector to render a self-contained GLSL `mainImage`
+pass in WebGL 2. Shapes, text, images, image sequences, Lottie, and tiled patterns support shader
+fills. The shader follows the object's shape or source alpha, including animated silhouettes;
+its output alpha preserves transparency. For a full-screen background or rain overlay, use a
+rectangle sized to the composition. Existing shader layers open as rectangles with shader fills.
+
+Edit the source and its declared controls in Properties. Shaders use composition time for
+repeatable scrubbing and OGraf `goToTime()` seeking. For media, choose **Original pixels** to
+remove the shader fill. Shader fills replace visible color; they do not filter source pixels.
+
+Text also has an independent **Outline** paint selector. Choose **Shader** there and set **Stroke
+Width** to animate its border separately from the fill. The object remains editable text: changes
+to Content, font, sizing, or alignment update both paints. Solid and shader paints can be mixed.
+
+**Resources → Shaders** lists saved project shaders. Shader paints already applied to object
+fills and text outlines are edited on that object's **Properties** panel instead of appearing as
+duplicate resources. **New Shader** opens a draft without adding a canvas object.
+Choose **Save shader** to keep it in the project, then drag it onto Fill or Outline when needed;
+**Cancel** discards the new draft. Unused project shaders are retained in editable `.ogs` files.
+Each saved entry has a thumbnail, **Edit**, **Load**, and a remove icon. The editor has an
+editable shader name and a larger animated preview. Changes stay in the window until **Save
+shader**; **Cancel** discards them. **Preview shader** tests source changes in the preview, and
+loading a file opens a draft. Entries are independent, even when their source is identical. Edits
+preserve compatible parameter values and keep the current canvas selection.
+Drag a shader entry from Resources onto an object's **Fill** or text **Outline** row to apply a
+copy of its current source, settings, name, and controls. The destination highlights while dragging;
+the original shader stays independent.
+Removing a saved project shader keeps copies already applied to objects. To detach an applied
+shader, choose Solid or Original pixels from the object's Fill or Outline control in Properties.
+Text returns to its solid fill or outline color, shapes use the selected solid fill, and media shows
+its original pixels. Use **Undo** to restore a change.
+
+Mark literal global constants to create editable controls and OGraf data fields automatically:
+
+```glsl
+#pragma ograf intensity slider min(0) max(2) step(0.1)
+const float intensity = 0.5;
+#pragma ograf tint color
+const vec3 tint = vec3(0.1, 0.3, 0.6);
+#pragma ograf enabled toggle
+const bool enabled = true;
+#pragma ograf offset vector2 min(-1) max(1) step(0.01)
+const vec2 offset = vec2(0.0);
+
+void mainImage(out vec4 color, in vec2 coord) {
+  vec2 uv = coord / iResolution.xy + offset;
+  float wave = 0.5 + 0.5 * sin(uv.x * 8.0 - iTime);
+  color = vec4(tint * intensity * wave, enabled ? 1.0 : 0.0);
+}
+```
+
+`slider` supports `float` and `int`, `color` supports `vec3` and `vec4`, `toggle` supports `bool`,
+and `vector2` supports `vec2`. Literal object-like `#define` constants are also accepted. The
+optional `min(...)`, `max(...)`, and `step(...)` annotations set numeric control limits. Marked
+symbols must be read-only; expressions, conditional declarations, and values needed as compile-time
+constants are rejected when they cannot safely become uniforms.
+
+Every marked symbol gets a normal field in **Data** and a `fill.parameters.NAME` binding. Colors use
+hexadecimal RGB/RGBA strings in OGraf data; vectors use `{ "x": 0, "y": 0 }`. Control edits and
+field defaults stay synchronized. Field keys and labels may be renamed; change the source pragma
+to change a field's type, limits, or presence. Duplicated objects get independent shader fields.
+Changing to Shader detaches incompatible whole-fill and gradient-stop bindings while keeping
+their data fields and Brand Kit tokens available.
+Text outline parameters use `strokePaint.parameters.NAME` and independent fields, so the same
+parameter name can appear in both shaders without sharing its value.
+
+Exposed shader controls can also own keyframes and local loops. Expand the object in **Timeline**,
+enable **Auto-keyframe**, and use **+ Property → Fill shader** or **Outline shader** to choose a
+control. Move the playhead and adjust the control in Properties, or edit a selected key's **Value**
+in the Keyframe editor. With Auto-keyframe off, changing a keyed control offsets its existing keys.
+Select a property and use its **Loop** section to set repeating values and preview the loop.
+
+Float controls use the usual easing and curves. Integers and toggles hold their values until the
+next key; vectors use X/Y tracks and colors use R/G/B/A tracks. Keys follow the limits declared in
+the shader. Keyed channels take precedence over data-bound values while their tracks are active;
+unkeyed channels remain data-driven. Removing the final key returns that channel to its authored/data value. The shader's
+`iTime` clock continues independently. Animation belongs to the object, not a saved library shader.
+Keep exposed names stable: removing declarations or shader paints removes their matching tracks.
+
+The original source and values are saved in `.ogs` and compiled packages. Under **Rendering**, an
+embedded PNG or JPEG can be assigned as a portable static **Image input**. Shadertoy Image code
+samples it as `sampler2D iChannel0`; `iChannelResolution[0]` reports its pixel dimensions. Repeat or
+Clamp wrapping and Linear or Nearest filtering are authored with the shader. The supported profile
+also provides `iTime` and `iResolution`. Additional channels, video, buffer/feedback passes, audio
+inputs, mouse inputs, and custom uniform declarations are unsupported. Shadertoy Image passes that
+fit this profile can be adapted; check their individual licences. Export certification checks rendering
+and repeated seeks, but the destination player must still support WebGL 2. Shader-filled objects
+can use geometric masks, but cannot currently supply an alpha mask for another object.
+
 ## Editing and animation
 
 AI proposals appear on the main canvas. Review frames and compare the original, then use
@@ -152,7 +288,7 @@ display while preserving its proportions, with black margins where needed.
 
 - Importing arbitrary third-party OGraf packages is best-effort; opaque JavaScript cannot always
   be recovered as editable layers.
-- Package font assets when consistent typography across computers matters.
+- Package font assets when consistent typography across computers matters. Embedded project fonts stay active even when Resources is closed, and are included in captures, review images, contact sheets, and saved/exported thumbnails. Detached windows register their own copies.
 - Refreshing a linked component replaces its local content/style edits. Use independent instances
   when those edits must be retained.
 - Runtime collections have explicit capacity and truncate overflow. Validate representative data

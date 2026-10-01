@@ -68,7 +68,7 @@ export const gradientPaintSchema = z
 export const propertySchema = z
   .string()
   .regex(
-    /^(x|y|width|height|rotation|opacity|transformOriginX|transformOriginY|strokeWidth|blur|dropShadowOpacity|dropShadowOffsetX|dropShadowOffsetY|dropShadowBlur|fill\.stops\[(0|[1-9]\d*)\]\.offset|effects\.[a-zA-Z0-9_-]+\.(radius|offsetX|offsetY|opacity|amount|angle))$/,
+    /^(x|y|width|height|rotation|opacity|transformOrigin[XY]|strokeWidth|blur|dropShadow(Opacity|Offset[XY]|Blur)|fill\.stops\[(0|[1-9]\d*)\]\.offset|(fill|strokePaint)\.parameters\.[A-Za-z_]\w*(\.[xyrgba])?|effects\.[\w-]+\.(radius|offset[XY]|opacity|amount|angle))$/,
   )
   .transform((value) => value as AnimatableLayerProperty);
 
@@ -275,7 +275,16 @@ const effectPatchSchema = z
   .object({
     name: z.string().min(1).optional(),
     enabled: z.boolean().optional(),
+    blendMode: z
+      .string()
+      .regex(/^(normal|screen|add|multiply|overlay|darken|lighten)$/)
+      .optional(),
+    blendOpacity: z.number().min(0).max(1).optional(),
     params: z.record(z.string(), z.union([z.number().finite(), z.string()])).optional(),
+    shader: z
+      .unknown()
+      .describe('Shader effect paint; iChannel0=input; omit inputImage.')
+      .optional(),
   })
   .strict();
 
@@ -587,6 +596,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
       'pattern',
       'image-sequence',
       'lottie',
+      'shader',
     ]),
     name: z.string().optional(),
     transform: transform.optional(),

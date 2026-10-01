@@ -2,6 +2,11 @@ import {
   resolveElementAssetReferences,
   resolvePatternElement,
   applyElementDataValue,
+  shaderPaintConflictsWithBinding,
+  inspectShaderSource,
+  shaderParameterTarget,
+  getElementShaderPaints,
+  isGradientPaint,
   parseEffectProperty,
   withEffectParameter,
   getEffectStack,
@@ -28,6 +33,19 @@ export const BINDABLE_PROPERTIES: Record<ElementType, BindableProperty[]> = {
   text: [
     { value: 'content', label: 'Text Content' },
     { value: 'color', label: 'Text Color' },
+    { value: 'fontFamily', label: 'Font family' },
+    { value: 'fontSize', label: 'Font size' },
+    { value: 'fontWeight', label: 'Font weight' },
+    { value: 'strokeWidth', label: 'Outline width' },
+    { value: 'textAlign', label: 'Text alignment' },
+    { value: 'verticalAlign', label: 'Vertical alignment' },
+    { value: 'lineHeight', label: 'Line height' },
+    { value: 'letterSpacing', label: 'Letter spacing' },
+    { value: 'baselineShift', label: 'Baseline shift' },
+    { value: 'textTransform', label: 'Text transform' },
+    { value: 'minFontSize', label: 'Minimum font size' },
+    { value: 'overflowPolicy', label: 'Overflow' },
+    { value: 'autoFit', label: 'Text sizing' },
   ],
   image: [{ value: 'src', label: 'Image URL' }],
   rectangle: [{ value: 'fill', label: 'Fill Paint' }],
@@ -37,6 +55,7 @@ export const BINDABLE_PROPERTIES: Record<ElementType, BindableProperty[]> = {
   // An image sequence's frame list isn't a sensible single-value data-binding target (v1 scope).
   'image-sequence': [],
   lottie: [],
+  shader: [],
 };
 
 /**
@@ -68,8 +87,17 @@ export function resolveEffectiveElement(
 }
 
 export function bindableProperties(element: Element, effects?: LayerEffects): BindableProperty[] {
+  const shaderPaints = getElementShaderPaints(element);
   const result = [
-    ...BINDABLE_PROPERTIES[element.type],
+    ...BINDABLE_PROPERTIES[element.type].filter(
+      (property) => !shaderPaintConflictsWithBinding(element, property.value),
+    ),
+    ...shaderPaints.flatMap(({ slot, paint }) =>
+      inspectShaderSource(paint.fragmentSource).parameters.map((parameter) => ({
+        value: shaderParameterTarget(parameter.name, slot),
+        label: slot === 'stroke' ? `Outline: ${parameter.name}` : parameter.name,
+      })),
+    ),
     { value: 'dropShadowColor', label: 'Shadow Color' },
   ];
   if (effects)
@@ -79,8 +107,9 @@ export function bindableProperties(element: Element, effects?: LayerEffects): Bi
           value: effectProperty(effect, key),
           label: `${effect.name} · ${spec.label}`,
         });
-  if ('strokeColor' in element) result.push({ value: 'strokeColor', label: 'Outline Color' });
-  if ('fill' in element && typeof element.fill !== 'string')
+  if ('strokeColor' in element && !shaderPaintConflictsWithBinding(element, 'strokeColor'))
+    result.push({ value: 'strokeColor', label: 'Outline Color' });
+  if ('fill' in element && isGradientPaint(element.fill))
     result.push(
       ...element.fill.stops.map((_, i) => ({
         value: `fill.stops[${i}].color`,

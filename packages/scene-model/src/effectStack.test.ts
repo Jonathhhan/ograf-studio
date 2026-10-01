@@ -10,6 +10,7 @@ import {
   getEffectStack,
   sampleEffectStack,
   ensureLegacyEffects,
+  effectStackErrors,
 } from './effectStack';
 import { layerEffectsToCssFilter } from './layerEffects';
 import { effectStackToSvg } from './effectRendering';
@@ -38,7 +39,7 @@ describe('composable effects', () => {
   it('preserves stable parameter paths and keys through reorder and bypass', () => {
     const l = createLayerOfKind('rectangle'),
       a = addEffect(l, 'glow'),
-      b = addEffect(l, 'contrast');
+      b = addEffect(l, 'contrast', { enabled: true });
     const p = effectProperty(a, 'radius') as EffectParameterProperty;
     l.animationTracks[p] = [
       { id: 'key-a', frame: 0, value: 2, easing: 'linear' },
@@ -95,9 +96,12 @@ describe('composable effects', () => {
   it('builds a sequential sRGB-compatible SVG chain and clamps eased numeric overshoot', () => {
     const l = createLayerOfKind('rectangle');
     l.effects.stack = [];
-    addEffect(l, 'brightness', { params: { amount: 0.5 } });
-    addEffect(l, 'contrast', { params: { amount: 2 } });
-    addEffect(l, 'glow', { params: { color: '#ffaa0080', opacity: 0.5, radius: 8 } });
+    addEffect(l, 'brightness', { enabled: true, params: { amount: 0.5 } });
+    addEffect(l, 'contrast', { enabled: true, params: { amount: 2 } });
+    addEffect(l, 'glow', {
+      enabled: true,
+      params: { color: '#ffaa0080', opacity: 0.5, radius: 8 },
+    });
     const svg = effectStackToSvg(l.effects);
     expect(svg).toContain('in="SourceGraphic" result="fx-0"');
     expect(svg).toContain('in="fx-0" result="fx-1"');
@@ -111,5 +115,27 @@ describe('composable effects', () => {
     l.effects = ensureLegacyEffects({ ...l.effects, blur: 5 }, { blur: 5 });
     expect(getEffectStack(l.effects).filter((e) => e.legacy === 'blur')).toHaveLength(1);
     expect(layerEffectsToCssFilter(l.effects)).toBe('blur(5px)');
+  });
+  it('creates and duplicates a true post-process shader whose iChannel0 is supplied by the stack', () => {
+    const layer = createLayerOfKind('rectangle');
+    layer.effects.stack = [];
+    const shader = addEffect(layer, 'shader', { blendMode: 'normal' });
+    expect(shader.shader?.fragmentSource).toContain('texture(iChannel0');
+    expect(effectStackErrors(layer.effects)).toEqual([]);
+    const copy = duplicateEffect(layer, shader.id);
+    expect(copy.shader).toEqual(shader.shader);
+    expect(copy.shader).not.toBe(shader.shader);
+    expect(() =>
+      updateEffect(layer, shader.id, {
+        shader: {
+          ...shader.shader!,
+          inputImage: {
+            source: 'data:image/png;base64,iVBORw0KGgo=',
+            wrap: 'repeat',
+            filter: 'linear',
+          },
+        },
+      }),
+    ).toThrow(/incoming stack image/);
   });
 });

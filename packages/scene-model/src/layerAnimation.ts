@@ -1,3 +1,11 @@
+import { isGradientPaint } from './paint';
+import {
+  parseShaderAnimationProperty,
+  shaderAnimationPropertySpec,
+  getShaderAnimatableProperties,
+  getShaderAnimationValue,
+  getShaderTrackValueAtFrame,
+} from './shaderAnimation';
 import { normalizeLayerEffects } from './layerEffects';
 import {
   effectParameterSpec,
@@ -11,7 +19,7 @@ import type {
   AnimatableLayerProperty,
   CubicBezierCurve,
   EasingPreset,
-  GradientPaint,
+  Paint,
   GradientStopOffsetProperty,
   Layer,
   LayerAnimationTracks,
@@ -88,6 +96,7 @@ export function isAnimatableLayerProperty(property: string): property is Animata
   return (
     ANIMATABLE_LAYER_PROPERTIES.includes(property as AnimatableLayerProperty) ||
     isGradientStopOffsetProperty(property) ||
+    parseShaderAnimationProperty(property) !== null ||
     (parseEffectProperty(property) !== null && !property.endsWith('.color'))
   );
 }
@@ -96,6 +105,8 @@ export function isAnimatableLayerPropertyApplicable(
   layer: Layer,
   property: AnimatableLayerProperty,
 ): boolean {
+  if (parseShaderAnimationProperty(property))
+    return shaderAnimationPropertySpec(layer.element, property) !== undefined;
   if (parseEffectProperty(property))
     return typeof effectParameterSpec(layer.effects, property)?.default === 'number';
   if (property === 'blur') return getEffectStack(layer.effects).some((e) => e.legacy === 'blur');
@@ -105,6 +116,10 @@ export function isAnimatableLayerPropertyApplicable(
 }
 
 export function animatablePropertyLabel(property: AnimatableLayerProperty, layer?: Layer): string {
+  if (parseShaderAnimationProperty(property))
+    return layer
+      ? (shaderAnimationPropertySpec(layer.element, property)?.label ?? property)
+      : property;
   const effectPath = parseEffectProperty(property);
   if (effectPath) {
     const effect = layer?.effects.stack?.find((e) => e.id === effectPath.id);
@@ -123,14 +138,16 @@ export function getLayerAnimatableProperties(layer: Layer): AnimatableLayerPrope
     ),
   );
   for (const property of numericEffectProperties(layer.effects)) properties.add(property);
+  for (const property of getShaderAnimatableProperties(layer.element)) properties.add(property);
   const fill =
     layer.element.type === 'rectangle' ||
     layer.element.type === 'ellipse' ||
     layer.element.type === 'path' ||
-    layer.element.type === 'pattern'
+    layer.element.type === 'pattern' ||
+    layer.element.type === 'text'
       ? layer.element.fill
       : null;
-  if (fill && typeof fill !== 'string') {
+  if (isGradientPaint(fill)) {
     fill.stops.forEach((_, index) => properties.add(gradientStopOffsetProperty(index)));
   }
   for (const property of Object.keys(layer.animationTracks ?? {})) {
@@ -158,18 +175,19 @@ export function pruneInvalidGradientStopTracks(layer: Layer): void {
     layer.element.type === 'rectangle' ||
     layer.element.type === 'ellipse' ||
     layer.element.type === 'path' ||
-    layer.element.type === 'pattern'
+    layer.element.type === 'pattern' ||
+    layer.element.type === 'text'
       ? layer.element.fill
       : null;
   for (const property of Object.keys(layer.animationTracks ?? {})) {
     const stopIndex = gradientStopIndexForProperty(property);
-    if (stopIndex !== null && (!fill || typeof fill === 'string' || !fill.stops[stopIndex])) {
+    if (stopIndex !== null && (!isGradientPaint(fill) || !fill.stops[stopIndex])) {
       delete layer.animationTracks[property as AnimatableLayerProperty];
     }
   }
   for (const property of Object.keys(layer.loop?.tracks ?? {})) {
     const stopIndex = gradientStopIndexForProperty(property);
-    if (stopIndex !== null && (!fill || typeof fill === 'string' || !fill.stops[stopIndex])) {
+    if (stopIndex !== null && (!isGradientPaint(fill) || !fill.stops[stopIndex])) {
       delete layer.loop?.tracks[property as AnimatableLayerProperty];
     }
   }
@@ -317,6 +335,8 @@ export function sortLayerPropertyKeyframes(
 }
 
 function staticPropertyValue(layer: Layer, property: AnimatableLayerProperty): number {
+  if (parseShaderAnimationProperty(property))
+    return getShaderAnimationValue(layer.element, property);
   if (parseEffectProperty(property)) {
     const value = effectParameterValue(layer.effects, property);
     if (typeof value !== 'number')
@@ -334,10 +354,11 @@ function staticPropertyValue(layer: Layer, property: AnimatableLayerProperty): n
       layer.element.type === 'rectangle' ||
       layer.element.type === 'ellipse' ||
       layer.element.type === 'path' ||
-      layer.element.type === 'pattern'
+      layer.element.type === 'pattern' ||
+      layer.element.type === 'text'
         ? layer.element.fill
         : null;
-    if (!fill || typeof fill === 'string' || !fill.stops[stopIndex]) {
+    if (!isGradientPaint(fill) || !fill.stops[stopIndex]) {
       throw new Error(`Layer "${layer.name}" has no gradient stop ${stopIndex}.`);
     }
     return fill.stops[stopIndex].offset;
@@ -365,6 +386,7 @@ export function getResolvedLayerAnimationTracks(layer: Layer): LayerAnimationTra
       tracks[property] = sortLayerPropertyKeyframes(existing);
       continue;
     }
+    if (parseShaderAnimationProperty(property)) continue;
     if (TRANSFORM_ANIMATION_PROPERTIES.includes(property as keyof LayerTransform)) {
       tracks[property] = sortLayerKeyframes(layer.keyframes).map((keyframe) => ({
         id: `${keyframe.id}:${property}`,
@@ -407,6 +429,8 @@ export function getLayerPropertyValueAtFrame(
   frame: number,
 ): number {
   const keyframes = getResolvedLayerAnimationTracks(layer)[property] ?? [];
+  if (parseShaderAnimationProperty(property))
+    return getShaderTrackValueAtFrame(layer.element, property, keyframes, frame);
   return getTrackValueAtFrame(keyframes, frame, staticPropertyValue(layer, property));
 }
 
@@ -433,12 +457,8 @@ export function getTrackValueAtFrame(
 }
 
 /** Applies canonical stop-offset tracks without mutating the authored or data-bound paint. */
-export function getPaintAtFrame(
-  paint: string | GradientPaint,
-  tracks: LayerAnimationTracks,
-  frame: number,
-): string | GradientPaint {
-  if (typeof paint === 'string') return paint;
+export function getPaintAtFrame(paint: Paint, tracks: LayerAnimationTracks, frame: number): Paint {
+  if (!isGradientPaint(paint)) return paint;
   return {
     ...paint,
     stops: paint.stops.map((stop, index) => {

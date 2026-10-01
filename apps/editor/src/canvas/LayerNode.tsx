@@ -1,7 +1,11 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
-  layerEffectsToCssFilter,
+  applyElementDataValue,
   getLayerEffectsAtFrame,
+  effectEnabled,
+  getEffectStack,
+  hasElementShaderPaint,
+  shaderParameterTarget,
   type Element,
   type Asset,
   type FieldDefinition,
@@ -10,9 +14,15 @@ import {
   type TilingPattern,
 } from '@ograf-editor/scene-model';
 import {
+  applyLayerEffectsFilter,
+  disposeLayerEffects,
   applyAnimatedPaint,
   disposeElementContent,
   lottieBackingSizeForLayer,
+  shaderBackingSizeForLayer,
+  shaderStrokePaddingForLayer,
+  updateShaderPaintUniforms,
+  updateShaderParameters,
   renderAnimatedElementAtTime,
   renderElementContent,
   setLottieDeterministicRendering,
@@ -21,6 +31,8 @@ import {
 import { resolveEffectiveElement, resolveEffectiveEffects } from '../state/dataBinding';
 import { useTestDataStore } from '../state/testDataStore';
 import { useTimelineStore } from '../state/timelineStore';
+import type { ShaderPreviewClock } from './shaderPreviewClock';
+import { useShaderParameterPreviewStore } from '../state/shaderParameterPreviewStore';
 import './LayerNode.css';
 
 interface LayerNodeProps {
@@ -33,6 +45,7 @@ interface LayerNodeProps {
   dataFields: FieldDefinition[];
   clipPath?: string;
   compositionFrameRate: number;
+  shaderPreviewClock: ShaderPreviewClock;
   patterns: TilingPattern[];
 }
 
@@ -59,6 +72,7 @@ export function LayerNode({
   dataFields,
   clipPath,
   compositionFrameRate,
+  shaderPreviewClock,
   patterns,
 }: LayerNodeProps) {
   const testValues = useTestDataStore((s) => s.values);
@@ -66,11 +80,24 @@ export function LayerNode({
   const readinessGeneration = useRef(0);
   const [contentError, setContentError] = useState<string | null>(null);
 
-  const element = useMemo(
-    () => resolveEffectiveElement(layer, testValues, assets, dataFields, patterns),
-    [assets, dataFields, layer, testValues, patterns],
-  );
+  const lastEffectiveElement = useRef<Element>(layer.element);
+  const resolvedContent = useMemo(() => {
+    try {
+      const next = resolveEffectiveElement(layer, testValues, assets, dataFields, patterns);
+      lastEffectiveElement.current = next;
+      return { element: next, error: null };
+    } catch (error) {
+      return {
+        element: lastEffectiveElement.current,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }, [assets, dataFields, layer, testValues, patterns]);
+  const element = resolvedContent.element;
+  const hasShaderPaint = hasElementShaderPaint(element);
   const lottieBackingSize = useMemo(() => lottieBackingSizeForLayer(layer), [layer]);
+  const shaderBackingSize = useMemo(() => shaderBackingSizeForLayer(layer), [layer]);
+  const shaderStrokePadding = useMemo(() => shaderStrokePaddingForLayer(layer), [layer]);
   const watchContentReadiness = useCallback((host: HTMLElement) => {
     const generation = ++readinessGeneration.current;
     void waitForElementContentReady(host).then(
@@ -94,23 +121,115 @@ export function LayerNode({
   useLayoutEffect(() => {
     const host = contentRef.current;
     if (host) {
-      renderElementContent(
-        host,
-        element,
-        0,
-        element.type === 'lottie' ? { lottieBackingSize } : undefined,
-      );
-      if (element.type === 'lottie') watchContentReadiness(host);
-      else setContentError(null);
+      renderElementContent(host, element, 0, {
+        ...(element.type === 'lottie' ? { lottieBackingSize } : {}),
+        ...(hasShaderPaint ? { shaderBackingSize, shaderStrokePadding } : {}),
+      });
       applyAnimatedPaint(host, layer.animationTracks, useTimelineStore.getState().currentFrame);
+      if (element.type === 'lottie' || hasShaderPaint) watchContentReadiness(host);
+      else setContentError(null);
     }
     return () => {
       readinessGeneration.current += 1;
-      if (host) disposeElementContent(host);
     };
-  }, [element, layer.animationTracks, layer.isVisible, lottieBackingSize, watchContentReadiness]);
+  }, [
+    element,
+    hasShaderPaint,
+    layer.animationTracks,
+    layer.isVisible,
+    lottieBackingSize,
+    shaderBackingSize,
+    shaderStrokePadding,
+    watchContentReadiness,
+  ]);
 
   useLayoutEffect(() => {
+    const host = contentRef.current?.parentElement;
+    return () => {
+      if (host) disposeLayerEffects(host);
+    };
+  }, [layer.isVisible]);
+
+  useLayoutEffect(() => {
+    const host = contentRef.current;
+    if (!host || !hasShaderPaint) return;
+    let previewing = false;
+    const applyPreview = (
+      preview: ReturnType<typeof useShaderParameterPreviewStore.getState>['preview'],
+    ) => {
+      if (preview?.layerId === layer.id) {
+        const previewElement = applyElementDataValue(
+          element,
+          shaderParameterTarget(preview.name, preview.slot),
+          preview.value,
+        );
+        const updated =
+          previewElement.type === 'shader'
+            ? updateShaderParameters(host, previewElement, shaderBackingSize)
+            : updateShaderPaintUniforms(host, previewElement);
+        if (!updated) throw new Error('The shader preview renderer is not mounted.');
+        previewing = true;
+      } else if (previewing) {
+        renderElementContent(host, element, 0, {
+          shaderBackingSize,
+          shaderStrokePadding,
+        });
+        applyAnimatedPaint(host, layer.animationTracks, useTimelineStore.getState().currentFrame);
+        previewing = false;
+      }
+    };
+    applyPreview(useShaderParameterPreviewStore.getState().preview);
+    return useShaderParameterPreviewStore.subscribe((state) => applyPreview(state.preview));
+  }, [
+    element,
+    hasShaderPaint,
+    layer.animationTracks,
+    layer.id,
+    shaderBackingSize,
+    shaderStrokePadding,
+  ]);
+
+  // Value-only shader edits reuse the mounted GPU program. Release it only when the host leaves
+  // the canvas; renderElementContent handles source/type/backing changes itself.
+  useLayoutEffect(() => {
+    const host = contentRef.current;
+    return () => {
+      if (host) disposeElementContent(host);
+    };
+  }, [layer.isVisible]);
+
+  useLayoutEffect(() => {
+    if (hasShaderPaint) {
+      let animationFrame: number | null = null;
+      const render = () => {
+        animationFrame = null;
+        const host = contentRef.current;
+        if (!host) return;
+        try {
+          if (element.type === 'lottie')
+            setLottieDeterministicRendering(host, !shaderPreviewClock.running);
+          // The master timeline and Stage's local-loop sampler own animated uniforms. This
+          // independent clock advances iTime only, so a held loop's values are never replaced.
+          renderAnimatedElementAtTime(host, element, shaderPreviewClock.sample(performance.now()));
+          if (!shaderPreviewClock.running) watchContentReadiness(host);
+        } catch (error) {
+          setContentError(error instanceof Error ? error.message : String(error));
+          // A restored context can resume itself. Compilation/draw failures await a source edit.
+          if (!(error instanceof Error) || error.name !== 'ShaderContextLostError') return;
+        }
+        if (shaderPreviewClock.running) animationFrame = requestAnimationFrame(render);
+      };
+      const sync = () => {
+        if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+        render();
+      };
+      const unsubscribe = shaderPreviewClock.subscribe(sync);
+      sync();
+      return () => {
+        unsubscribe();
+        if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+      };
+    }
     const renderAtFrame = (frame: number, playing: boolean) => {
       const host = contentRef.current;
       if (host) {
@@ -133,7 +252,49 @@ export function LayerNode({
       previousPlaying = state.isPlaying;
       renderAtFrame(state.currentFrame, state.isPlaying);
     });
-  }, [compositionFrameRate, element, layer.isVisible, lottieBackingSize, watchContentReadiness]);
+  }, [
+    compositionFrameRate,
+    element,
+    hasShaderPaint,
+    layer.isVisible,
+    lottieBackingSize,
+    shaderBackingSize,
+    shaderPreviewClock,
+    watchContentReadiness,
+  ]);
+
+  useLayoutEffect(() => {
+    const host = contentRef.current?.parentElement;
+    if (!host) return;
+    const effects = resolveEffectiveEffects(
+      layer,
+      getLayerEffectsAtFrame(layer, useTimelineStore.getState().currentFrame),
+      testValues,
+      dataFields,
+    );
+    const shaderEffect = getEffectStack(effects).some(
+      (effect) => effect.type === 'shader' && effectEnabled(effect, effects),
+    );
+    const apply = () =>
+      applyLayerEffectsFilter(host, effects, shaderPreviewClock.sample(performance.now()));
+    apply();
+    if (!shaderEffect) return;
+    let animationFrame: number | null = null;
+    const render = () => {
+      animationFrame = null;
+      apply();
+      if (shaderPreviewClock.running) animationFrame = requestAnimationFrame(render);
+    };
+    const sync = () => {
+      if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+      render();
+    };
+    const unsubscribe = shaderPreviewClock.subscribe(sync);
+    return () => {
+      unsubscribe();
+      if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+    };
+  }, [layer, testValues, dataFields, transform.width, transform.height, shaderPreviewClock]);
 
   if (!layer.isVisible) return null;
 
@@ -148,18 +309,11 @@ export function LayerNode({
     mixBlendMode: layer.blendMode === 'normal' ? undefined : layer.blendMode,
     transform: `translate(${transform.x}px, ${transform.y}px) rotate(${transform.rotation}deg)`,
     transformOrigin: `${transform.transformOriginX * 100}% ${transform.transformOriginY * 100}%`,
-    filter: layerEffectsToCssFilter(
-      resolveEffectiveEffects(
-        layer,
-        getLayerEffectsAtFrame(layer, useTimelineStore.getState().currentFrame),
-        testValues,
-        dataFields,
-      ),
-    ),
     clipPath,
   };
 
   const placeholder = emptyContentLabel(element);
+  const visibleError = resolvedContent.error ?? (hasShaderPaint ? null : contentError);
 
   return (
     <div
@@ -181,9 +335,9 @@ export function LayerNode({
       style={style}
     >
       <div className="layer-content-host" ref={contentRef} />
-      {contentError ? (
-        <div className="layer-content-placeholder" title={contentError}>
-          Lottie render error
+      {visibleError ? (
+        <div className="layer-content-placeholder" title={visibleError} role="alert">
+          Render error: {visibleError}
         </div>
       ) : (
         placeholder && <div className="layer-content-placeholder">{placeholder}</div>

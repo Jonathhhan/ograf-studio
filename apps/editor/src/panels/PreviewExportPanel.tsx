@@ -29,7 +29,8 @@ import {
 } from '../state/ografCompatibility';
 import { useFitZoom } from '../canvas/useFitZoom';
 import { transparencyCheckerboardStyle } from '../canvas/compositionBackground';
-import { resolvePreviewDataRecord } from '../state/previewData';
+import { resolvePreviewDataRecord, resolvePreviewFormValue } from '../state/previewData';
+import { canReusePreviewForShaderParameters } from '../state/shaderPreviewReuse';
 import { enterPreviewFullscreen, installPreviewShortcuts } from '../state/previewPresentation';
 import { measureAgentText } from '../state/agentCapture';
 import { Panel } from './Panel';
@@ -141,6 +142,31 @@ export function PreviewExportPanel() {
   useEffect(() => setComparisonNaturalSize(null), [comparisonAssetId]);
 
   const descriptor = useMemo(() => compileDescriptor(composition), [composition]);
+  const previewDescriptorRef = useRef({
+    latest: descriptor,
+    mounted: descriptor,
+    projectId: project.id,
+    compositionId: composition.id,
+    keyframes: composition.keyframes,
+  });
+  if (previewDescriptorRef.current.latest !== descriptor) {
+    const previous = previewDescriptorRef.current;
+    // Parameter patches retain lifecycle-array identity in the store. Loading another document
+    // (even one with the same IDs) supplies fresh arrays and must start a fresh preview session.
+    if (
+      previous.projectId !== project.id ||
+      previous.compositionId !== composition.id ||
+      previous.keyframes !== composition.keyframes ||
+      !canReusePreviewForShaderParameters(previous.latest, descriptor)
+    ) {
+      previewDescriptorRef.current.mounted = descriptor;
+    }
+    previewDescriptorRef.current.latest = descriptor;
+    previewDescriptorRef.current.projectId = project.id;
+    previewDescriptorRef.current.compositionId = composition.id;
+    previewDescriptorRef.current.keyframes = composition.keyframes;
+  }
+  const previewDescriptor = previewDescriptorRef.current.mounted;
   const previewData = useMemo(
     () => resolvePreviewDataRecord(composition, dataForm),
     [composition, dataForm],
@@ -157,7 +183,7 @@ export function PreviewExportPanel() {
   const resetDataForm = () => {
     const next: Record<string, TestValue> = {};
     for (const field of composition.dataFields) {
-      next[field.key] = testValues[field.id] ?? field.defaultValue;
+      next[field.key] = resolvePreviewFormValue(field, testValues[field.id]);
     }
     setDataForm(next);
   };
@@ -203,11 +229,11 @@ export function PreviewExportPanel() {
     [appendLog],
   );
 
-  // Rebuilds the live preview instance whenever the descriptor changes — same "every edit
-  // invalidates the instance" behavior as Stage.tsx's master timeline, and arguably more correct
-  // here: it forces re-testing after an edit rather than showing possibly-stale harness state.
+  // Public shader value changes flow through the normal updateAction data path below. Retaining
+  // the instance keeps its current Step, content clock and GPU resources while a control moves.
+  // Source, bindings, backing and other structural authoring edits still create a fresh preview.
   useEffect(() => {
-    const tagName = registerGraphicElement(descriptor);
+    const tagName = registerGraphicElement(previewDescriptor);
     const container = containerRef.current;
     if (!container) return;
     container.replaceChildren();
@@ -256,7 +282,7 @@ export function PreviewExportPanel() {
     composition.frameRate,
     composition.height,
     composition.width,
-    descriptor,
+    previewDescriptor,
     renderType,
   ]);
 
@@ -687,13 +713,34 @@ export function PreviewExportPanel() {
                   className="preview-data-row"
                 >
                   <span>{field.label || field.key}</span>
-                  <input
-                    type="text"
-                    value={String(dataForm[field.key] ?? '')}
-                    onChange={(e) =>
-                      setDataForm((prev) => ({ ...prev, [field.key]: e.target.value }))
-                    }
-                  />
+                  {field.type === 'select' ? (
+                    <select
+                      value={String(dataForm[field.key] ?? field.defaultValue)}
+                      onChange={(event) =>
+                        setDataForm((previous) => ({
+                          ...previous,
+                          [field.key]: event.target.value,
+                        }))
+                      }
+                    >
+                      {field.options.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={String(dataForm[field.key] ?? '')}
+                      onChange={(event) =>
+                        setDataForm((previous) => ({
+                          ...previous,
+                          [field.key]: event.target.value,
+                        }))
+                      }
+                    />
+                  )}
                 </PropertyRow>
               ))}
             </div>

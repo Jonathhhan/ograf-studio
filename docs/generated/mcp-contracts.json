@@ -1,11 +1,11 @@
 {
   "contractVersion": 1,
-  "server": { "name": "ograf-editor", "version": "0.21.0" },
+  "server": { "name": "ograf-editor", "version": "0.22.0" },
   "tools": [
     {
       "name": "ograf_get_capabilities",
       "title": "Get OGraf authoring capabilities",
-      "description": "Discover element/easing/semantic/design/loop/binding contracts by section. Include editor before browser work: connected, responsive and certificationReady are distinct.",
+      "description": "Discover section contracts and browser-editor readiness.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -16,6 +16,8 @@
               "type": "string",
               "enum": [
                 "elements",
+                "shaders",
+                "tiling",
                 "easing",
                 "semantics",
                 "designSystem",
@@ -39,7 +41,7 @@
     {
       "name": "ograf_list_sessions",
       "title": "List OGraf authoring sessions",
-      "description": "Lists open authoring sessions and their current revisions.",
+      "description": "List session revisions.",
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -56,7 +58,7 @@
     {
       "name": "ograf_get_changes",
       "title": "Get OGraf revision changes",
-      "description": "Read up to 100 retained revisions after sinceRevision, with source and affected-layer summaries.",
+      "description": "Read up to 100 revisions after sinceRevision, with source/layer summaries.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -77,7 +79,7 @@
     {
       "name": "ograf_get_project",
       "title": "Get editable OGraf project",
-      "description": "Read project and revision. Omit filters for full data; include sections and tracks=animated-only reduce output. Preserve IDs.",
+      "description": "Read project/revision; include/tracks narrow the result. Preserve IDs.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -95,7 +97,8 @@
                 "dataFields",
                 "transitions",
                 "layout",
-                "patterns"
+                "patterns",
+                "shaders"
               ]
             }
           },
@@ -118,7 +121,7 @@
     {
       "name": "ograf_inspect_scene",
       "title": "Inspect OGraf scene",
-      "description": "Read layers, bindings, masks, Lottie warnings, path anchors, resolved pattern motion and lifecycle. Preserve IDs and revision.",
+      "description": "Inspect scene layers, authoring links, motion, warnings, IDs and revision.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -138,7 +141,7 @@
     {
       "name": "ograf_query_scene",
       "title": "Query OGraf scene by semantic intent",
-      "description": "Find layer IDs by semantics, name, type, bindings, visibility or motion; includes frame geometry, masks and authoring links.",
+      "description": "Query layers by semantics, name, type, bindings, visibility or motion.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -259,7 +262,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^(x|y|width|height|rotation|opacity|transformOriginX|transformOriginY|strokeWidth|blur|dropShadowOpacity|dropShadowOffsetX|dropShadowOffsetY|dropShadowBlur|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|effects\\.[a-zA-Z0-9_-]+\\.(radius|offsetX|offsetY|opacity|amount|angle))$"
+              "pattern": "^(x|y|width|height|rotation|opacity|transformOrigin[XY]|strokeWidth|blur|dropShadow(Opacity|Offset[XY]|Blur)|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|(fill|strokePaint)\\.parameters\\.[A-Za-z_]\\w*(\\.[xyrgba])?|effects\\.[\\w-]+\\.(radius|offset[XY]|opacity|amount|angle))$"
             }
           },
           "loopElapsedFrame": { "type": "number", "minimum": 0 }
@@ -299,7 +302,7 @@
     {
       "name": "ograf_capture",
       "title": "Capture browser-rendered OGraf PNG",
-      "description": "Capture PNG (responsive editor required). Default: first Step. Matte/dataOverrides: composition only. Five-minute URL; inline PNG opt-in. Not export certification.",
+      "description": "Browser PNG; default first Step. Matte/dataOverrides: composition only. URL lasts 5 min; inline PNG opt-in. Not certification.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -372,7 +375,7 @@
     {
       "name": "ograf_render_strip",
       "title": "Render OGraf PNG frame strip",
-      "description": "Capture up to 12 labelled browser frames; defaults to lifecycle/midpoints. maxDimension is per tile. Five-minute URL; inline PNG opt-in.",
+      "description": "Browser strip, up to 12 frames; default lifecycle/midpoints. maxDimension per tile. URL lasts 5 min; inline PNG opt-in.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -402,8 +405,8 @@
     },
     {
       "name": "ograf_apply_operations",
-      "title": "Apply, preview, or propose OGraf operations",
-      "description": "Revision-checked atomic operations. apply commits; dry-run validates without changes. includeReview adds optional QA/capture without rollback on capture failure. preview renders a frame/strip in a responsive editor without changes. propose requires sessionId=editor, title and human Accept/Reject.",
+      "title": "Apply OGraf operations",
+      "description": "Atomic apply, dry-run, rendered preview, or Accept/Reject proposal.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -457,7 +460,8 @@
                         "brightness",
                         "contrast",
                         "saturate",
-                        "hue-rotate"
+                        "hue-rotate",
+                        "shader"
                       ]
                     },
                     "patch": {
@@ -465,12 +469,20 @@
                       "properties": {
                         "name": { "type": "string", "minLength": 1 },
                         "enabled": { "type": "boolean" },
+                        "blendMode": {
+                          "type": "string",
+                          "pattern": "^(normal|screen|add|multiply|overlay|darken|lighten)$"
+                        },
+                        "blendOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
                         "params": {
                           "type": "object",
                           "propertyNames": { "type": "string" },
                           "additionalProperties": {
                             "anyOf": [{ "type": "number" }, { "type": "string" }]
                           }
+                        },
+                        "shader": {
+                          "description": "Shader effect paint; iChannel0=input; omit inputImage."
                         }
                       },
                       "additionalProperties": false
@@ -492,12 +504,20 @@
                       "properties": {
                         "name": { "type": "string", "minLength": 1 },
                         "enabled": { "type": "boolean" },
+                        "blendMode": {
+                          "type": "string",
+                          "pattern": "^(normal|screen|add|multiply|overlay|darken|lighten)$"
+                        },
+                        "blendOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
                         "params": {
                           "type": "object",
                           "propertyNames": { "type": "string" },
                           "additionalProperties": {
                             "anyOf": [{ "type": "number" }, { "type": "string" }]
                           }
+                        },
+                        "shader": {
+                          "description": "Shader effect paint; iChannel0=input; omit inputImage."
                         }
                       },
                       "additionalProperties": false
@@ -1060,7 +1080,8 @@
                         "path",
                         "pattern",
                         "image-sequence",
-                        "lottie"
+                        "lottie",
+                        "shader"
                       ]
                     },
                     "name": { "type": "string" },
@@ -1837,7 +1858,7 @@
                     "layerName": { "type": "string" },
                     "property": {
                       "type": "string",
-                      "pattern": "^(x|y|width|height|rotation|opacity|transformOriginX|transformOriginY|strokeWidth|blur|dropShadowOpacity|dropShadowOffsetX|dropShadowOffsetY|dropShadowBlur|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|effects\\.[a-zA-Z0-9_-]+\\.(radius|offsetX|offsetY|opacity|amount|angle))$"
+                      "pattern": "^(x|y|width|height|rotation|opacity|transformOrigin[XY]|strokeWidth|blur|dropShadow(Opacity|Offset[XY]|Blur)|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|(fill|strokePaint)\\.parameters\\.[A-Za-z_]\\w*(\\.[xyrgba])?|effects\\.[\\w-]+\\.(radius|offset[XY]|opacity|amount|angle))$"
                     },
                     "frame": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
                     "value": { "type": "number" },
@@ -1907,7 +1928,7 @@
                     "layerName": { "type": "string" },
                     "property": {
                       "type": "string",
-                      "pattern": "^(x|y|width|height|rotation|opacity|transformOriginX|transformOriginY|strokeWidth|blur|dropShadowOpacity|dropShadowOffsetX|dropShadowOffsetY|dropShadowBlur|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|effects\\.[a-zA-Z0-9_-]+\\.(radius|offsetX|offsetY|opacity|amount|angle))$"
+                      "pattern": "^(x|y|width|height|rotation|opacity|transformOrigin[XY]|strokeWidth|blur|dropShadow(Opacity|Offset[XY]|Blur)|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|(fill|strokePaint)\\.parameters\\.[A-Za-z_]\\w*(\\.[xyrgba])?|effects\\.[\\w-]+\\.(radius|offset[XY]|opacity|amount|angle))$"
                     },
                     "keys": {
                       "minItems": 1,
@@ -2034,7 +2055,7 @@
                     "layerName": { "type": "string" },
                     "property": {
                       "type": "string",
-                      "pattern": "^(x|y|width|height|rotation|opacity|transformOriginX|transformOriginY|strokeWidth|blur|dropShadowOpacity|dropShadowOffsetX|dropShadowOffsetY|dropShadowBlur|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|effects\\.[a-zA-Z0-9_-]+\\.(radius|offsetX|offsetY|opacity|amount|angle))$"
+                      "pattern": "^(x|y|width|height|rotation|opacity|transformOrigin[XY]|strokeWidth|blur|dropShadow(Opacity|Offset[XY]|Blur)|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|(fill|strokePaint)\\.parameters\\.[A-Za-z_]\\w*(\\.[xyrgba])?|effects\\.[\\w-]+\\.(radius|offset[XY]|opacity|amount|angle))$"
                     },
                     "keys": {
                       "minItems": 1,
@@ -2125,7 +2146,7 @@
                     "layerNamePattern": { "type": "string", "minLength": 1 },
                     "property": {
                       "type": "string",
-                      "pattern": "^(x|y|width|height|rotation|opacity|transformOriginX|transformOriginY|strokeWidth|blur|dropShadowOpacity|dropShadowOffsetX|dropShadowOffsetY|dropShadowBlur|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|effects\\.[a-zA-Z0-9_-]+\\.(radius|offsetX|offsetY|opacity|amount|angle))$"
+                      "pattern": "^(x|y|width|height|rotation|opacity|transformOrigin[XY]|strokeWidth|blur|dropShadow(Opacity|Offset[XY]|Blur)|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|(fill|strokePaint)\\.parameters\\.[A-Za-z_]\\w*(\\.[xyrgba])?|effects\\.[\\w-]+\\.(radius|offset[XY]|opacity|amount|angle))$"
                     },
                     "keys": {
                       "minItems": 1,
@@ -2211,7 +2232,7 @@
                     "layerName": { "type": "string" },
                     "property": {
                       "type": "string",
-                      "pattern": "^(x|y|width|height|rotation|opacity|transformOriginX|transformOriginY|strokeWidth|blur|dropShadowOpacity|dropShadowOffsetX|dropShadowOffsetY|dropShadowBlur|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|effects\\.[a-zA-Z0-9_-]+\\.(radius|offsetX|offsetY|opacity|amount|angle))$"
+                      "pattern": "^(x|y|width|height|rotation|opacity|transformOrigin[XY]|strokeWidth|blur|dropShadow(Opacity|Offset[XY]|Blur)|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|(fill|strokePaint)\\.parameters\\.[A-Za-z_]\\w*(\\.[xyrgba])?|effects\\.[\\w-]+\\.(radius|offset[XY]|opacity|amount|angle))$"
                     },
                     "keyframeId": { "type": "string" },
                     "frame": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
@@ -2227,7 +2248,7 @@
                     "layerName": { "type": "string" },
                     "property": {
                       "type": "string",
-                      "pattern": "^(x|y|width|height|rotation|opacity|transformOriginX|transformOriginY|strokeWidth|blur|dropShadowOpacity|dropShadowOffsetX|dropShadowOffsetY|dropShadowBlur|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|effects\\.[a-zA-Z0-9_-]+\\.(radius|offsetX|offsetY|opacity|amount|angle))$"
+                      "pattern": "^(x|y|width|height|rotation|opacity|transformOrigin[XY]|strokeWidth|blur|dropShadow(Opacity|Offset[XY]|Blur)|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|(fill|strokePaint)\\.parameters\\.[A-Za-z_]\\w*(\\.[xyrgba])?|effects\\.[\\w-]+\\.(radius|offset[XY]|opacity|amount|angle))$"
                     },
                     "keyframeId": { "type": "string" }
                   },
@@ -2242,7 +2263,7 @@
                     "layerName": { "type": "string" },
                     "property": {
                       "type": "string",
-                      "pattern": "^(x|y|width|height|rotation|opacity|transformOriginX|transformOriginY|strokeWidth|blur|dropShadowOpacity|dropShadowOffsetX|dropShadowOffsetY|dropShadowBlur|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|effects\\.[a-zA-Z0-9_-]+\\.(radius|offsetX|offsetY|opacity|amount|angle))$"
+                      "pattern": "^(x|y|width|height|rotation|opacity|transformOrigin[XY]|strokeWidth|blur|dropShadow(Opacity|Offset[XY]|Blur)|fill\\.stops\\[(0|[1-9]\\d*)\\]\\.offset|(fill|strokePaint)\\.parameters\\.[A-Za-z_]\\w*(\\.[xyrgba])?|effects\\.[\\w-]+\\.(radius|offset[XY]|opacity|amount|angle))$"
                     },
                     "keyframeId": { "type": "string" },
                     "easing": {
@@ -3035,7 +3056,7 @@
     {
       "name": "ograf_validate_project",
       "title": "Validate editable OGraf project",
-      "description": "Validate semantics; optionally measure browser text overflow with stress testValues and broadcast lint. detail=summary shows failures/counts. Does not certify artifacts.",
+      "description": "Validate semantics, browser text stress and broadcast lint; not certification.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3100,7 +3121,7 @@
     {
       "name": "ograf_measure_text",
       "title": "Measure OGraf text in the browser",
-      "description": "Browser text fit, lines and overflow at first Step by default. degenerate means failed fitting. Parent clipping may be intentional; font resolution is inferred.",
+      "description": "Measure browser text fit and overflow at a frame; reports failed fitting and clipping.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3124,7 +3145,7 @@
     {
       "name": "ograf_create_project",
       "title": "Create OGraf project session",
-      "description": "Creates a new in-memory editable OGraf project session. Use sessionId=editor only for the live browser project.",
+      "description": "Create an in-memory project session; editor is the live browser session.",
       "inputSchema": {
         "type": "object",
         "properties": { "sessionId": { "type": "string" }, "name": { "type": "string" } },
@@ -3142,7 +3163,7 @@
     {
       "name": "ograf_reset_project",
       "title": "Reset an OGraf project session",
-      "description": "Reset an existing session in one undoable transaction; requires confirm=true and expectedRevision. keepDataFields copies main-composition fields, not layers or bindings.",
+      "description": "Undoable reset with confirm=true and expectedRevision. keepDataFields retains main fields only.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3204,7 +3225,7 @@
     {
       "name": "ograf_import_asset",
       "title": "Import a workspace asset into OGraf",
-      "description": "Atomically embed one workspace image/font/CSS/text resource (max 32 MiB). Returns asset:<id> for layer sources or field defaults. Paths cannot leave the workspace.",
+      "description": "Embed workspace image/font/CSS/text (32 MiB max). Returns asset:<id> for sources/defaults.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3251,7 +3272,7 @@
     {
       "name": "ograf_import_svg_bundle",
       "title": "Import a portable Photoshop SVG bundle",
-      "description": "Atomically import one workspace SVG with companion CSS/images/fonts. Embeds relative references and registers fonts. Paths cannot leave the workspace; limits are 32 MiB per file and 64 MiB total.",
+      "description": "Import workspace SVG + CSS/images/fonts atomically; embed references/register fonts. Limits: 32 MiB/file, 64 MiB total.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3321,7 +3342,7 @@
     {
       "name": "ograf_certify_project",
       "title": "Certify OGraf output",
-      "description": "Validate project, manifest, package, module and lifecycle in the editor.",
+      "description": "Certify project/manifest/package/module/lifecycle in the editor.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3341,7 +3362,7 @@
     {
       "name": "ograf_save_project",
       "title": "Save OGraf project and PNG",
-      "description": "Certify and save .ogs plus <id>_thumb.png.",
+      "description": "Certify/save .ogs + thumbnail.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3370,7 +3391,7 @@
     {
       "name": "ograf_export_package",
       "title": "Export OGraf ZIP and PNG",
-      "description": "Export certified .ograf.zip with <id>_thumb.png.",
+      "description": "Export certified .ograf.zip + thumbnail.",
       "inputSchema": {
         "type": "object",
         "properties": {

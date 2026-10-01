@@ -1,3 +1,12 @@
+import {
+  getShaderAnimatableProperties,
+  shaderAnimationPropertySpec,
+} from '@ograf-editor/scene-model';
+import {
+  getElementShaderPaint,
+  getElementShaderPaints,
+  hasElementShaderPaint,
+} from '@ograf-editor/scene-model';
 import { parseEditablePath, pathConversionError } from '@ograf-editor/scene-model';
 import { access, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
@@ -20,12 +29,15 @@ import {
 import {
   ANIMATABLE_LAYER_PROPERTIES,
   EFFECT_CATALOG,
+  EFFECT_BLEND_MODES,
   getEffectStack,
   effectProperty,
   effectEnabled,
   effectParams,
   patternRows,
   patternRowOffset,
+  PATTERN_PRESETS,
+  getPatternPresetPatch,
   BLEND_MODES,
   buildSvgBundle,
   computeKeyframeFrames,
@@ -43,6 +55,9 @@ import {
   getTotalFrames,
   intersectConvexPolygons,
   inspectLottieAnimationData,
+  inspectShaderElement,
+  MAX_SHADER_IMAGE_BYTES,
+  MAX_SHADER_SOURCE_BYTES,
   LOTTIE_READY_TIMEOUT_MS,
   PROJECT_SOURCE_EXTENSION,
   MOTION_PRESET_NAMES,
@@ -104,8 +119,98 @@ interface ToolRegistrar {
   ): void;
 }
 
+const SHADER_PAINT_CAPABILITIES = {
+  type: 'shader',
+  library: {
+    storage: 'project.shaders',
+    shape: '{id,paint:ShaderPaint}',
+    read: 'ograf_get_project include:["shaders"]',
+    semantics:
+      'Saved unused shaders are authoring resources, with no layer or OGraf data fields. Applying a library shader copies its paint independently into an object.',
+    authoring:
+      'Read project.shaders, then copy resource.paint into update_element.patch.fill, text strokePaint, or add_effect/update_effect patch.shader. Remove inputImage when copying into an effect because its iChannel0 is the incoming stack image. New Shader, rename, Load GLSL, Save shader and library removal are editor UI actions; no dedicated shader-library mutation operation is exposed.',
+  },
+  slots: {
+    fill: 'All listed elements',
+    stroke: 'Text only, stored in element.strokePaint; absent uses strokeColor.',
+    effect:
+      'Post-process stack entry via add_effect/update_effect patch.shader; iChannel0 is reserved for preceding stack output.',
+  },
+  supportedElements: [
+    'rectangle',
+    'ellipse',
+    'path',
+    'pattern',
+    'text',
+    'image',
+    'image-sequence',
+    'lottie',
+  ],
+  shape:
+    'Shader RGBA is multiplied by the object shape or source alpha; original media colors are replaced. Text outlines can use an independent strokePaint shader clipped by native glyph stroke alpha. One independent embedded image may be sampled through iChannel0; the shader cannot sample the painted object, lower layers or external broadcast video.',
+  editor:
+    'Resources > Shaders provides saved shaders with previews, Edit/Load/remove and drag to Fill or text Outline. Applied copies are edited on the object in Properties and do not appear as duplicate resources. Shader source edits use Save shader; copying a resource creates an independent paint. Auto-keyframe and Timeline + Property expose declared channels; local loops have their own preview.',
+  animation:
+    'Use set_property_track for lifecycle keys, or set_layer_loop plus set_loop_property_track for ambient motion. Inspect shaderAnimationProperties for exact paths and limits. Float channels interpolate; int/bool hold (bool keys are 0/1), vec2 uses .x/.y, colors .r/.g/.b/.a. Active keyed channels override data only for those channels; loop-only channels return to data when inactive. iTime continues independently. Keep loop endpoints equal and exposed symbol names stable.',
+  fragmentSource: {
+    type: 'string',
+    maximumBytes: MAX_SHADER_SOURCE_BYTES,
+    description:
+      'Self-contained GLSL Image pass defining mainImage(out vec4 fragColor, in vec2 fragCoord), preserved verbatim. The runtime supplies main, version, iTime, iResolution, optional iChannel0 and iChannelResolution. Mark literal global constants with #pragma ograf NAME CONTROL options to generate controls and OGraf fields automatically; omit custom uniform declarations.',
+  },
+  speed: { type: 'number', default: 1, minimum: 0, maximum: 10 },
+  resolutionScale: { type: 'number', default: 1, minimum: 0.25, maximum: 1 },
+  parameters: {
+    type: 'object',
+    default: {},
+    values: 'number, boolean, or numeric vector, keyed by a marked source symbol',
+    pragma: '#pragma ograf NAME slider|color|toggle|vector2 min(N) max(N) step(N)',
+    declarations:
+      'Literal global float/int/bool/vec2/vec3/vec4 constants or object-like #define constants. slider: float/int; color: vec3/vec4; toggle: bool; vector2: vec2.',
+    exposure:
+      'Every marked parameter automatically gets an ordinary typed OGraf data field and fill.parameters.NAME or strokePaint.parameters.NAME binding. Identical parameter names in fill and outline remain independent. No separate expose option or manual field creation is needed. Removed symbols remove only unused generated fields; copies get independent fields.',
+    dataTypes:
+      'float: number; int: integer; bool: boolean; vec3/vec4 colors: #rrggbb/#rrggbbaa; vec2: object with numeric x and y properties.',
+  },
+  inputImage: {
+    optional: true,
+    shape: '{source,name?,wrap:"repeat"|"clamp",filter:"linear"|"nearest"}',
+    source: 'Embedded PNG or JPEG data URI',
+    maximumBytes: MAX_SHADER_IMAGE_BYTES,
+    uniforms: ['sampler2D iChannel0', 'vec3 iChannelResolution[4]'],
+    semantics:
+      'One portable static image copied with the shader paint. It is independent of the painted object and external video.',
+  },
+  runtimeProfile: {
+    renderer: 'WebGL2',
+    passes: 1,
+    supportedInputs: ['iTime', 'iResolution', 'iChannel0', 'iChannelResolution[0]'],
+    unsupported: [
+      'iChannel1–3',
+      'video textures',
+      'audio',
+      'buffer passes',
+      'feedback',
+      'mouse',
+      'date',
+      'frame counters',
+      'custom uniforms',
+    ],
+    timing:
+      'iTime is absolute composition elapsed seconds multiplied by speed; deterministic backward and repeated seeking.',
+    portability:
+      'The target renderer must support WebGL2. Source inspection is not a GLSL compile or rendering check. SVG-only previews cannot render shader pixels.',
+    editing:
+      'Set element.fill to {type:shader, fragmentSource, speed:1, resolutionScale:1, parameters:{}, inputImage?} on an existing shape, text, or media layer. Use update_element.patch.fill for fill edits; text also accepts independent strokePaint with the same shape. Set strokePaint:null to restore its solid strokeColor. inputImage.source is an embedded PNG/JPEG data URI sampled as iChannel0. Source pragmas define editable parameters and automatically exposed typed runtime bindings. Exposed controls support numeric lifecycle and loop tracks. Scalars use fill.parameters.NAME or strokePaint.parameters.NAME; vec2 uses .x/.y, colors .r/.g/.b/.a. Integer/toggle keys hold until the next key (toggle values0/1). Only keyed channels override data; unkeyed channels retain data/defaults.',
+    verification:
+      'Inspect shaderPaintInspections.fill and shaderPaintInspections.stroke, then render and certify the exported package in a browser with WebGL2; test representative timestamps and backward seeks.',
+  },
+};
+
 const CAPABILITY_SECTIONS = [
   'elements',
+  'shaders',
+  'tiling',
   'easing',
   'semantics',
   'designSystem',
@@ -117,9 +222,12 @@ const CAPABILITY_SECTIONS = [
 type CapabilitySection = (typeof CAPABILITY_SECTIONS)[number];
 
 const CAPABILITY_SECTION_KEYS: Record<CapabilitySection, readonly string[]> = {
+  shaders: ['paintSchemas', 'animatablePropertyPatterns'],
+  tiling: ['tiling'],
   elements: [
     'elementTypes',
     'elementSchemas',
+    'paintSchemas',
     'animatableProperties',
     'animatablePropertyPatterns',
     'blendModes',
@@ -211,9 +319,8 @@ function consolidateOperationTools(
   const consolidated: AgentToolRecord = {
     name: 'ograf_apply_operations',
     config: {
-      title: 'Apply, preview, or propose OGraf operations',
-      description:
-        'Revision-checked atomic operations. apply commits; dry-run validates without changes. includeReview adds optional QA/capture without rollback on capture failure. preview renders a frame/strip in a responsive editor without changes. propose requires sessionId=editor, title and human Accept/Reject.',
+      title: 'Apply OGraf operations',
+      description: 'Atomic apply, dry-run, rendered preview, or Accept/Reject proposal.',
       inputSchema: consolidatedOperationInputSchema,
       annotations: mutation,
     },
@@ -554,6 +661,23 @@ function inspectComposition(composition: Composition) {
               : null,
           }
         : {}),
+      ...(getElementShaderPaint(layer.element)
+        ? { shaderInspection: inspectShaderElement(getElementShaderPaint(layer.element)!) }
+        : {}),
+      shaderAnimationProperties: getShaderAnimatableProperties(layer.element).map((property) => ({
+        property,
+        ...shaderAnimationPropertySpec(layer.element, property),
+      })),
+      ...(hasElementShaderPaint(layer.element)
+        ? {
+            shaderPaintInspections: Object.fromEntries(
+              getElementShaderPaints(layer.element).map(({ slot, paint }) => [
+                slot,
+                inspectShaderElement(paint),
+              ]),
+            ),
+          }
+        : {}),
       effectStack: getEffectStack(layer.effects).map((e) => ({
         ...e,
         enabled: effectEnabled(e, layer.effects),
@@ -650,6 +774,7 @@ const PROJECT_INCLUDE_SECTIONS = [
   'transitions',
   'layout',
   'patterns',
+  'shaders',
 ] as const;
 type ProjectIncludeSection = (typeof PROJECT_INCLUDE_SECTIONS)[number];
 type ProjectTracksMode = 'none' | 'animated-only' | 'full';
@@ -762,6 +887,7 @@ function projectSnapshotProjection(
       return projectedComposition;
     }),
   };
+  if (sections.has('shaders')) projectedProject.shaders = project.shaders;
   if (sections.has('metadata')) {
     projectedProject.documentVersion = project.documentVersion;
     projectedProject.name = project.name;
@@ -1496,8 +1622,7 @@ export function createOGrafToolRecords(
     'ograf_get_capabilities',
     {
       title: 'Get OGraf authoring capabilities',
-      description:
-        'Discover element/easing/semantic/design/loop/binding contracts by section. Include editor before browser work: connected, responsive and certificationReady are distinct.',
+      description: 'Discover section contracts and browser-editor readiness.',
       inputSchema: {
         sections: z.array(z.enum(CAPABILITY_SECTIONS)).min(1).optional(),
       },
@@ -1532,6 +1657,7 @@ export function createOGrafToolRecords(
           'image-sequence',
           'lottie',
         ],
+        paintSchemas: { shader: SHADER_PAINT_CAPABILITIES },
         elementSchemas: {
           rectangle: {
             defaultTransform: { width: 200, height: 200, shape: 'square' },
@@ -1542,6 +1668,7 @@ export function createOGrafToolRecords(
                 'linear-gradient',
                 'radial-gradient',
                 'conic-gradient',
+                'shader',
               ],
               default: '#3b3f4a',
               gradientShape: {
@@ -1569,6 +1696,7 @@ export function createOGrafToolRecords(
                 'linear-gradient',
                 'radial-gradient',
                 'conic-gradient',
+                'shader',
               ],
               default: '#3b3f4a',
               gradientShape: {
@@ -1581,6 +1709,15 @@ export function createOGrafToolRecords(
             strokeWidth: { type: 'number', default: 0, minimum: 0 },
           },
           text: {
+            strokePaint: {
+              type: 'shader-or-omitted',
+              description:
+                'Independent shader outline on editable text, using strokeWidth and glyph stroke alpha. Omitted uses strokeColor.',
+            },
+            fill: {
+              type: 'paint-or-omitted',
+              description: 'Solid, gradient, or shader clipped by glyph alpha; omitted uses color.',
+            },
             content: { type: 'string', default: 'Text' },
             color: { type: 'color', default: '#ffffff' },
             strokeColor: { type: 'color', default: 'transparent' },
@@ -1619,6 +1756,7 @@ export function createOGrafToolRecords(
             },
           },
           image: {
+            fill: { type: 'shader-or-omitted' },
             src: {
               type: 'string-or-null',
               default: null,
@@ -1668,6 +1806,7 @@ export function createOGrafToolRecords(
                 'linear-gradient',
                 'radial-gradient',
                 'conic-gradient',
+                'shader',
               ],
               gradientShape: {
                 type: 'linear | radial | conic',
@@ -1682,6 +1821,7 @@ export function createOGrafToolRecords(
             viewBoxHeight: { type: 'number', default: 100, exclusiveMinimum: 0 },
           },
           'image-sequence': {
+            fill: { type: 'shader-or-omitted' },
             frames: {
               type: 'string-array',
               default: [],
@@ -1691,6 +1831,11 @@ export function createOGrafToolRecords(
             loop: { type: 'boolean', default: true },
           },
           lottie: {
+            fill: {
+              type: 'shader-or-omitted',
+              description:
+                'Shader paint replaces color through source alpha; omitted preserves original pixels.',
+            },
             animationData: {
               type: 'object-or-null',
               default: null,
@@ -1726,6 +1871,11 @@ export function createOGrafToolRecords(
         },
         animatableProperties: [...ANIMATABLE_LAYER_PROPERTIES],
         animatablePropertyPatterns: {
+          'fill.parameters.NAME / strokePaint.parameters.NAME':
+            'Exposed float/int/bool scalar; int/bool hold outgoing values until next key. Bool keys are0/1.',
+          'fill.parameters.NAME.CHANNEL / strokePaint.parameters.NAME.CHANNEL':
+            'Exposed vector/color channels: vec2 x/y; color r/g/b/a. Ease numeric channels and clamp declared limits. Existing keyframe and loop operations apply. Only keyed channels override data; empty tracks do not override.',
+
           'effects.ID.PARAM':
             'Stable per-effect numeric target, independent of stack order; add_effect results and inspect_scene return exact property paths.',
           'fill.stops[N].offset':
@@ -1897,14 +2047,46 @@ export function createOGrafToolRecords(
           effectParameters:
             'Color/number fields may bind effects.ID.PARAM from the effect catalog. Live values override the sampled parameter; updating data does not restart an effect loop.',
           targetProperties: {
-            rectangle: ['fill', 'fill.stops[N].color', 'strokeColor', 'dropShadowColor'],
-            ellipse: ['fill', 'fill.stops[N].color', 'strokeColor', 'dropShadowColor'],
-            text: ['content', 'color', 'strokeColor', 'dropShadowColor'],
-            image: ['src', 'dropShadowColor'],
-            path: ['fill', 'fill.stops[N].color', 'strokeColor', 'dropShadowColor'],
-            pattern: ['fill', 'fill.stops[N].color', 'strokeColor', 'dropShadowColor'],
-            'image-sequence': ['dropShadowColor'],
-            lottie: ['dropShadowColor'],
+            rectangle: [
+              'fill',
+              'fill.stops[N].color',
+              'fill.parameters.NAME',
+              'strokeColor',
+              'dropShadowColor',
+            ],
+            ellipse: [
+              'fill',
+              'fill.stops[N].color',
+              'fill.parameters.NAME',
+              'strokeColor',
+              'dropShadowColor',
+            ],
+            text: [
+              'content',
+              'color',
+              'fill',
+              'fill.parameters.NAME',
+              'strokePaint.parameters.NAME',
+              'strokeColor',
+              'dropShadowColor',
+            ],
+            image: ['src', 'fill.parameters.NAME', 'dropShadowColor'],
+            path: [
+              'fill',
+              'fill.stops[N].color',
+              'fill.parameters.NAME',
+              'strokeColor',
+              'dropShadowColor',
+            ],
+            pattern: [
+              'fill',
+              'fill.stops[N].color',
+              'fill.parameters.NAME',
+              'strokeColor',
+              'dropShadowColor',
+            ],
+            'image-sequence': ['fill.parameters.NAME', 'dropShadowColor'],
+            lottie: ['fill.parameters.NAME', 'dropShadowColor'],
           },
         },
         editorParity: {
@@ -1929,6 +2111,9 @@ export function createOGrafToolRecords(
             'Lifecycle retiming shares the browser editor planner and therefore returns the same duration bounds and warnings. Structural canvas groups, reusable-component snapshots, custom actions, and asset removal use the same canonical project mutations as OGraf Studio.',
         },
         composableEffects: {
+          blendModes: EFFECT_BLEND_MODES,
+          blending:
+            'Normal preserves legacy filtering. Other modes combine each effect with its input; glow/shadow blend their generated contribution only. blendOpacity mixes the result with the input. Blend settings are static; numeric effect params retain their tracks. All bypassed skips filters; normal/full-strength uses CSS, mixed effects use an sRGB SVG filter graph shared with masks and captures.',
           operations: [
             'add_effect',
             'update_effect',
@@ -1939,13 +2124,39 @@ export function createOGrafToolRecords(
           order:
             'Top to bottom. Repeated types are allowed; each effect has a stable ID. Reorder supplies every ID exactly once. Maximum 16 effects including compatibility slots.',
           editing:
-            'update_effect patch accepts name, enabled and params. Numeric params use scope authored (lifecycle frames) or scope frame with frame. Rename/bypass/reorder never retime keys. Duplicate copies only that effect’s tracks and bindings; remove clears only its tracks and links, retaining data fields.',
+            'New effects start bypassed; blendMode enables them. update_effect accepts name, enabled, blendMode, blendOpacity, params and a complete paint for shader. Numeric catalog params use authored or frame scope. Rename/bypass/reorder preserve keys. Duplicate copies owned tracks, bindings and shader; remove clears owned links.',
           compatibility:
             'Old blur and shadow remain reorderable base-blur/base-shadow slots backed by existing numeric tracks and dropShadowColor bindings. inspect_scene resolves virtual slots on old documents. Existing appearance and data keys are preserved.',
           animation:
             'Use effects.ID.PARAM for new numeric tracks/local loops, color/number Brand Kit tokens and OGraf data bindings. Runtime data overrides the sampled parameter. Effect IDs are scoped to a layer and survive reorder. Legacy slots keep their original property names.',
           rendering:
-            'One ordered chain powers Studio and export; SVG alpha masks use the equivalent chain. Path masks ignore effects. Glow adds an outer colored halo to the preceding result. Values are bounded by the catalog; eased overshoot is clamped.',
+            'One ordered chain powers Studio and export. Shader is a WebGL2 post-process: iChannel0 receives preceding output; GPU Blend/Opacity feeds later effects. inputImage and alpha-mask sourcing are rejected. SVG projections omit GLSL pixels; use browser certification. Path masks ignore effects. Catalog values clamp overshoot.',
+          shaderEffect: {
+            contract:
+              'Use add_effect with effectType:"shader" or update_effect with the returned effectId. patch.shader is a complete ShaderPaint: type, fragmentSource, speed, resolutionScale and parameters. Do not set inputImage.',
+            input:
+              'iChannel0 is the flattened layer result after preceding effects; iResolution and iChannelResolution[0] are the padded effect buffer.',
+            controls:
+              '#pragma ograf declarations populate shader.parameters and remain static effect controls; effect-track/runtime binding is not yet supported for those controls.',
+            example: {
+              type: 'add_effect',
+              layerName: 'Layer name',
+              effectType: 'shader',
+              patch: {
+                name: 'Invert incoming layer',
+                blendMode: 'normal',
+                blendOpacity: 1,
+                shader: {
+                  type: 'shader',
+                  fragmentSource:
+                    'void mainImage(out vec4 c, in vec2 p) { vec4 s = texture(iChannel0, p / iResolution.xy); c = vec4(1.0 - s.rgb, s.a); }',
+                  speed: 1,
+                  resolutionScale: 1,
+                  parameters: {},
+                },
+              },
+            },
+          },
           catalog: EFFECT_CATALOG,
         },
         tiling: {
@@ -1964,7 +2175,23 @@ export function createOGrafToolRecords(
               'Existing infinite lifecycle loop curves are sampled over the shared light cycle without retiming keys. Static light layers are also supported. Intensity multiplies sampled layer opacity; glow multiplies glow-role opacity, softness scales their existing blur/shadow/glow radius. Colors and pattern row clocks remain independent. Disable bypasses the controller. Unlink before removing its pattern.',
           },
           creation:
-            'set_tiling_pattern with patch:{} creates an editable O/D pattern and a linked layer by default. Set createLayer:false for a definition only. Returns pattern and layer IDs.',
+            'Copy a presets.entries[].patch into set_tiling_pattern.patch and adapt width/height/cycleFrames to the target composition. Set createLayer:false for a resource only. Returns pattern/layer IDs. There is no presetId operation argument. An empty patch still creates the legacy O/D motif; use an explicit preset for the new visual workflow.',
+          presets: {
+            referenceComposition: { width: 1920, height: 1080, frameRate: 25 },
+            defaultId: 'dots',
+            motion:
+              'Presets start static. Use cyclesPerLoop:1 (or another whole number), cycleFrames:round(seconds*frameRate), and direction:left|right|alternate to animate. Clear per-row cycles overrides when toggling all rows.',
+            entries: PATTERN_PRESETS.map((preset) => ({
+              ...preset,
+              patch: getPatternPresetPatch(preset.id, 1920, 1080, 25),
+            })),
+          },
+          editor:
+            'Resources > Patterns > Add pattern opens visual presets or Use selected shapes (rectangle/ellipse/path silhouettes). Edit has a local Play/Pause preview, layout, motion in seconds, shape replacement, SVG import and sequence ordering; precision source/row/lighting controls are under Advanced. Resources shows usage, Duplicate and Add to canvas; Properties > Make independent copies the shared resource for one layer.',
+          sourceImport:
+            'MCP accepts explicit symbols/sequence in set_tiling_pattern.patch, not SVG filenames, arbitrary selected-layer groups, or an importPatternSvg operation. The editor SVG picker imports filled vector silhouettes with supported affine transforms; strokes/text need conversion to outlines. Clips, masks, images, external content and ambiguous overlapping separate shapes are rejected. Imported colors are replaced by the layer paint.',
+          duplication:
+            'Read the definition, copy its authored fields without id into set_tiling_pattern.patch with a new name and createLayer:false. Use the returned patternId in update_element.patch.patternId for the chosen layer, preserving its other properties; leave other references unchanged. Inspect and deliberately preserve or relink any separate layer.lighting controller.',
           editing:
             'Pass patternId or exact patternName to update shared controls; omitted fields stay unchanged. Sources are named vector paths, sequence entries reference symbolKey and scale the shared gap. Seeded spacing repeats identically in every tile.',
           motion:
@@ -1992,7 +2219,7 @@ export function createOGrafToolRecords(
           layout:
             'fitRows:true derives rowHeight from height, rowGap and offsetY. fitRows:false uses explicit rowHeight. Shrinking rows drops inactive overrides unless rowOverrides is explicitly supplied. Clear overrides to restore shared direction/speed/phase defaults.',
           paint:
-            'Pattern layers accept solid/linear/radial/conic fill, fill bindings and stop tracks, independent outlines and effects. Each tile repeats its paint for seamless wrapping. Do not author element.definition; compilation resolves it from composition.patterns.',
+            'Pattern layers accept solid/linear/radial/conic or shader fill, color outlines and effects. Gradient paint repeats with each motif; a shader fills the pattern layer through the moving geometry alpha mask. Shader outlines are text-only. Do not author element.definition; compilation resolves it from composition.patterns.',
           deletion:
             'Remove or relink pattern layers and component references before removing a definition.',
         },
@@ -2010,7 +2237,9 @@ export function createOGrafToolRecords(
             'hideSource defaults true and sets source.isMaskOnly. This suppresses source output without disabling masks; isVisible:false disables the source. set_layer_flags isMaskOnly:false shows the source again. Detaching does not change source visibility.',
           dependencies:
             'Same composition. No self/cycles, guide sources or cross-runtime-collection references. Source tracks/loops are sampled independently. Include sources when saving components; duplication remaps internal references. Detach consumers before deleting a source.',
-          unsupportedSources: ['text', 'image-sequence', 'lottie'],
+          unsupportedSources: ['text', 'image-sequence', 'lottie', 'shader'],
+          shaderPaint:
+            'Shader-painted layers may receive masks and provide geometric path masks; alpha-mask sourcing is unsupported.',
           conicAlpha:
             'SVG alpha masks tessellate conic paint at half-degree intervals; visible path paint uses native CSS gradients.',
         },
@@ -2108,7 +2337,7 @@ export function createOGrafToolRecords(
     'ograf_list_sessions',
     {
       title: 'List OGraf authoring sessions',
-      description: 'Lists open authoring sessions and their current revisions.',
+      description: 'List session revisions.',
       inputSchema: {},
       annotations: readOnly,
     },
@@ -2119,8 +2348,7 @@ export function createOGrafToolRecords(
     'ograf_get_changes',
     {
       title: 'Get OGraf revision changes',
-      description:
-        'Read up to 100 retained revisions after sinceRevision, with source and affected-layer summaries.',
+      description: 'Read up to 100 revisions after sinceRevision, with source/layer summaries.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         sinceRevision: z.number().int().nonnegative(),
@@ -2143,8 +2371,7 @@ export function createOGrafToolRecords(
     'ograf_get_project',
     {
       title: 'Get editable OGraf project',
-      description:
-        'Read project and revision. Omit filters for full data; include sections and tracks=animated-only reduce output. Preserve IDs.',
+      description: 'Read project/revision; include/tracks narrow the result. Preserve IDs.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         include: z.array(z.enum(PROJECT_INCLUDE_SECTIONS)).min(1).optional(),
@@ -2160,8 +2387,7 @@ export function createOGrafToolRecords(
     'ograf_inspect_scene',
     {
       title: 'Inspect OGraf scene',
-      description:
-        'Read layers, bindings, masks, Lottie warnings, path anchors, resolved pattern motion and lifecycle. Preserve IDs and revision.',
+      description: 'Inspect scene layers, authoring links, motion, warnings, IDs and revision.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         compositionId: z.string().optional(),
@@ -2187,8 +2413,7 @@ export function createOGrafToolRecords(
     'ograf_query_scene',
     {
       title: 'Query OGraf scene by semantic intent',
-      description:
-        'Find layer IDs by semantics, name, type, bindings, visibility or motion; includes frame geometry, masks and authoring links.',
+      description: 'Query layers by semantics, name, type, bindings, visibility or motion.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         compositionId: z.string().optional(),
@@ -2271,7 +2496,8 @@ export function createOGrafToolRecords(
           if (normalizedTagsAny && !normalizedTagsAny.some((tag) => tags.includes(tag)))
             return null;
           if (lowerName && !layer.name.toLocaleLowerCase().includes(lowerName)) return null;
-          if (elementTypes && !elementTypes.includes(layer.element.type)) return null;
+          if (elementTypes && !elementTypes.some((type) => type === layer.element.type))
+            return null;
           if (visible !== undefined && layer.isVisible !== visible) return null;
           if (
             animated !== undefined &&
@@ -2565,7 +2791,7 @@ export function createOGrafToolRecords(
     {
       title: 'Capture browser-rendered OGraf PNG',
       description:
-        'Capture PNG (responsive editor required). Default: first Step. Matte/dataOverrides: composition only. Five-minute URL; inline PNG opt-in. Not export certification.',
+        'Browser PNG; default first Step. Matte/dataOverrides: composition only. URL lasts 5 min; inline PNG opt-in. Not certification.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         target: z.enum(['composition', 'viewport']).default('composition'),
@@ -2643,7 +2869,7 @@ export function createOGrafToolRecords(
     {
       title: 'Render OGraf PNG frame strip',
       description:
-        'Capture up to 12 labelled browser frames; defaults to lifecycle/midpoints. maxDimension is per tile. Five-minute URL; inline PNG opt-in.',
+        'Browser strip, up to 12 frames; default lifecycle/midpoints. maxDimension per tile. URL lasts 5 min; inline PNG opt-in.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         compositionId: z.string().optional(),
@@ -2986,8 +3212,7 @@ export function createOGrafToolRecords(
     'ograf_validate_project',
     {
       title: 'Validate editable OGraf project',
-      description:
-        'Validate semantics; optionally measure browser text overflow with stress testValues and broadcast lint. detail=summary shows failures/counts. Does not certify artifacts.',
+      description: 'Validate semantics, browser text stress and broadcast lint; not certification.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         browserTextOverflow: z.boolean().default(false),
@@ -3217,7 +3442,7 @@ export function createOGrafToolRecords(
     {
       title: 'Measure OGraf text in the browser',
       description:
-        'Browser text fit, lines and overflow at first Step by default. degenerate means failed fitting. Parent clipping may be intentional; font resolution is inferred.',
+        'Measure browser text fit and overflow at a frame; reports failed fitting and clipping.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         compositionId: z.string().optional(),
@@ -3262,8 +3487,7 @@ export function createOGrafToolRecords(
     'ograf_create_project',
     {
       title: 'Create OGraf project session',
-      description:
-        'Creates a new in-memory editable OGraf project session. Use sessionId=editor only for the live browser project.',
+      description: 'Create an in-memory project session; editor is the live browser session.',
       inputSchema: { sessionId: z.string(), name: z.string().optional() },
       annotations: mutation,
     },
@@ -3283,7 +3507,7 @@ export function createOGrafToolRecords(
     {
       title: 'Reset an OGraf project session',
       description:
-        'Reset an existing session in one undoable transaction; requires confirm=true and expectedRevision. keepDataFields copies main-composition fields, not layers or bindings.',
+        'Undoable reset with confirm=true and expectedRevision. keepDataFields retains main fields only.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         expectedRevision: z.number().int().nonnegative(),
@@ -3348,7 +3572,7 @@ export function createOGrafToolRecords(
     {
       title: 'Import a workspace asset into OGraf',
       description:
-        'Atomically embed one workspace image/font/CSS/text resource (max 32 MiB). Returns asset:<id> for layer sources or field defaults. Paths cannot leave the workspace.',
+        'Embed workspace image/font/CSS/text (32 MiB max). Returns asset:<id> for sources/defaults.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         expectedRevision: z.number().int().nonnegative(),
@@ -3444,7 +3668,7 @@ export function createOGrafToolRecords(
     {
       title: 'Import a portable Photoshop SVG bundle',
       description:
-        'Atomically import one workspace SVG with companion CSS/images/fonts. Embeds relative references and registers fonts. Paths cannot leave the workspace; limits are 32 MiB per file and 64 MiB total.',
+        'Import workspace SVG + CSS/images/fonts atomically; embed references/register fonts. Limits: 32 MiB/file, 64 MiB total.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         expectedRevision: z.number().int().nonnegative(),
@@ -3522,7 +3746,7 @@ export function createOGrafToolRecords(
     {
       title: 'Apply atomic OGraf authoring operations',
       description:
-        'Apply a revision-checked atomic batch across scene/lifecycle tracks and loops, masks, gradients, effects, shared pattern geometry/lighting, Brand Kits, components, collections, assets and layout. Discover capabilities for domain contracts. Single-layer operations take layerId or exact layerName; creation returns stable IDs. preview renders, propose awaits editor acceptance, dry-run does not commit. Transform/effect updates default to all authored lifecycle frames; scope:frame requires frame. Independent keys are never implicitly retimed. All warnings are returned.',
+        'Apply an atomic revision-checked batch: layers, tracks/loops, shader paints, patterns/lighting, masks, effects, Brand Kits, components, collections, assets and layout. Discover capabilities first. Select layers by layerId or exact layerName; creation returns stable IDs. preview renders; propose awaits acceptance; dry-run validates only. Transform/effect updates default to authored lifecycle frames; scope:frame requires frame. Keys are not implicitly retimed. Returns all warnings.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         expectedRevision: z.number().int().nonnegative(),
@@ -3682,7 +3906,7 @@ export function createOGrafToolRecords(
     'ograf_certify_project',
     {
       title: 'Certify OGraf output',
-      description: 'Validate project, manifest, package, module and lifecycle in the editor.',
+      description: 'Certify project/manifest/package/module/lifecycle in the editor.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         profile: z.enum(['realtime', 'non-realtime', 'dual']).optional(),
@@ -3699,7 +3923,7 @@ export function createOGrafToolRecords(
     'ograf_save_project',
     {
       title: 'Save OGraf project and PNG',
-      description: 'Certify and save .ogs plus <id>_thumb.png.',
+      description: 'Certify/save .ogs + thumbnail.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         path: z.string(),
@@ -3767,7 +3991,7 @@ export function createOGrafToolRecords(
     'ograf_export_package',
     {
       title: 'Export OGraf ZIP and PNG',
-      description: 'Export certified .ograf.zip with <id>_thumb.png.',
+      description: 'Export certified .ograf.zip + thumbnail.',
       inputSchema: {
         sessionId: z.string().default('editor'),
         path: z.string(),

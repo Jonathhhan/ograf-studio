@@ -7,9 +7,12 @@ import { useAgentReviewStore } from '../state/agentReviewStore';
 import { DockWorkspace, type DockPaneCommand } from './DockWorkspace';
 import type { DockPaneId } from './dockModel';
 import { NumericScrubController } from '../components/NumericScrubController';
+import { PatternDialogHost } from '../panels/PatternResources';
+import { useProjectFonts } from '../state/useProjectFonts';
 import './AppShell.css';
 
 export function AppShell() {
+  useProjectFonts();
   const proposals = useAgentReviewStore((state) => state.proposals);
   const proposal = proposals[0];
   useEffect(() => {
@@ -61,6 +64,7 @@ export function AppShell() {
           }
         />
         <NumericScrubController />
+        <PatternDialogHost />
       </div>
     </DetachedWindowsProvider>
   );

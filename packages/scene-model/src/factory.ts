@@ -13,6 +13,8 @@ import type {
   ImageElement,
   ImageSequenceElement,
   LottieElement,
+  ShaderElement,
+  ShaderResource,
   Keyframe,
   KeyframeRole,
   Layer,
@@ -32,6 +34,7 @@ import type {
 } from './types';
 import { normalizeAuthoredTransform } from './authoredTransform';
 import { normalizeCornerRadii } from './cornerRadii';
+import { normalizeShaderElement } from './shader';
 
 const BASE_TRANSFORM: LayerTransform = {
   x: 100,
@@ -160,6 +163,17 @@ export function createLottieElement(overrides: Partial<LottieElement> = {}): Lot
   };
 }
 
+export function createShaderElement(overrides: Partial<ShaderElement> = {}): ShaderElement {
+  return normalizeShaderElement(overrides);
+}
+
+export function createShaderResource(overrides: Partial<ShaderResource> = {}): ShaderResource {
+  return {
+    id: overrides.id ?? createId('shader'),
+    paint: normalizeShaderElement(overrides.paint),
+  };
+}
+
 function createLayer(name: string, element: Element): Layer {
   return {
     id: createId('layer'),
@@ -187,7 +201,15 @@ function createLayer(name: string, element: Element): Layer {
 }
 
 export type NewLayerKind =
-  'rectangle' | 'ellipse' | 'text' | 'image' | 'path' | 'pattern' | 'image-sequence' | 'lottie';
+  | 'rectangle'
+  | 'ellipse'
+  | 'text'
+  | 'image'
+  | 'path'
+  | 'pattern'
+  | 'image-sequence'
+  | 'lottie'
+  | 'shader';
 
 /** The starting pose for a freshly created layer of this kind — a fresh object every call. */
 export function defaultTransformFor(kind: NewLayerKind): LayerTransform {
@@ -231,6 +253,10 @@ export function createLottieLayer(): Layer {
   return createLayer('Lottie', createLottieElement());
 }
 
+export function createShaderLayer(): Layer {
+  return createLayer('Shader', createRectangleElement({ fill: createShaderElement() }));
+}
+
 export function createLayerOfKind(kind: NewLayerKind): Layer {
   switch (kind) {
     case 'rectangle':
@@ -255,6 +281,8 @@ export function createLayerOfKind(kind: NewLayerKind): Layer {
       return createImageSequenceLayer();
     case 'lottie':
       return createLottieLayer();
+    case 'shader':
+      return createShaderLayer();
   }
 }
 
@@ -501,7 +529,7 @@ export function createComposition(overrides: Partial<Composition> = {}): Composi
   };
 }
 
-export const PROJECT_DOCUMENT_VERSION = 31;
+export const PROJECT_DOCUMENT_VERSION = 33;
 
 export function createProject(overrides: Partial<Project> = {}): Project {
   const mainComposition = createComposition({ name: 'Main' });
@@ -516,6 +544,7 @@ export function createProject(overrides: Partial<Project> = {}): Project {
     supportsNonRealTime: true,
     mainCompositionId: mainComposition.id,
     compositions: [mainComposition],
+    shaders: [],
     ...overrides,
   };
 }

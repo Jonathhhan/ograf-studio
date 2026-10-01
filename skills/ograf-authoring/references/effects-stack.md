@@ -1,9 +1,16 @@
 # Composable effects stack
 
 Properties → Effects stack is an ordered filter chain. Types: blur, drop-shadow, glow,
-brightness, contrast, saturate, hue-rotate. Each layer supports 16 entries, including the two
+brightness, contrast, saturate, hue-rotate, shader. Each layer supports 16 entries, including the two
 compatibility slots for older blur/shadow controls. Duplicate types are supported. The stack
 stays inside one layer; avoid duplicate geometry just to combine shadows or glows.
+
+New effects start bypassed. Choose Normal, Screen, Add, Multiply, Overlay, Darken or Lighten to
+activate one; MCP `blendMode` also enables unless `enabled:false` is explicit. `blendOpacity`
+(0..1) mixes its result with the input. Glow/shadow modes blend their generated contribution;
+adjustments blend the processed image. Existing entries without blend settings keep Normal/100%.
+Blend settings are static; effect parameter keyframes remain independent. Bypass preserves all
+settings and keys. All bypassed produces no extra filter graph.
 
 ## Create, then use returned paths
 
@@ -15,6 +22,8 @@ stays inside one layer; avoid duplicate geometry just to combine shadows or glow
     "effectType": "glow",
     "patch": {
       "name": "Soft silver bloom",
+      "blendMode": "screen",
+      "blendOpacity": 0.6,
       "params": { "radius": 12, "color": "#a8d8ff", "opacity": 0.35 }
     }
   }
@@ -27,7 +36,7 @@ For example the returned radius path has shape `effects.<effect-id>.radius`. IDs
 layer and do not change when the effect moves or is renamed. Inspect the resolved `effectStack`
 through `ograf_inspect_scene`; it includes enabled state, params and legacy property mappings.
 
-`update_effect` accepts an effect ID and `patch: {name?,enabled?,params?}`. Numeric params use
+`update_effect` accepts an effect ID and `patch: {name?,enabled?,blendMode?,blendOpacity?,params?,shader?}`. Numeric params use
 authored lifecycle frames by default; use `scope: "frame"` plus `frame` for one key. Full tracks
 can be supplied independently. A bypass only changes `enabled` and preserves keys/bindings.
 `duplicate_effect` copies the selected effect's tracks and bindings with fresh effect/key IDs.
@@ -41,6 +50,49 @@ Read the live capability catalog for current bounds and defaults. Blur/glow/shad
 use multipliers 0–4 (1 is unchanged), and hue uses degrees. Effect colors use #RRGGBB/#RRGGBBAA.
 Numeric eased overshoot is clamped to the supported range. Glow adds an outer colored halo to
 the preceding result. A subsequent blur or color adjustment processes that halo too; order matters.
+
+## Shader effect
+
+`add_effect` with `effectType:"shader"` creates a bypassed identity post-process shader. Enable a
+Blend mode, then edit its complete `shader` paint. `iChannel0` is the flattened incoming layer image
+after every preceding stack entry; the shader output is blended with that input and becomes the
+source for later effects. `iResolution` and `iChannelResolution[0]` describe the padded effect
+buffer. The pass is WebGL 2 and uses absolute OGraf time. A separate `inputImage` is rejected because
+the stack owns `iChannel0`; additional texture channels, feedback, video and audio remain unsupported.
+
+The editor disclosure exposes source loading, render scale and pragma controls. Shader-effect source
+and static control edits are stored with the effect; declared controls are not yet effect-track or
+runtime-binding targets. Use browser capture and final certification—SVG-only previews omit the GLSL
+pixels. A layer with an enabled shader effect cannot be used as an alpha-mask source; path masks
+still ignore paint and effects.
+
+Create and enable an invert post-process in one operation:
+
+```json
+{
+  "type": "add_effect",
+  "layerName": "Title",
+  "effectType": "shader",
+  "patch": {
+    "name": "Invert incoming layer",
+    "blendMode": "normal",
+    "blendOpacity": 1,
+    "shader": {
+      "type": "shader",
+      "fragmentSource": "void mainImage(out vec4 c, in vec2 p) { vec4 s = texture(iChannel0, p / iResolution.xy); c = vec4(1.0 - s.rgb, s.a); }",
+      "speed": 1,
+      "resolutionScale": 1,
+      "parameters": {}
+    }
+  }
+}
+```
+
+Use the returned effect ID for later edits. `update_effect.patch.shader` is a complete paint, so
+preserve unchanged source/settings explicitly. Pragma-driven values belong in `shader.parameters`;
+the sibling effect `params` object is for catalog effects such as blur and brightness. To reuse a
+saved shader, read `project.shaders` with `ograf_get_project include:["shaders"]`, copy its `paint`
+into `patch.shader`, and remove `inputImage` first. A shader effect always owns `iChannel0`.
 
 Old projects preserve blur then shadow through `base-blur` and `base-shadow` slots. Their property
 paths remain `blur`, `dropShadowBlur`, `dropShadowOpacity`, `dropShadowOffsetX`, `dropShadowOffsetY`
@@ -57,6 +109,6 @@ parameter without restarting the loop; authored values remain intact. A color fi
 
 Check a frame where the effect is visible, compare different orders, and sample animation before
 and after reordering. Realtime updates and scheduled backward seeking must reproduce the same
-filter/phase. Studio and export use one CSS chain; alpha masks use the equivalent ordered SVG
-chain with padding for accumulated blur/shadow extents. Path masks ignore effects by definition.
+filter/phase. Studio and export keep CSS for Normal/100% chains and use an sRGB SVG filter graph
+for per-effect blending; alpha masks use the same ordered graph with padding for accumulated blur/shadow extents. Path masks ignore effects by definition.
 Preserve the final certification gate before source save or package export.

@@ -1,3 +1,4 @@
+import { applyLayerEffectsFilter } from './effectCompositing';
 import {
   GRAPHIC_ERROR_STATUS_CODE,
   type CompiledGraphicDescriptor,
@@ -16,6 +17,7 @@ import {
 import { buildRuntimeTimeline } from './buildRuntimeTimeline';
 import { applyCompiledMasks } from './maskRendering';
 import { resolvePlayTarget } from './lifecycle';
+import { ShaderContextLostError, shaderBackingSizeForLayer } from './shaderRendering';
 import {
   applyAnimatedPaint,
   disposeElementContent,
@@ -28,7 +30,17 @@ import {
   setLottieDeterministicRendering,
   waitForElementContentReady,
 } from './renderElement';
-import { layerEffectsToCssFilter } from '@ograf-editor/scene-model';
+import {
+  getElementShaderPaints,
+  effectEnabled,
+  getEffectStack,
+  getShaderAnimationValue,
+  parseShaderAnimationProperty,
+  shaderAnimationPropertySpec,
+  hasElementShaderPaint,
+  resolveShaderParameters,
+} from '@ograf-editor/scene-model';
+import { shaderStrokePaddingForLayer } from './shaderPaintRendering';
 import {
   EFFECT_ANIMATION_PROPERTIES,
   numericEffectProperties,
@@ -55,6 +67,20 @@ function errorPayload(err: unknown): ReturnPayload {
   };
 }
 
+function contentOptions(layer: CompiledGraphicDescriptor['layers'][number]) {
+  return {
+    ...(layer.element.type === 'lottie'
+      ? { lottieBackingSize: lottieBackingSizeForLayer(layer) }
+      : {}),
+    ...(hasElementShaderPaint(layer.element)
+      ? {
+          shaderBackingSize: shaderBackingSizeForLayer(layer),
+          shaderStrokePadding: shaderStrokePaddingForLayer(layer),
+        }
+      : {}),
+  };
+}
+
 interface LoopExitCorrection {
   startFrame: number;
   targetFrame: number;
@@ -64,6 +90,7 @@ interface LoopExitCorrection {
       transform: Partial<LayerTransform>;
       effects: Partial<Record<(typeof EFFECT_ANIMATION_PROPERTIES)[number], number>>;
       paint: Partial<Record<AnimatableLayerProperty, number>>;
+      discreteShader: Partial<Record<AnimatableLayerProperty, number>>;
       stack: Record<string, number>;
     }
   >;
@@ -311,8 +338,9 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
               directLayer.target,
               directProgress,
               direct.targetFrame,
+              this.#lastData,
             )
-          : sampleCompiledLayerVisualState(layer, baseFrame, elapsedFrames);
+          : sampleCompiledLayerVisualState(layer, baseFrame, elapsedFrames, this.#lastData);
       const correction = this.#loopExitCorrection?.layers.get(layer.id);
       if (!direct && correction && this.#loopExitCorrection) {
         const distance = Math.abs(
@@ -347,6 +375,24 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         ][]) {
           const sampled = state.paintTracks[property]?.[0];
           if (sampled) sampled.value += delta * remaining;
+          else if (remaining > 0 && parseShaderAnimationProperty(property)) {
+            const value =
+              getShaderAnimationValue(resolveBoundElement(layer, this.#lastData), property) +
+              delta * remaining;
+            state.paintTracks[property] = [
+              { id: `${layer.id}:${property}:loop-exit`, frame: 0, value, easing: 'linear' },
+            ];
+          }
+        }
+        if (remaining > 0) {
+          for (const [property, value] of Object.entries(correction.discreteShader) as [
+            AnimatableLayerProperty,
+            number,
+          ][]) {
+            state.paintTracks[property] = [
+              { id: `${layer.id}:${property}:loop-exit`, frame: 0, value, easing: 'linear' },
+            ];
+          }
         }
       }
       state.effects = resolveBoundEffects(layer, this.#lastData, state.effects);
@@ -363,6 +409,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     targetFrame: number,
     clockMs: number,
     epochs = this.#activeLoopEpochs,
+    data = this.#lastData,
   ): DirectLifecycleTransition {
     const layers = new Map<
       string,
@@ -375,8 +422,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           ? undefined
           : Math.max(0, ((clockMs - epoch) / 1000) * this.descriptor.frameRate);
       layers.set(layer.id, {
-        source: sampleCompiledLayerVisualState(layer, startFrame, elapsedFrames),
-        target: sampleCompiledLayerVisualState(layer, targetFrame),
+        source: sampleCompiledLayerVisualState(layer, startFrame, elapsedFrames, data),
+        target: sampleCompiledLayerVisualState(layer, targetFrame, undefined, data),
       });
     }
     return { startFrame, targetFrame, layers };
@@ -393,6 +440,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         resolved.target,
         progress,
         transition.targetFrame,
+        this.#lastData,
       );
       state.effects = resolveBoundEffects(layer, this.#lastData, state.effects);
       states.set(layer.id, state);
@@ -417,23 +465,28 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     targetFrame: number,
     clockMs: number,
     shouldExit: (layer: CompiledGraphicDescriptor['layers'][number]) => boolean,
+    baseFrame = (this.#timeline?.time() ?? 0) * this.descriptor.frameRate,
+    epochs = this.#activeLoopEpochs,
+    data = this.#lastData,
   ): void {
     this.#directLifecycleTransition = null;
-    const baseFrame = (this.#timeline?.time() ?? 0) * this.descriptor.frameRate;
     const layers = new Map<
       string,
       LoopExitCorrection['layers'] extends Map<string, infer V> ? V : never
     >();
     for (const layer of this.activeDescriptor.layers) {
-      const epoch = this.#activeLoopEpochs.get(layer.id);
+      const epoch = epochs.get(layer.id);
       if (epoch === undefined || !layer.loop || !shouldExit(layer)) continue;
       const elapsed = Math.max(0, ((clockMs - epoch) / 1000) * this.descriptor.frameRate);
-      const looped = sampleCompiledLayerVisualState(layer, baseFrame, elapsed);
-      const base = sampleCompiledLayerVisualState(layer, baseFrame);
+      const looped = sampleCompiledLayerVisualState(layer, baseFrame, elapsed, data);
+      const base = sampleCompiledLayerVisualState(layer, baseFrame, undefined, data);
       const transform: Partial<LayerTransform> = {};
       const effects: Partial<Record<(typeof EFFECT_ANIMATION_PROPERTIES)[number], number>> = {};
       const paint: Partial<Record<AnimatableLayerProperty, number>> = {};
+      const discreteShader: Partial<Record<AnimatableLayerProperty, number>> = {};
+      const boundElement = resolveBoundElement(layer, data);
       for (const property of Object.keys(layer.loop.tracks) as AnimatableLayerProperty[]) {
+        if (!layer.loop.tracks[property]?.length) continue;
         if (TRANSFORM_ANIMATION_PROPERTIES.includes(property as keyof LayerTransform)) {
           const key = property as keyof LayerTransform;
           transform[key] = looped.transform[key] - base.transform[key];
@@ -444,6 +497,12 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           paint[property] =
             (looped.paintTracks[property]?.[0]?.value ?? 0) -
             (base.paintTracks[property]?.[0]?.value ?? 0);
+        } else if (shaderAnimationPropertySpec(boundElement, property)) {
+          const fallback = getShaderAnimationValue(boundElement, property);
+          const value = looped.paintTracks[property]?.[0]?.value ?? fallback;
+          if (shaderAnimationPropertySpec(boundElement, property)!.discrete)
+            discreteShader[property] = value;
+          else paint[property] = value - (base.paintTracks[property]?.[0]?.value ?? fallback);
         }
       }
       const stack: Record<string, number> = {};
@@ -452,7 +511,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           stack[property] =
             Number(effectParameterValue(looped.effects, property)) -
             Number(effectParameterValue(base.effects, property));
-      layers.set(layer.id, { transform, effects, paint, stack });
+      layers.set(layer.id, { transform, effects, paint, stack, discreteShader });
     }
     this.#loopExitCorrection =
       layers.size > 0 ? { startFrame: baseFrame, targetFrame, layers } : null;
@@ -556,7 +615,6 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       }
       el.style.mixBlendMode =
         !layer.blendMode || layer.blendMode === 'normal' ? '' : layer.blendMode;
-      el.style.filter = layerEffectsToCssFilter(layer.effects);
       const firstTransform = [...layer.keyframes].sort((a, b) => a.frame - b.frame)[0]?.transform;
       if (firstTransform) {
         el.style.width = `${firstTransform.width}px`;
@@ -567,10 +625,9 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         el,
         resolveBoundElement(layer, this.#lastData),
         0,
-        layer.element.type === 'lottie'
-          ? { lottieBackingSize: lottieBackingSizeForLayer(layer) }
-          : undefined,
+        contentOptions(layer),
       );
+      applyLayerEffectsFilter(el, layer.effects, 0);
       this.#layerEls.set(layer.id, el);
     }
 
@@ -592,14 +649,21 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     if (this.#contentPlaybackError) throw this.#contentPlaybackError;
   }
 
-  #remountLottieContent(): void {
+  #remountAnimatedCanvasContent(): void {
     for (const layer of this.activeDescriptor.layers) {
-      if (layer.element.type !== 'lottie' || !layer.element.animationData) continue;
+      if (
+        !hasElementShaderPaint(layer.element) &&
+        (layer.element.type !== 'lottie' || !layer.element.animationData)
+      )
+        continue;
       const element = this.#layerEls.get(layer.id);
       if (!element) continue;
-      renderElementContent(element, resolveBoundElement(layer, this.#lastData), 0, {
-        lottieBackingSize: lottieBackingSizeForLayer(layer),
-      });
+      renderElementContent(
+        element,
+        resolveBoundElement(layer, this.#lastData),
+        0,
+        contentOptions(layer),
+      );
     }
   }
 
@@ -608,7 +672,11 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     const layers = this.activeDescriptor.layers.filter(
       (layer) =>
         (layer.element.type === 'image-sequence' && layer.element.frames.length > 0) ||
-        (layer.element.type === 'lottie' && !!layer.element.animationData),
+        (layer.element.type === 'lottie' && !!layer.element.animationData) ||
+        hasElementShaderPaint(layer.element) ||
+        getEffectStack(layer.effects).some(
+          (effect) => effect.type === 'shader' && effectEnabled(effect, layer.effects),
+        ),
     );
     if (layers.length === 0 || typeof requestAnimationFrame === 'undefined') return;
     const epoch = performance.now();
@@ -618,12 +686,23 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       try {
         this.#renderAnimatedContentAt(elapsedMs);
       } catch (error) {
+        if (error instanceof ShaderContextLostError) {
+          this.#contentAnimationFrame = this.#requestFrame(render);
+          return;
+        }
         this.#contentPlaybackError = error instanceof Error ? error : new Error(String(error));
         return;
       }
       const shouldContinue = layers.some((layer) => {
         const element = layer.element;
-        if (element.type === 'lottie') return true;
+        if (
+          element.type === 'lottie' ||
+          hasElementShaderPaint(element) ||
+          getEffectStack(layer.effects).some(
+            (effect) => effect.type === 'shader' && effectEnabled(effect, layer.effects),
+          )
+        )
+          return true;
         if (element.type !== 'image-sequence') return false;
         return element.loop || elapsedMs / 1000 < element.frames.length / Math.max(1, element.fps);
       });
@@ -634,10 +713,35 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
 
   #renderAnimatedContentAt(timestampMs: number): void {
     for (const layer of this.activeDescriptor.layers) {
-      if (layer.element.type !== 'image-sequence' && layer.element.type !== 'lottie') continue;
+      const shaderEffect = getEffectStack(layer.effects).some(
+        (effect) => effect.type === 'shader' && effectEnabled(effect, layer.effects),
+      );
+      if (
+        layer.element.type !== 'image-sequence' &&
+        layer.element.type !== 'lottie' &&
+        !hasElementShaderPaint(layer.element) &&
+        !shaderEffect
+      )
+        continue;
       const el = this.#layerEls.get(layer.id);
       if (!el) continue;
-      renderAnimatedElementAtTime(el, layer.element, timestampMs);
+      // Shader uniforms belong to the mounted, data-resolved element. Frame ticks only advance
+      // time; passing the authored descriptor here must never reset a live parameter binding.
+      if (
+        layer.element.type === 'image-sequence' ||
+        layer.element.type === 'lottie' ||
+        hasElementShaderPaint(layer.element)
+      )
+        renderAnimatedElementAtTime(el, layer.element, timestampMs);
+      if (shaderEffect) {
+        const state = sampleCompiledLayerVisualState(
+          layer,
+          (this.#timeline?.time() ?? 0) * this.descriptor.frameRate,
+          undefined,
+          this.#lastData,
+        );
+        applyLayerEffectsFilter(el, state.effects, timestampMs);
+      }
     }
   }
 
@@ -654,14 +758,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         const element = resolveBoundElement(layer, this.#lastData);
         const serialized = JSON.stringify(element);
         if (el.dataset.ografRenderedElement !== serialized) {
-          renderElementContent(
-            el,
-            element,
-            0,
-            element.type === 'lottie'
-              ? { lottieBackingSize: lottieBackingSizeForLayer(layer) }
-              : undefined,
-          );
+          renderElementContent(el, element, 0, contentOptions(layer));
           setLottieDeterministicRendering(el, this.#renderType === 'non-realtime');
         }
         const state = sampleCompiledLayerVisualState(
@@ -670,7 +767,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           undefined,
           this.#lastData,
         );
-        el.style.filter = layerEffectsToCssFilter(state.effects);
+        applyLayerEffectsFilter(el, state.effects, (this.#timeline?.time() ?? 0) * 1000);
         applyAnimatedPaint(
           el,
           layer.animationTracks,
@@ -692,15 +789,25 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
 
   #applyData(data: unknown): void {
     if (!data || typeof data !== 'object') return;
-    this.#lastData = { ...this.#lastData, ...(data as Record<string, unknown>) };
+    const nextData = { ...this.#lastData, ...(data as Record<string, unknown>) };
+    this.#lastData = nextData;
     this.#refreshBoundLayers();
     this.#renderLoopSnapshot(typeof performance !== 'undefined' ? performance.now() : Date.now());
   }
 
   #replaceData(data: unknown): void {
-    this.#lastData =
+    const nextData =
       data && typeof data === 'object' ? { ...(data as Record<string, unknown>) } : {};
+    this.#validateShaderData(nextData);
+    this.#lastData = nextData;
     this.#refreshBoundLayers();
+  }
+
+  #validateShaderData(data: Record<string, unknown>): void {
+    for (const layer of this.activeDescriptor.layers) {
+      const element = resolveBoundElement(layer, data);
+      for (const { paint } of getElementShaderPaints(element)) resolveShaderParameters(paint);
+    }
   }
 
   async #seekToKeyframeId(
@@ -753,8 +860,9 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#clearContentAnimationFrames();
       this.#contentPlaybackError = null;
       this.#renderType = params.renderType;
+      if (!this.#timeline) this.#buildDom();
       this.#replaceData(params.data);
-      this.#remountLottieContent();
+      this.#remountAnimatedCanvasContent();
       this.#setContentRenderingMode();
       this.#renderAnimatedContentAt(0);
       await this.#awaitContentReady();
@@ -765,6 +873,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#directLifecycleTransition = null;
       await this.#seekToKeyframeId(this.descriptor.startKeyframeId, true);
       this.#renderLoopSnapshot(0, new Map());
+      await this.#awaitContentReady();
       if (this.#renderType === 'realtime') this.#startRealtimeContentAnimations();
       return { statusCode: 200 };
     } catch (err) {
@@ -787,6 +896,9 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#cancelUpdateAnimations();
       this.#schedule = [];
       this.#directLifecycleTransition = null;
+      for (const element of this.#layerEls.values()) disposeElementContent(element);
+      this.#layerEls.clear();
+      this.#renderDescriptor = null;
       return { statusCode: 200 };
     } catch (err) {
       return errorPayload(err);
@@ -800,6 +912,12 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
   async #updateActionUnlocked(params: UpdateActionParams): Promise<ReturnPayload | undefined> {
     try {
       await this.#awaitContentReady();
+      if (params.data && typeof params.data === 'object') {
+        this.#validateShaderData({
+          ...this.#lastData,
+          ...(params.data as Record<string, unknown>),
+        });
+      }
       this.#cancelUpdateAnimations();
       const keys = this.#changedBindingKeys(params.data);
       const durationMs =
@@ -944,6 +1062,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
    */
   #applySchedule(timestamp: number): void {
     const due = this.#schedule.filter((a) => a.timestamp <= timestamp);
+    this.#directLifecycleTransition = null;
+    this.#loopExitCorrection = null;
 
     let step: number | undefined;
     let targetKeyframeId = this.descriptor.startKeyframeId;
@@ -976,6 +1096,32 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     let directSample: { transition: DirectLifecycleTransition; progress: number } | undefined;
     let stepArrivalTimestamp: number | undefined;
     let lifecycleEpoch: number | undefined;
+
+    const loopEpochsAt = (atTimestamp: number): Map<string, number> => {
+      const epochs = new Map<string, number>();
+      const stepKeyframeId = step === undefined ? undefined : this.descriptor.stepKeyframeIds[step];
+      for (const layer of this.activeDescriptor.layers) {
+        const activation =
+          layer.element.type === 'pattern' || layer.lighting
+            ? { type: 'lifecycle' as const }
+            : layer.loop?.activation;
+        if (
+          activation?.type === 'lifecycle' &&
+          lifecycleEpoch !== undefined &&
+          atTimestamp >= lifecycleEpoch
+        )
+          epochs.set(layer.id, lifecycleEpoch);
+        else if (
+          activation?.type === 'step' &&
+          !animation &&
+          stepArrivalTimestamp !== undefined &&
+          atTimestamp >= stepArrivalTimestamp &&
+          activation.stepKeyframeId === stepKeyframeId
+        )
+          epochs.set(layer.id, stepArrivalTimestamp);
+      }
+      return epochs;
+    };
 
     const advanceTo = (atTimestamp: number): number => {
       if (!animation) return positionSeconds;
@@ -1048,6 +1194,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       } else if (type === 'playAction') {
         const playParams = params as PlayActionParams;
         const previousStep = step;
+        const outgoingEpochs = loopEpochsAt(scheduled.timestamp);
         const target = this.#resolvePlayTarget(step, playParams);
         step = target.currentStep;
         targetKeyframeId = target.keyframeId;
@@ -1061,6 +1208,16 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
               this.descriptor.frameRate) *
             1000
           : Math.abs(targetSeconds - positionSeconds) * 1000;
+        if (!exitsToEnd) {
+          this.#beginLoopExit(
+            targetSeconds * this.descriptor.frameRate,
+            scheduled.timestamp,
+            (layer) => target.currentStep === undefined || layer.loop?.activation.type === 'step',
+            positionSeconds * this.descriptor.frameRate,
+            outgoingEpochs,
+            displayData,
+          );
+        } else this.#loopExitCorrection = null;
         animation =
           playParams.skipAnimation || durationMs === 0
             ? undefined
@@ -1075,7 +1232,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
                         positionSeconds * this.descriptor.frameRate,
                         targetSeconds * this.descriptor.frameRate,
                         scheduled.timestamp,
-                        new Map(),
+                        outgoingEpochs,
+                        displayData,
                       ),
                     }
                   : {}),
@@ -1092,6 +1250,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         }
       } else if (type === 'stopAction') {
         const stopParams = params as StopActionParams;
+        const outgoingEpochs = loopEpochsAt(scheduled.timestamp);
+        this.#loopExitCorrection = null;
         step = undefined;
         targetKeyframeId = this.descriptor.endKeyframeId;
         const targetSeconds = keyframeSeconds(targetKeyframeId);
@@ -1113,7 +1273,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
                   positionSeconds * this.descriptor.frameRate,
                   targetSeconds * this.descriptor.frameRate,
                   scheduled.timestamp,
-                  new Map(),
+                  outgoingEpochs,
+                  displayData,
                 ),
               };
         directSample = undefined;
@@ -1131,30 +1292,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     this.#currentStep = step;
     advanceTo(timestamp);
     this.#timeline?.seek(positionSeconds, true);
-    const epochs = new Map<string, number>();
-    const settled = animation === undefined;
-    const stepKeyframeId = step === undefined ? undefined : this.descriptor.stepKeyframeIds[step];
-    for (const layer of this.activeDescriptor.layers) {
-      const activation =
-        layer.element.type === 'pattern' || layer.lighting
-          ? { type: 'lifecycle' as const }
-          : layer.loop?.activation;
-      if (!activation) continue;
-      if (
-        activation.type === 'lifecycle' &&
-        lifecycleEpoch !== undefined &&
-        timestamp >= lifecycleEpoch
-      ) {
-        epochs.set(layer.id, lifecycleEpoch);
-      } else if (
-        activation.type === 'step' &&
-        settled &&
-        stepArrivalTimestamp !== undefined &&
-        activation.stepKeyframeId === stepKeyframeId
-      ) {
-        epochs.set(layer.id, stepArrivalTimestamp);
-      }
-    }
+    const epochs = loopEpochsAt(timestamp);
     if (directSample) {
       this.#renderDirectLifecycleTransition(directSample.transition, directSample.progress);
     } else {
@@ -1168,9 +1306,13 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
 
   async #goToTimeUnlocked(params: GoToTimeParams): Promise<ReturnPayload | undefined> {
     try {
+      this.#clearContentAnimationFrames();
+      this.#stopLoopRendering();
       this.#timeline?.pause();
       this.#activeTween?.kill();
       this.#activeTween = null;
+      this.#directLifecycleTransition = null;
+      this.#loopExitCorrection = null;
       this.#timeline?.seek(params.timestamp / 1000, true);
       if (this.#schedule.length > 0) this.#applySchedule(params.timestamp);
       else this.#renderLoopSnapshot(params.timestamp, new Map());
@@ -1179,6 +1321,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#renderAnimatedContentAt(params.timestamp);
       if (this.#schedule.length > 0) this.#applySchedule(params.timestamp);
       else this.#renderLoopSnapshot(params.timestamp, new Map());
+      await this.#awaitContentReady();
       return { statusCode: 200 };
     } catch (err) {
       return errorPayload(err);

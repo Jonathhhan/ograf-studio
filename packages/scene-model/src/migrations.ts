@@ -18,6 +18,15 @@ import {
 import { normalizeAuthoredTransform } from './authoredTransform';
 import { normalizeLayerEffects } from './layerEffects';
 import { normalizeCornerRadii } from './cornerRadii';
+import {
+  normalizeShaderElement,
+  migrateShaderElement,
+  migrateShaderBindingTarget,
+  getElementShaderPaint,
+  isShaderPaint,
+} from './shader';
+import { compositionWithShaderParameterFields } from './shaderFields';
+import { parseShaderAnimationProperty } from './shaderAnimation';
 import type {
   Composition,
   Element,
@@ -109,12 +118,13 @@ type LegacyFieldDefinition = Omit<
 
 type LegacyProject = Omit<
   Project,
-  'documentVersion' | 'compositions' | 'supportsRealTime' | 'supportsNonRealTime'
+  'documentVersion' | 'compositions' | 'supportsRealTime' | 'supportsNonRealTime' | 'shaders'
 > & {
   documentVersion?: number;
   supportsRealTime?: boolean;
   supportsNonRealTime?: boolean;
   compositions: LegacyComposition[];
+  shaders?: Project['shaders'];
 };
 
 function cloneProject(project: LegacyProject): LegacyProject {
@@ -147,6 +157,13 @@ function normalizeFieldDefinition(field: LegacyFieldDefinition): FieldDefinition
 }
 
 function normalizeElement(element: Element): Element {
+  if (element.type === 'shader') return migrateShaderElement(element);
+  const shader = getElementShaderPaint(element);
+  if (shader && 'fill' in element)
+    element = { ...element, fill: normalizeShaderElement(shader) } as Element;
+  const strokeShader = getElementShaderPaint(element, 'stroke');
+  if (element.type === 'text' && strokeShader)
+    element = { ...element, strokePaint: normalizeShaderElement(strokeShader) };
   if (element.type === 'path') return { ...element, fillRule: element.fillRule ?? 'nonzero' };
   if (element.type === 'rectangle') {
     const legacy = element as Element & { borderRadius?: number | Record<string, unknown> };
@@ -225,6 +242,7 @@ function normalizeComposition(composition: LegacyComposition): Composition {
       legacyLayer.bindings ?? (legacyLayer.binding ? [legacyLayer.binding] : [])
     ).map((binding) => ({
       ...binding,
+      targetProperty: migrateShaderBindingTarget(binding.targetProperty),
       sourcePath: binding.sourcePath ?? [],
       ...(binding.valueMap ? { valueMap: { ...binding.valueMap } } : {}),
     }));
@@ -288,7 +306,11 @@ function normalizeComposition(composition: LegacyComposition): Composition {
           ...getLayerAnimatableProperties(normalizedLayer),
           ...Object.keys(legacyLayer.animationTracks ?? {}).filter(isAnimatableLayerProperty),
         ]),
-      ];
+      ].filter(
+        (property) =>
+          !parseShaderAnimationProperty(property) ||
+          (legacyLayer.animationTracks?.[property]?.length ?? 0) > 0,
+      );
       const hasAnimationTracks = trackProperties.some(
         (property) => (legacyLayer.animationTracks?.[property]?.length ?? 0) > 0,
       );
@@ -396,6 +418,16 @@ function normalizeComposition(composition: LegacyComposition): Composition {
         const normalizedLayer: Layer = {
           ...layer,
           element: normalizeElement(layer.element),
+          animationTracks: Object.fromEntries(
+            Object.entries(layer.animationTracks ?? {}).filter(
+              ([property, keys]) =>
+                !parseShaderAnimationProperty(property) || (keys?.length ?? 0) > 0,
+            ),
+          ),
+          bindings: layer.bindings.map((binding) => ({
+            ...binding,
+            targetProperty: migrateShaderBindingTarget(binding.targetProperty),
+          })),
           isMaskOnly: layer.isMaskOnly ?? false,
           mask: layer.mask ?? null,
           blendMode: layer.blendMode ?? 'normal',
@@ -448,6 +480,8 @@ function normalizeComposition(composition: LegacyComposition): Composition {
 /** Upgrade an editor project without mutating the parsed/autosaved source object. */
 export function migrateProject(project: Project | LegacyProject): Project {
   const cloned = cloneProject(project as LegacyProject);
+  if (cloned.shaders !== undefined && !Array.isArray(cloned.shaders))
+    throw new Error('Project shader library must be an array.');
   if (
     cloned.thumbnailFrame != null &&
     (!Number.isInteger(cloned.thumbnailFrame) || cloned.thumbnailFrame < 0)
@@ -458,6 +492,13 @@ export function migrateProject(project: Project | LegacyProject): Project {
     documentVersion: PROJECT_DOCUMENT_VERSION,
     supportsRealTime: cloned.supportsRealTime ?? true,
     supportsNonRealTime: cloned.supportsNonRealTime ?? true,
-    compositions: cloned.compositions.map(normalizeComposition),
+    shaders: (cloned.shaders ?? []).map((resource) =>
+      resource && typeof resource === 'object' && isShaderPaint(resource.paint)
+        ? { ...resource, paint: normalizeShaderElement(resource.paint) }
+        : resource,
+    ),
+    compositions: cloned.compositions.map((composition) =>
+      compositionWithShaderParameterFields(normalizeComposition(composition)),
+    ),
   };
 }

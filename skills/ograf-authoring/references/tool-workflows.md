@@ -6,7 +6,7 @@ Canvas artwork has no binding badges. Inspect scene bindings or use Properties â
 the absence of an on-canvas marker does not mean a layer is unbound.
 
 - `ograf_get_capabilities`: request only the relevant `sections` from `elements`, `easing`,
-  `semantics`, `designSystem`, `loops`, `bindings`, and `editor`. Include `editor` for the bridge
+  `shaders`, `tiling`, `semantics`, `designSystem`, `loops`, `bindings`, and `editor`. Include `editor` for the bridge
   connection/responsiveness/latency, certification readiness, browser dependency map, and safety
   policy. Omit `sections` only for the complete backward-compatible payload. Do not guess domains
   that were not requested.
@@ -114,7 +114,8 @@ Supported operation discriminators:
   `refresh_component_instances`, `rename_component`, `remove_component`
 - Shared patterns: `set_tiling_pattern`, `remove_tiling_pattern`, `set_layer_lighting`; inspect through
   `ograf_get_project include: ["patterns"]` and `ograf_inspect_scene`
-- Content/style: `update_element`, `update_transform`, `update_effects`
+- Content/style: `update_element`, `update_transform`, `update_effects`, `add_effect`,
+  `update_effect`, `duplicate_effect`, `remove_effect`, `reorder_effects`
 - Compositing: `set_layer_mask`; `set_layer_flags.isMaskOnly` controls source-only output
 - Timeline: `set_property_key`, `set_property_track`, `stagger_property_track`,
   `move_property_key`, `remove_property_key`, `set_property_key_easing`, `set_transition`,
@@ -164,6 +165,10 @@ selectors see matching entities created earlier in the same atomic batch.
 
 `update_transform` and `update_effects` default to `scope: "authored"`, writing each lifecycle frame.
 Use `scope: "frame"` and a required `frame` for one-frame animation changes.
+
+For a post-process shader use `add_effect effectType:"shader"` with complete `patch.shader`; its
+`iChannel0` is the preceding stack output, so omit `inputImage`. Update by returned effect ID. See
+[effects-stack.md](./effects-stack.md#shader-effect).
 
 `set_layer_flags.blendMode` accepts `normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`,
 `color-dodge`, `color-burn`, `hard-light`, `soft-light`, `difference`, or `exclusion`. The value is a
@@ -306,6 +311,13 @@ bindings atomically and reports them in `summary.clearedBindings`.
 - A dry run does not increment the revision or change the editor.
 - After any other human or agent edit, assume the revision changed and re-read.
 - After a conflict, call `ograf_get_changes` for a compact history before consciously rebasing.
+
+## Shaders and visual patterns
+
+Use the compact `shaders`/`tiling` capability sections before shader paint or pattern work.
+[Shader and pattern workflows](./shaders-and-patterns.md) documents complete paint patches,
+pragma-driven fields, independent parameter tracks, preset patches, and UI-only import/library
+conveniences. Pattern presets are ordinary `set_tiling_pattern.patch` data.
 
 ## Session reset
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 import {
   findAssetConsumers,
   findMissingAssetReferences,
@@ -9,7 +9,8 @@ import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useSelectionStore } from '../state/selectionStore';
 import { ResourceTreeBranch, ResourceTreeItem } from './ResourceTreeComponents';
 import { Panel } from './Panel';
-import { TilingPatternEditor } from './TilingPatternEditor';
+import { PatternResources } from './PatternResources';
+import { ShaderResources } from './ShaderResources';
 import { partitionResourceAssets } from './resourceTree';
 import './ResourcesPanel.css';
 import { useImagePlacement } from '../state/useImagePlacement';
@@ -23,9 +24,6 @@ const formatBytes = (bytes = 0) => {
 export function ResourcesPanel() {
   const imagePlacement = useImagePlacement();
   const composition = useActiveComposition();
-  const addPattern = useProjectStore((s) => s.addLayer);
-  const addPatternInstance = useProjectStore((s) => s.addPatternInstance);
-  const removePattern = useProjectStore((s) => s.removeTilingPattern);
   const importAsset = useProjectStore((s) => s.importAsset);
   const importSvgBundle = useProjectStore((s) => s.importSvgBundle);
   const updateAsset = useProjectStore((s) => s.updateAsset);
@@ -50,30 +48,6 @@ export function ResourcesPanel() {
   const imageAssets = assetsByKind.images;
   const fontAssets = assetsByKind.fonts;
   const sourceAssets = assetsByKind.sources;
-
-  useEffect(() => {
-    const loaded: FontFace[] = [];
-    let cancelled = false;
-    for (const asset of composition.assets.filter((candidate) => candidate.kind === 'font')) {
-      const family = asset.fontFamily || asset.name.replace(/\.[^.]+$/, '');
-      const face = new FontFace(family, `url(${asset.dataUri})`, {
-        weight: asset.fontWeight || '100 900',
-        style: asset.fontStyle || 'normal',
-      });
-      void face
-        .load()
-        .then((ready) => {
-          if (cancelled) return;
-          document.fonts.add(ready);
-          loaded.push(ready);
-        })
-        .catch(() => undefined);
-    }
-    return () => {
-      cancelled = true;
-      for (const face of loaded) document.fonts.delete(face);
-    };
-  }, [composition.assets]);
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const files = [...(e.target.files ?? [])];
@@ -117,37 +91,8 @@ export function ResourcesPanel() {
     <Panel title="Resources">
       <div className="resources-panel">
         <div className="resources-tree" role="tree" aria-label="Project resources">
-          <ResourceTreeBranch label="Patterns" count={composition.patterns.length}>
-            <button
-              onClick={() => {
-                const id = addPattern('pattern');
-                selectMany([id]);
-              }}
-            >
-              Add procedural pattern
-            </button>
-            {composition.patterns.map((pattern) => (
-              <ResourceTreeItem key={pattern.id} label={pattern.name} meta={`${pattern.rows} rows`}>
-                <div className="resources-tree-toolbar">
-                  <button onClick={() => selectMany([addPatternInstance(pattern.id)])}>
-                    Add linked layer
-                  </button>
-                  <button
-                    disabled={[
-                      ...composition.layers,
-                      ...composition.components.flatMap((c) => c.layers),
-                    ].some(
-                      (l) => l.element.type === 'pattern' && l.element.patternId === pattern.id,
-                    )}
-                    onClick={() => removePattern(pattern.id)}
-                  >
-                    Remove pattern
-                  </button>
-                </div>
-                <TilingPatternEditor pattern={pattern} frameRate={composition.frameRate} />
-              </ResourceTreeItem>
-            ))}
-          </ResourceTreeBranch>
+          <ShaderResources />
+          <PatternResources />
 
           <ResourceTreeBranch label="Components" count={composition.components.length}>
             <div className="resources-tree-toolbar">

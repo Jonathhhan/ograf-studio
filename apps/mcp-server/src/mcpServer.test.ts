@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
+import { readFile } from 'node:fs/promises';
 import {
   computeKeyframeFrames,
   getLayerTransformAtFrame,
@@ -10,6 +11,8 @@ import {
   createLayerKeyframe,
   createDefaultTransform,
   createLayerPropertyKeyframe,
+  createProject,
+  createShaderResource,
 } from '@ograf-editor/scene-model';
 import { createOGrafAuthoringHost } from './index';
 import {
@@ -22,6 +25,150 @@ describe('OGraf MCP authoring host', () => {
   const host = createOGrafAuthoringHost();
   const client = new Client({ name: 'ograf-mcp-test', version: '1.0.0' });
   let testEditorSocket: WebSocket | null = null;
+  it('authors the advertised visual pattern presets through their documented patch contract', async () => {
+    const result = await client.callTool({
+      name: 'ograf_get_capabilities',
+      arguments: { sections: ['tiling'] },
+    });
+    const capabilities = result.structuredContent as {
+      tiling: { presets: { entries: Array<{ id: string; patch: Record<string, unknown> }> } };
+    };
+    expect(result.structuredContent).not.toHaveProperty('elementSchemas');
+    expect(capabilities.tiling.presets.entries.map((entry) => entry.id)).toEqual([
+      'dots',
+      'stripes',
+      'chevrons',
+      'diamonds',
+      'checkerboard',
+      'monogram',
+    ]);
+    for (const preset of capabilities.tiling.presets.entries) {
+      const sessionId = `advertised-pattern-${preset.id}`;
+      host.workspace.create(sessionId);
+      const applied = await client.callTool({
+        name: 'ograf_apply_operations',
+        arguments: {
+          sessionId,
+          expectedRevision: 0,
+          operations: [{ type: 'set_tiling_pattern', patch: preset.patch }],
+        },
+      });
+      expect(applied.isError, JSON.stringify(applied.content)).not.toBe(true);
+      const snapshot = host.workspace.get(sessionId).snapshot();
+      expect(snapshot.validation.valid).toBe(true);
+      expect(snapshot.project.compositions[0]!.patterns[0]).toMatchObject(preset.patch);
+      expect(snapshot.project.compositions[0]!.layers[0]!.element).toMatchObject({
+        type: 'pattern',
+        patternId: snapshot.project.compositions[0]!.patterns[0]!.id,
+      });
+    }
+  });
+
+  it('executes the skill shader paint and loop examples with independent data defaults', async () => {
+    const guide = await readFile(
+      new URL(
+        '../../../skills/ograf-authoring/references/shaders-and-patterns.md',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const examples = [...guide.matchAll(/```json\r?\n([\s\S]*?)\r?\n```/g)].map((match) =>
+      JSON.parse(match[1]!),
+    );
+    const sessionId = 'skill-shader-loop-example';
+    host.workspace.create(sessionId);
+    const capabilities = await client.callTool({
+      name: 'ograf_get_capabilities',
+      arguments: { sections: ['shaders'] },
+    });
+    expect(capabilities.structuredContent).toHaveProperty('paintSchemas.shader');
+    expect(capabilities.structuredContent).not.toHaveProperty('tiling');
+    const result = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 0,
+        operations: [
+          { type: 'add_layer', kind: 'text', name: 'Title' },
+          examples[0],
+          ...examples[1],
+        ],
+      },
+    });
+    expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+    const composition = host.workspace.get(sessionId).snapshot().project.compositions[0]!;
+    expect(composition.dataFields).toHaveLength(1);
+    expect(composition.dataFields[0]!.defaultValue).toBe(1);
+    const sample = await client.callTool({
+      name: 'ograf_sample_tracks',
+      arguments: {
+        sessionId,
+        layerIds: [composition.layers[0]!.id],
+        frames: [12],
+        loopElapsedFrame: 50,
+        properties: ['fill.parameters.intensity'],
+      },
+    });
+    expect(sample.isError).not.toBe(true);
+    const sampled = sample.structuredContent as {
+      frames: Array<{ layers: Array<{ properties: Record<string, number> }> }>;
+    };
+    expect(sampled.frames[0]!.layers[0]!.properties['fill.parameters.intensity']).toBe(0.25);
+  });
+  it('executes the advertised MCP shader-effect example', async () => {
+    const capabilities = await client.callTool({
+      name: 'ograf_get_capabilities',
+      arguments: { sections: ['elements'] },
+    });
+    const example = (
+      capabilities.structuredContent as {
+        composableEffects: { shaderEffect: { example: Record<string, unknown> } };
+      }
+    ).composableEffects.shaderEffect.example;
+    const sessionId = 'shader-effect-capability-example';
+    host.workspace.create(sessionId);
+    const result = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 0,
+        operations: [{ type: 'add_layer', kind: 'text', name: 'Layer name' }, example],
+      },
+    });
+    expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+    expect(
+      host.workspace.get(sessionId).snapshot().project.compositions[0]!.layers[0]!.effects.stack,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'shader',
+          enabled: true,
+          shader: expect.objectContaining({ fragmentSource: expect.stringContaining('iChannel0') }),
+        }),
+      ]),
+    );
+  });
+  it('reads saved unused shaders as a project section without inventing layers or data fields', async () => {
+    const resource = createShaderResource();
+    resource.paint.name = 'Saved library shader';
+    const project = createProject({ shaders: [resource] });
+    host.workspace.create('shader-library-read', project);
+    const result = await client.callTool({
+      name: 'ograf_get_project',
+      arguments: { sessionId: 'shader-library-read', include: ['shaders'], tracks: 'none' },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      project: { shaders: [resource] },
+      validation: { valid: true },
+    });
+    expect(
+      host.workspace.get('shader-library-read').snapshot().project.compositions[0]!.layers,
+    ).toEqual([]);
+    expect(
+      host.workspace.get('shader-library-read').snapshot().project.compositions[0]!.dataFields,
+    ).toEqual([]);
+  });
   it('applies and edits pack colors through existing GDD bindings and restores their defaults', async () => {
     const sessionId = 'pack-colors-test';
     await client.callTool({ name: 'ograf_create_project', arguments: { sessionId } });
@@ -520,6 +667,11 @@ describe('OGraf MCP authoring host', () => {
     );
     expect(tools.tools.map((tool) => tool.name)).not.toContain('ograf_preview_operations');
     expect(tools.tools.map((tool) => tool.name)).not.toContain('ograf_propose_operations');
+    expect(
+      JSON.stringify(
+        tools.tools.find((tool) => tool.name === 'ograf_apply_operations')?.inputSchema,
+      ),
+    ).toContain('iChannel0=input');
   });
 
   it('renders a bounded fourteen-tool in-app surface from the same canonical records', () => {
@@ -559,6 +711,17 @@ describe('OGraf MCP authoring host', () => {
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({
       editor: { certificationReady: false, certificationLikelyCause: expect.any(String) },
+      paintSchemas: {
+        shader: {
+          speed: { default: 1, minimum: 0, maximum: 10 },
+          resolutionScale: { default: 1, minimum: 0.25, maximum: 1 },
+          runtimeProfile: {
+            renderer: 'WebGL2',
+            passes: 1,
+            supportedInputs: ['iTime', 'iResolution', 'iChannel0', 'iChannelResolution[0]'],
+          },
+        },
+      },
       elementSchemas: {
         rectangle: {
           defaultTransform: { width: 200, height: 200, shape: 'square' },
@@ -651,10 +814,18 @@ describe('OGraf MCP authoring host', () => {
         ]),
         gdd: expect.any(String),
         targetProperties: {
-          text: ['content', 'color', 'strokeColor', 'dropShadowColor'],
-          image: ['src', 'dropShadowColor'],
-          'image-sequence': ['dropShadowColor'],
-          lottie: ['dropShadowColor'],
+          text: [
+            'content',
+            'color',
+            'fill',
+            'fill.parameters.NAME',
+            'strokePaint.parameters.NAME',
+            'strokeColor',
+            'dropShadowColor',
+          ],
+          image: ['src', 'fill.parameters.NAME', 'dropShadowColor'],
+          'image-sequence': ['fill.parameters.NAME', 'dropShadowColor'],
+          lottie: ['fill.parameters.NAME', 'dropShadowColor'],
         },
       },
       canvasLayout: {
@@ -741,6 +912,78 @@ describe('OGraf MCP authoring host', () => {
       },
     });
     expect(bad.isError).toBe(true);
+  });
+
+  it('authors and inspects a shader through canonical MCP operations', async () => {
+    const sessionId = 'shader-inspection-test';
+    await client.callTool({ name: 'ograf_create_project', arguments: { sessionId } });
+    const created = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 0,
+        operations: [{ type: 'add_layer', kind: 'shader', name: 'Shader background' }],
+      },
+    });
+    expect(created.isError).not.toBe(true);
+    const edited = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 1,
+        operations: [
+          {
+            type: 'update_element',
+            layerName: 'Shader background',
+            patch: {
+              speed: 0.5,
+              resolutionScale: 0.5,
+              fragmentSource: `#pragma ograf amount slider min(0) max(1) step(0.1)
+const float amount = 0.5;
+void mainImage(out vec4 color, in vec2 coord) { color = vec4(amount); }`,
+              parameters: { amount: 0.7 },
+            },
+          },
+        ],
+      },
+    });
+    expect(edited.isError).not.toBe(true);
+    const shaderComposition = host.workspace.get(sessionId).snapshot().project.compositions[0]!;
+    expect(shaderComposition.dataFields).toHaveLength(1);
+    expect(shaderComposition.dataFields[0]).toMatchObject({
+      type: 'number',
+      defaultValue: 0.7,
+      generatedShaderParameter: { name: 'amount' },
+    });
+    expect(shaderComposition.layers[0]!.bindings).toEqual([
+      { fieldId: shaderComposition.dataFields[0]!.id, targetProperty: 'fill.parameters.amount' },
+    ]);
+    const inspected = await client.callTool({
+      name: 'ograf_inspect_scene',
+      arguments: { sessionId },
+    });
+    expect(inspected.structuredContent).toMatchObject({
+      compositions: [
+        { layers: [{ type: 'rectangle', shaderInspection: { valid: true, errors: [] } }] },
+      ],
+    });
+    const queried = await client.callTool({
+      name: 'ograf_query_scene',
+      arguments: { sessionId, elementTypes: ['rectangle'] },
+    });
+    expect(queried.isError).not.toBe(true);
+    const rejected = await client.callTool({
+      name: 'ograf_apply_operations',
+      arguments: {
+        sessionId,
+        expectedRevision: 2,
+        operations: [
+          { type: 'update_element', layerName: 'Shader background', patch: { speed: -1 } },
+        ],
+      },
+    });
+    expect(rejected.isError).toBe(true);
+    expect(host.workspace.get(sessionId).revision).toBe(2);
   });
 
   it('derives Lottie compatibility details during scene inspection', async () => {

@@ -1,3 +1,4 @@
+import { applyLayerEffectsFilter } from './effectCompositing';
 import gsap from 'gsap';
 import type { CompiledGraphicDescriptor } from '@ograf-editor/ograf-types';
 import {
@@ -6,7 +7,7 @@ import {
   getTrackValueAtFrame,
   parseEffectProperty,
   isGradientStopOffsetProperty,
-  layerEffectsToCssFilter,
+  parseShaderAnimationProperty,
   TRANSFORM_ANIMATION_PROPERTIES,
   type AnimatableLayerProperty,
   type LayerEffects,
@@ -87,8 +88,10 @@ export function buildRuntimeTimeline(
       el.style.transformOrigin = `${originState.transformOriginX * 100}% ${originState.transformOriginY * 100}%`;
     };
     const updateEffects = () => {
-      el.style.filter = layerEffectsToCssFilter(
+      applyLayerEffectsFilter(
+        el,
         resolveBoundEffects(layer, dataProvider(), effectState),
+        tl.time() * 1000,
       );
     };
     const applyInitialState = () => {
@@ -112,6 +115,7 @@ export function buildRuntimeTimeline(
     for (const property of Object.keys(tracks) as AnimatableLayerProperty[]) {
       if (
         isGradientStopOffsetProperty(property) ||
+        parseShaderAnimationProperty(property) ||
         property === 'strokeWidth' ||
         parseEffectProperty(property)
       )
@@ -155,10 +159,15 @@ export function buildRuntimeTimeline(
     for (const layer of descriptor.layers) {
       const child = layerEls.get(layer.id);
       if (child && layer.effects.stack?.some((e) => !e.legacy))
-        child.style.filter = layerEffectsToCssFilter(
+        applyLayerEffectsFilter(
+          child,
           sampleCompiledLayerVisualState(layer, frame, undefined, dataProvider()).effects,
+          tl.time() * 1000,
         );
-      if (child) applyAnimatedPaint(child, layer.animationTracks, frame);
+      if (child) {
+        const sampled = sampleCompiledLayerVisualState(layer, frame, undefined, dataProvider());
+        applyAnimatedPaint(child, sampled.paintTracks, sampled.paintFrame);
+      }
       if (child && layer.element.type === 'pattern')
         renderPatternAtElapsed(child, compiledLoopElapsedFrames(descriptor, layer, frame) ?? 0);
       if (child && layer.lighting)
@@ -227,7 +236,10 @@ export function buildRuntimeTimeline(
       layer.effects.stack?.some((e) => !e.legacy) ||
       layer.isMaskOnly ||
       Object.keys(layer.animationTracks).some(
-        (property) => isGradientStopOffsetProperty(property) || property === 'strokeWidth',
+        (property) =>
+          isGradientStopOffsetProperty(property) ||
+          property === 'strokeWidth' ||
+          !!parseShaderAnimationProperty(property),
       ),
   );
   if (hasDynamicRendering) {

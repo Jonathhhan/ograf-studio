@@ -4,10 +4,16 @@ import { PropertyRow } from '../components/PropertyRow';
 import { EffectStackEditor } from './EffectStackEditor';
 import { ImageSourceEditor } from './ImageSourceEditor';
 import { LayerLightingEditor } from './LayerLightingEditor';
-import { getEffectStack, EFFECT_CATALOG, effectProperty } from '@ograf-editor/scene-model';
+import {
+  getEffectStack,
+  EFFECT_CATALOG,
+  effectProperty,
+  effectParameterValue,
+} from '@ograf-editor/scene-model';
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { LayerMaskEditor } from './LayerMaskEditor';
 import { TilingPatternEditor } from './TilingPatternEditor';
+import { PatternInstanceActions } from './PatternResources';
 import { usePathEditStore } from '../state/pathEditStore';
 import { pathConversionError } from '@ograf-editor/scene-model';
 import {
@@ -17,13 +23,17 @@ import {
   type ElementFields,
 } from '../state/projectStore';
 import { useSelectionStore } from '../state/selectionStore';
+import { useShaderParameterPreviewStore } from '../state/shaderParameterPreviewStore';
 import { bindableProperties } from '../state/dataBinding';
 import type {
   BlendMode,
   CornerRadii,
   DesignTokenTargetProperty,
   DesignTokenType,
+  Layer,
   LayerTransform,
+  ShaderPaintSlot,
+  ShaderParameterValue,
   TextElement,
 } from '@ograf-editor/scene-model';
 import {
@@ -31,6 +41,13 @@ import {
   createCornerRadii,
   findLayerKeyframeAtFrame,
   getLayerPropertyValueAtFrame,
+  getElementFill,
+  getElementShaderPaint,
+  sampleShaderAnimationTracks,
+  parseShaderAnimationProperty,
+  isGradientPaint,
+  isShaderPaint,
+  shaderPaintConflictsWithBinding,
   getPaintAtFrame,
   listFieldLeafPaths,
   getResolvedLayerAnimationTracks,
@@ -58,6 +75,91 @@ const TRANSFORM_FIELDS: { key: keyof LayerTransform; label: string; step?: numbe
   { key: 'height', label: 'H' },
   { key: 'rotation', label: 'Rotation' },
 ];
+
+const NUMERIC_MAPPING_PROPERTIES = new Set([
+  'fontSize',
+  'fontWeight',
+  'strokeWidth',
+  'lineHeight',
+  'letterSpacing',
+  'baselineShift',
+  'minFontSize',
+]);
+
+const ENUM_MAPPING_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  textAlign: [
+    { value: 'left', label: 'Left' },
+    { value: 'center', label: 'Center' },
+    { value: 'right', label: 'Right' },
+  ],
+  verticalAlign: [
+    { value: 'top', label: 'Top' },
+    { value: 'middle', label: 'Middle' },
+    { value: 'bottom', label: 'Bottom' },
+  ],
+  textTransform: [
+    { value: 'none', label: 'None' },
+    { value: 'uppercase', label: 'Uppercase' },
+    { value: 'lowercase', label: 'Lowercase' },
+    { value: 'capitalize', label: 'Capitalize' },
+  ],
+  overflowPolicy: [
+    { value: 'visible', label: 'Visible' },
+    { value: 'clip', label: 'Clip' },
+    { value: 'ellipsis', label: 'Ellipsis' },
+  ],
+  autoFit: [
+    { value: 'auto-size', label: 'Auto size box' },
+    { value: 'shrink-to-fit', label: 'Shrink text to box' },
+    { value: 'fit-to-width', label: 'Fit to width' },
+    { value: 'squeeze', label: 'Squeeze' },
+    { value: 'fixed', label: 'Fixed box' },
+  ],
+};
+
+function isColorMappingProperty(property: string): boolean {
+  return (
+    property === 'fill' ||
+    property === 'color' ||
+    property === 'strokeColor' ||
+    property === 'dropShadowColor' ||
+    property.endsWith('.color')
+  );
+}
+
+function colorInputValue(value: string): string {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : '#000000';
+}
+
+function selectOptionConstantValueMap(
+  field: { type: string; options?: Array<{ value: string }> },
+  value: unknown,
+): Record<string, string> | undefined {
+  if (field.type !== 'select' || !field.options) return undefined;
+  const mappedValue =
+    typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+      ? String(value)
+      : '';
+  return Object.fromEntries(field.options.map((option) => [option.value, mappedValue]));
+}
+
+function layerBindingPropertyValue(layer: Layer, property: string): unknown {
+  if (property === 'dropShadowColor') return layer.effects.dropShadowColor;
+  const effectValue = effectParameterValue(layer.effects, property);
+  if (effectValue !== undefined) return effectValue;
+
+  const segments = property.replaceAll(/\[(\d+)\]/g, '.$1').split('.');
+  let value: unknown = layer.element;
+  for (const segment of segments) {
+    if (!value || typeof value !== 'object') return undefined;
+    value = (value as Record<string, unknown>)[segment];
+  }
+  if (property === 'fill' && value && typeof value === 'object') {
+    if ('color' in value) return (value as { color: unknown }).color;
+    if ('stops' in value && Array.isArray(value.stops)) return value.stops[0]?.color;
+  }
+  return value;
+}
 
 function elementSectionLabel(type: string): string {
   return type
@@ -245,6 +347,8 @@ export function InspectorPanel() {
   const currentFrame = useTimelineStore((s) => s.currentFrame);
   const selectedLayerId = useSelectionStore((s) => s.selectedLayerId);
   const liveTransform = useSelectionStore((s) => s.liveTransform);
+  const previewShaderParameter = useShaderParameterPreviewStore((s) => s.previewParameter);
+  const clearShaderParameterPreview = useShaderParameterPreviewStore((s) => s.clearPreview);
   const renameLayer = useProjectStore((s) => s.renameLayer);
   const reorderLayers = useProjectStore((s) => s.reorderLayers);
   const updateLayerTransform = useProjectStore((s) => s.updateLayerTransform);
@@ -252,6 +356,7 @@ export function InspectorPanel() {
   const updateLayerElement = useProjectStore((s) => s.updateLayerElement);
   const updateLayerTextStroke = useProjectStore((s) => s.updateLayerTextStroke);
   const updateLayerPaint = useProjectStore((s) => s.updateLayerPaint);
+  const updateLayerShaderParameter = useProjectStore((s) => s.updateLayerShaderParameter);
   const setLayerBindings = useProjectStore((s) => s.setLayerBindings);
   const toggleLayerLock = useProjectStore((s) => s.toggleLayerLock);
   const setLayerParent = useProjectStore((s) => s.setLayerParent);
@@ -261,6 +366,11 @@ export function InspectorPanel() {
   const setLayerBlendMode = useProjectStore((s) => s.setLayerBlendMode);
   const bindDesignToken = useProjectStore((s) => s.bindDesignToken);
   const unbindDesignToken = useProjectStore((s) => s.unbindDesignToken);
+
+  useEffect(
+    () => () => clearShaderParameterPreview(),
+    [clearShaderParameterPreview, selectedLayerId],
+  );
 
   const layer = composition.layers.find((l) => l.id === selectedLayerId);
   const lottieInspection = useMemo(
@@ -282,6 +392,19 @@ export function InspectorPanel() {
   }
 
   const roundedFrame = Math.round(currentFrame);
+  const previewLayerShaderParameter = (
+    slot: ShaderPaintSlot,
+    name: string,
+    value: ShaderParameterValue,
+  ) => previewShaderParameter(layer.id, slot, name, value);
+  const commitLayerShaderParameter = (
+    slot: ShaderPaintSlot,
+    name: string,
+    value: ShaderParameterValue,
+  ) => {
+    updateLayerShaderParameter(layer.id, roundedFrame, slot, name, value);
+    clearShaderParameterPreview();
+  };
   const activeLayerKeyframe = findLayerKeyframeAtFrame(layer, roundedFrame);
   const authoredPose = getLayerTransformAtFrame(layer, currentFrame);
   const pose =
@@ -290,12 +413,23 @@ export function InspectorPanel() {
       : authoredPose;
   const isLiveTransform = liveTransform?.layerId === layer.id;
   const alphaPercent = opacityToAlphaPercent(pose.opacity);
+  const sampledShaderElement = sampleShaderAnimationTracks(
+    layer.element,
+    getResolvedLayerAnimationTracks(layer),
+    currentFrame,
+  );
+  const animatedShaderSlots = new Set(
+    [layer.animationTracks, layer.loop?.tracks].flatMap((tracks) =>
+      Object.entries(tracks ?? {})
+        .filter(([, keys]) => keys?.length)
+        .map(([property]) => parseShaderAnimationProperty(property)?.slot)
+        .filter(Boolean),
+    ),
+  );
+  const authoredPaint = getElementFill(sampledShaderElement);
   const evaluatedPaint =
-    layer.element.type === 'rectangle' ||
-    layer.element.type === 'ellipse' ||
-    layer.element.type === 'path' ||
-    layer.element.type === 'pattern'
-      ? getPaintAtFrame(layer.element.fill, getResolvedLayerAnimationTracks(layer), currentFrame)
+    authoredPaint !== undefined
+      ? getPaintAtFrame(authoredPaint, getResolvedLayerAnimationTracks(layer), currentFrame)
       : null;
   const evaluatedTextStrokeWidth =
     layer.element.type === 'text'
@@ -326,7 +460,9 @@ export function InspectorPanel() {
     }
   };
 
-  const setTextStroke = (patch: Partial<Pick<TextElement, 'strokeColor' | 'strokeWidth'>>) => {
+  const setTextStroke = (
+    patch: Partial<Pick<TextElement, 'strokeColor' | 'strokeWidth' | 'strokePaint'>>,
+  ) => {
     if (layer.element.type !== 'text') return;
     updateLayerTextStroke(layer.id, roundedFrame, patch);
     if (patch.strokeWidth !== undefined && layer.element.autoFit === 'auto-size') {
@@ -356,11 +492,13 @@ export function InspectorPanel() {
     tokenType: DesignTokenType;
   }> = [
     ...(layer.element.type in DESIGN_TOKEN_TARGETS
-      ? DESIGN_TOKEN_TARGETS[layer.element.type as keyof typeof DESIGN_TOKEN_TARGETS]
+      ? DESIGN_TOKEN_TARGETS[layer.element.type as keyof typeof DESIGN_TOKEN_TARGETS].filter(
+          (target) => !shaderPaintConflictsWithBinding(layer.element, target.property),
+        )
       : []),
     { property: 'dropShadowColor', label: 'Shadow colour', tokenType: 'color' },
   ];
-  if ('fill' in layer.element && typeof layer.element.fill !== 'string') {
+  if ('fill' in layer.element && isGradientPaint(layer.element.fill)) {
     tokenTargets.push(
       ...layer.element.fill.stops.map((_, index) => ({
         property: `fill.stops[${index}].color` as const,
@@ -503,6 +641,23 @@ export function InspectorPanel() {
         {layer.element.type === 'image' && (
           <ImageSourceEditor key={`image-${layer.id}`} layer={layer} assets={composition.assets} />
         )}
+        {(layer.element.type === 'image' ||
+          layer.element.type === 'image-sequence' ||
+          layer.element.type === 'lottie') && (
+          <PaintEditor
+            media
+            disabled={layer.isLocked}
+            value={evaluatedPaint ?? layer.element.fill}
+            shaderAnimationActive={animatedShaderSlots.has('fill')}
+            onShaderParameterPreview={(name, value) =>
+              previewLayerShaderParameter('fill', name, value)
+            }
+            onShaderParameterChange={(name, value) =>
+              commitLayerShaderParameter('fill', name, value)
+            }
+            onChange={(fill) => updateLayerPaint(layer.id, roundedFrame, fill)}
+          />
+        )}
         {layer.element.type !== 'image' && (
           <h3 className="inspector-section">{elementSectionLabel(layer.element.type)}</h3>
         )}
@@ -523,7 +678,15 @@ export function InspectorPanel() {
         {layer.element.type === 'rectangle' && (
           <>
             <PaintEditor
+              disabled={layer.isLocked}
               value={evaluatedPaint ?? layer.element.fill}
+              shaderAnimationActive={animatedShaderSlots.has('fill')}
+              onShaderParameterPreview={(name, value) =>
+                previewLayerShaderParameter('fill', name, value)
+              }
+              onShaderParameterChange={(name, value) =>
+                commitLayerShaderParameter('fill', name, value)
+              }
               onChange={(fill) => updateLayerPaint(layer.id, roundedFrame, fill)}
             />
             <CornerRadiusEditor
@@ -536,7 +699,15 @@ export function InspectorPanel() {
         {layer.element.type === 'ellipse' && (
           <>
             <PaintEditor
+              disabled={layer.isLocked}
               value={evaluatedPaint ?? layer.element.fill}
+              shaderAnimationActive={animatedShaderSlots.has('fill')}
+              onShaderParameterPreview={(name, value) =>
+                previewLayerShaderParameter('fill', name, value)
+              }
+              onShaderParameterChange={(name, value) =>
+                commitLayerShaderParameter('fill', name, value)
+              }
               onChange={(fill) => updateLayerPaint(layer.id, roundedFrame, fill)}
             />
             <PropertyRow
@@ -585,36 +756,37 @@ export function InspectorPanel() {
                 onChange={(e) => setTextElement({ content: e.target.value })}
               />
             </PropertyRow>
-            <PropertyRow
-              help={
-                'Fill color of the text characters. A Brand Kit token or runtime color binding can control this value.'
+            <PaintEditor
+              disabled={layer.isLocked}
+              value={evaluatedPaint ?? layer.element.color}
+              shaderAnimationActive={animatedShaderSlots.has('fill')}
+              onShaderParameterPreview={(name, value) =>
+                previewLayerShaderParameter('fill', name, value)
               }
-              className="inspector-row"
-            >
-              <span>Color</span>
-              <input
-                type="color"
-                value={layer.element.color}
-                onChange={(e) => setTextElement({ color: e.target.value })}
-              />
-            </PropertyRow>
-            <PropertyRow
-              help={
-                'Color of the outline around the text characters. Use Stroke Width to set its thickness.'
+              onShaderParameterChange={(name, value) =>
+                commitLayerShaderParameter('fill', name, value)
               }
-              className="inspector-row"
-            >
-              <span>Stroke Color</span>
-              <input
-                type="color"
-                value={
-                  layer.element.strokeColor === 'transparent'
-                    ? '#000000'
-                    : layer.element.strokeColor
-                }
-                onChange={(event) => setTextStroke({ strokeColor: event.target.value })}
-              />
-            </PropertyRow>
+              onChange={(fill) => updateLayerPaint(layer.id, roundedFrame, fill)}
+            />
+            <PaintEditor
+              label="Outline"
+              disabled={layer.isLocked}
+              allowGradient={false}
+              value={
+                getElementShaderPaint(sampledShaderElement, 'stroke') ?? layer.element.strokeColor
+              }
+              shaderAnimationActive={animatedShaderSlots.has('stroke')}
+              onShaderParameterPreview={(name, value) =>
+                previewLayerShaderParameter('stroke', name, value)
+              }
+              onShaderParameterChange={(name, value) =>
+                commitLayerShaderParameter('stroke', name, value)
+              }
+              onChange={(paint) => {
+                if (isShaderPaint(paint)) setTextStroke({ strokePaint: paint });
+                else if (typeof paint === 'string') setTextStroke({ strokeColor: paint });
+              }}
+            />
             <PropertyRow
               help={
                 'Thickness of the text outline in pixels. Zero removes the outline; larger values can improve separation from the background.'
@@ -900,7 +1072,15 @@ export function InspectorPanel() {
               />
             </PropertyRow>
             <PaintEditor
+              disabled={layer.isLocked}
               value={evaluatedPaint ?? layer.element.fill}
+              shaderAnimationActive={animatedShaderSlots.has('fill')}
+              onShaderParameterPreview={(name, value) =>
+                previewLayerShaderParameter('fill', name, value)
+              }
+              onShaderParameterChange={(name, value) =>
+                commitLayerShaderParameter('fill', name, value)
+              }
               onChange={(fill) => updateLayerPaint(layer.id, roundedFrame, fill)}
             />
             <PropertyRow
@@ -979,6 +1159,11 @@ export function InspectorPanel() {
         )}
         {layer.element.type === 'pattern' && (
           <>
+            <PatternInstanceActions
+              layerId={layer.id}
+              patternId={layer.element.patternId}
+              locked={layer.isLocked}
+            />
             <PropertyRow
               help={
                 'Shared procedural pattern used by this layer. Editing that pattern updates all linked fills, outlines and masks.'
@@ -999,7 +1184,15 @@ export function InspectorPanel() {
               </select>
             </PropertyRow>
             <PaintEditor
+              disabled={layer.isLocked}
               value={evaluatedPaint ?? layer.element.fill}
+              shaderAnimationActive={animatedShaderSlots.has('fill')}
+              onShaderParameterPreview={(name, value) =>
+                previewLayerShaderParameter('fill', name, value)
+              }
+              onShaderParameterChange={(name, value) =>
+                commitLayerShaderParameter('fill', name, value)
+              }
               onChange={(fill) => updateLayerPaint(layer.id, roundedFrame, fill)}
             />
             <PropertyRow
@@ -1375,7 +1568,18 @@ export function InspectorPanel() {
                         : [];
                       const bindings = layer.bindings.map((candidate, candidateIndex) =>
                         candidateIndex === index
-                          ? { ...candidate, fieldId: event.target.value, sourcePath: nextPath }
+                          ? {
+                              ...candidate,
+                              fieldId: event.target.value,
+                              sourcePath: nextPath,
+                              valueMap:
+                                candidate.valueMap && nextField
+                                  ? selectOptionConstantValueMap(
+                                      nextField,
+                                      layerBindingPropertyValue(layer, candidate.targetProperty),
+                                    )
+                                  : undefined,
+                            }
                           : candidate,
                       );
                       setLayerBindings(layer.id, bindings);
@@ -1428,9 +1632,17 @@ export function InspectorPanel() {
                     aria-label={`Binding ${index + 1} property`}
                     value={binding.targetProperty}
                     onChange={(event) => {
+                      const targetProperty = event.target.value;
+                      const nextValueMap =
+                        binding.valueMap && field?.type === 'select'
+                          ? selectOptionConstantValueMap(
+                              field,
+                              layerBindingPropertyValue(layer, targetProperty),
+                            )
+                          : undefined;
                       const bindings = layer.bindings.map((candidate, candidateIndex) =>
                         candidateIndex === index
-                          ? { ...candidate, targetProperty: event.target.value }
+                          ? { ...candidate, targetProperty, valueMap: nextValueMap }
                           : candidate,
                       );
                       setLayerBindings(layer.id, bindings);
@@ -1453,19 +1665,136 @@ export function InspectorPanel() {
                       ))}
                   </select>
                 </PropertyRow>
-                <button
-                  type="button"
-                  className="inspector-binding-remove"
-                  aria-label={`Remove binding ${index + 1}`}
-                  onClick={() =>
-                    setLayerBindings(
-                      layer.id,
-                      layer.bindings.filter((_, candidateIndex) => candidateIndex !== index),
-                    )
-                  }
-                >
-                  Remove
-                </button>
+                {field?.type === 'select' &&
+                  binding.valueMap &&
+                  field.options.map((option) => {
+                    const mappedValue = binding.valueMap?.[option.value];
+                    const mappingValue =
+                      typeof mappedValue === 'string' ||
+                      typeof mappedValue === 'number' ||
+                      typeof mappedValue === 'boolean'
+                        ? String(mappedValue)
+                        : option.value;
+                    const enumOptions = ENUM_MAPPING_OPTIONS[binding.targetProperty];
+                    const updateMapping = (value: string) => {
+                      const valueMap = { ...binding.valueMap };
+                      valueMap[option.value] = value || option.value;
+                      setLayerBindings(
+                        layer.id,
+                        layer.bindings.map((candidate, candidateIndex) =>
+                          candidateIndex === index
+                            ? {
+                                ...candidate,
+                                valueMap: Object.keys(valueMap).length > 0 ? valueMap : undefined,
+                              }
+                            : candidate,
+                        ),
+                      );
+                    };
+                    return (
+                      <PropertyRow
+                        key={option.value}
+                        help={`Value assigned to ${binding.targetProperty} when ${field.label || field.key} is ${option.label}.`}
+                        className="inspector-row"
+                      >
+                        <span>{option.label}</span>
+                        {binding.targetProperty === 'fontFamily' ? (
+                          <select
+                            aria-label={`Binding ${index + 1} map ${option.label}`}
+                            value={mappingValue}
+                            onChange={(event) => updateMapping(event.target.value)}
+                          >
+                            {availableFontOptions.map((font) => (
+                              <option key={font.value} value={font.value}>
+                                {font.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : isColorMappingProperty(binding.targetProperty) ? (
+                          <input
+                            type="color"
+                            aria-label={`Binding ${index + 1} map ${option.label}`}
+                            value={colorInputValue(mappingValue)}
+                            onChange={(event) => updateMapping(event.target.value)}
+                          />
+                        ) : NUMERIC_MAPPING_PROPERTIES.has(binding.targetProperty) ? (
+                          <input
+                            type="number"
+                            step="any"
+                            aria-label={`Binding ${index + 1} map ${option.label}`}
+                            value={mappingValue}
+                            placeholder={option.value}
+                            onChange={(event) => updateMapping(event.target.value)}
+                          />
+                        ) : enumOptions ? (
+                          <select
+                            aria-label={`Binding ${index + 1} map ${option.label}`}
+                            value={mappingValue}
+                            onChange={(event) => updateMapping(event.target.value)}
+                          >
+                            {enumOptions.map((value) => (
+                              <option key={value.value} value={value.value}>
+                                {value.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            aria-label={`Binding ${index + 1} map ${option.label}`}
+                            value={mappingValue}
+                            placeholder={option.value}
+                            onChange={(event) => updateMapping(event.target.value)}
+                          />
+                        )}
+                      </PropertyRow>
+                    );
+                  })}
+                <div className="inspector-binding-actions">
+                  {field?.type === 'select' && (
+                    <label className="inspector-binding-mode">
+                      <input
+                        type="checkbox"
+                        aria-label={`Binding ${index + 1} advanced mapping`}
+                        checked={Boolean(binding.valueMap)}
+                        onChange={(event) =>
+                          setLayerBindings(
+                            layer.id,
+                            layer.bindings.map((candidate, candidateIndex) =>
+                              candidateIndex === index
+                                ? {
+                                    ...candidate,
+                                    valueMap: event.target.checked
+                                      ? selectOptionConstantValueMap(
+                                          field,
+                                          layerBindingPropertyValue(
+                                            layer,
+                                            candidate.targetProperty,
+                                          ),
+                                        )
+                                      : undefined,
+                                  }
+                                : candidate,
+                            ),
+                          )
+                        }
+                      />
+                      Advanced mapping
+                    </label>
+                  )}
+                  <button
+                    type="button"
+                    className="inspector-binding-remove"
+                    aria-label={`Remove binding ${index + 1}`}
+                    onClick={() =>
+                      setLayerBindings(
+                        layer.id,
+                        layer.bindings.filter((_, candidateIndex) => candidateIndex !== index),
+                      )
+                    }
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
             );
           })}

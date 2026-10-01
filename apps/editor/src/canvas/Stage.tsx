@@ -35,7 +35,6 @@ import {
   applyCompiledClipPaths,
   applyCompiledMasks,
   applyCompiledLayerVisualState,
-  compiledLoopElapsedFrames,
   sampleCompiledLayerVisualState,
 } from '@ograf-editor/ograf-runtime';
 import { LayerNode } from './LayerNode';
@@ -69,6 +68,8 @@ import {
   type StageZoomAnchor,
 } from './stageZoom';
 import { nextOgrafStepFrame } from './ografStepPlayback';
+import { ShaderPreviewClock } from './shaderPreviewClock';
+import { StageLoopPreviewClock } from './stageLoopPreviewClock';
 import { isInteractiveShortcutTarget } from '../state/keyboardShortcuts';
 import { duplicateLayerSelection } from '../state/editorShortcuts';
 import './Stage.css';
@@ -80,6 +81,27 @@ export function Stage({ style }: { style?: CSSProperties }) {
   const imagePlacement = useImagePlacement();
   const [draggingImages, setDraggingImages] = useState(false);
   const composition = useActiveComposition();
+  const shaderClockRef = useRef<{
+    compositionId: string;
+    frameRate: number;
+    clock: ShaderPreviewClock;
+    loopClock: StageLoopPreviewClock;
+  } | null>(null);
+  if (
+    shaderClockRef.current?.compositionId !== composition.id ||
+    shaderClockRef.current.frameRate !== composition.frameRate
+  ) {
+    shaderClockRef.current = {
+      compositionId: composition.id,
+      frameRate: composition.frameRate,
+      clock: new ShaderPreviewClock(
+        (useTimelineStore.getState().currentFrame / composition.frameRate) * 1000,
+      ),
+      loopClock: new StageLoopPreviewClock(),
+    };
+  }
+  const shaderPreviewClock = shaderClockRef.current.clock;
+  const loopPreviewClock = shaderClockRef.current.loopClock;
   const previewLoopLayerId = useTimelineStore((state) => state.previewLoopLayerId);
   const updateLayerTransform = useProjectStore((s) => s.updateLayerTransform);
   const pasteLayers = useProjectStore((s) => s.pasteLayers);
@@ -609,6 +631,17 @@ export function Stage({ style }: { style?: CSSProperties }) {
   // GSAP itself always works in seconds; frame <-> seconds conversion happens only at this
   // boundary, via the composition's frameRate, so the rest of the app can stay frame-based.
   const timelineRef = useRef<ReturnType<typeof buildMasterTimeline> | null>(null);
+  useEffect(
+    () =>
+      useTimelineStore.subscribe((state, previous) => {
+        // Direct agent/project frame changes are also seeks. Automatic Step arrival publishes its
+        // final frame while playing, so it deliberately leaves the content clock running.
+        if (!state.isPlaying && state.currentFrame !== previous.currentFrame) {
+          shaderPreviewClock.seek((state.currentFrame / composition.frameRate) * 1000);
+        }
+      }),
+    [composition.frameRate, shaderPreviewClock],
+  );
   const maskTestValues = useTestDataStore((state) => state.values);
   useEffect(() => {
     const descriptor = compileDescriptor(composition, { includeGuides: true });
@@ -647,6 +680,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
 
     tl.eventCallback('onUpdate', () => setCurrentFrame(tl.time() * frameRate));
     tl.eventCallback('onComplete', () => {
+      shaderPreviewClock.pause(performance.now());
       setPlaying(false);
     });
 
@@ -659,6 +693,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
         setPlaying(false);
         tl.seek(Math.max(0, Math.min(durationFrames, frame)) / frameRate, true);
         setCurrentFrame(tl.time() * frameRate);
+        shaderPreviewClock.seek(tl.time() * 1000);
       },
       play: () => {
         // GSAP remains at its completed position after reaching the end. A transport's Play
@@ -666,7 +701,9 @@ export function Stage({ style }: { style?: CSSProperties }) {
         if (tl.time() >= tl.duration()) {
           tl.seek(0, true);
           setCurrentFrame(0);
+          shaderPreviewClock.seek(0);
         }
+        shaderPreviewClock.play(performance.now());
         setPlaying(true);
         const current = tl.time() * frameRate;
         const nextStep = useTimelineStore.getState().pauseAtOgrafSteps
@@ -692,6 +729,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
         segmentTween?.kill();
         segmentTween = null;
         tl.pause();
+        shaderPreviewClock.pause(performance.now());
         setPlaying(false);
       },
       stop: () => {
@@ -700,6 +738,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
         tl.pause();
         tl.seek(0, true);
         setCurrentFrame(0);
+        shaderPreviewClock.seek(0);
         setPlaying(false);
       },
     };
@@ -714,7 +753,14 @@ export function Stage({ style }: { style?: CSSProperties }) {
       tl.kill();
       if (useTimelineStore.getState().controller === controller) setController(null);
     };
-  }, [composition, setController, setCurrentFrame, setDurationFrames, setPlaying]);
+  }, [
+    composition,
+    setController,
+    setCurrentFrame,
+    setDurationFrames,
+    setPlaying,
+    shaderPreviewClock,
+  ]);
 
   // Normal Timeline playback uses the compiled runtime sampler for every active local loop, not
   // only the manually previewed layer. This keeps ticker crawls, pulses, and other ambient motion
@@ -725,11 +771,6 @@ export function Stage({ style }: { style?: CSSProperties }) {
       (layer) => layer.loop || layer.lighting || layer.element.type === 'pattern',
     );
     if (loopLayers.length === 0) return;
-    const parkedFrame = useTimelineStore.getState().currentFrame;
-    const parkedAtStep = descriptor.keyframes.some(
-      (keyframe) => keyframe.role === 'step' && Math.abs(keyframe.frame - parkedFrame) < 0.01,
-    );
-    if (!isPlaying && !previewLoopLayerId && !parkedAtStep) return;
     const previewTimeline = timelineRef.current;
     const previewMoveable = moveableRef.current;
     const previewLightingPattern = descriptor.layers.find(
@@ -740,10 +781,10 @@ export function Stage({ style }: { style?: CSSProperties }) {
     const render = (now: number) => {
       const baseFrame = (previewTimeline?.time() ?? 0) * descriptor.frameRate;
       const timelineIsPlaying = useTimelineStore.getState().isPlaying;
-      const heldFrames =
-        !timelineIsPlaying && parkedAtStep ? ((now - epoch) / 1000) * descriptor.frameRate : 0;
+      const contentTimeMs = shaderPreviewClock.sample(now);
       const states = new Map<string, ReturnType<typeof sampleCompiledLayerVisualState>>();
       for (const layer of descriptor.layers) {
+        const activeElapsed = loopPreviewClock.sample(descriptor, layer, baseFrame, contentTimeMs);
         const elapsed =
           (layer.id === previewLoopLayerId ||
             (previewLightingPattern &&
@@ -752,7 +793,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
                   layer.element.patternId === previewLightingPattern)))) &&
           !timelineIsPlaying
             ? ((now - epoch) / 1000) * descriptor.frameRate
-            : compiledLoopElapsedFrames(descriptor, layer, baseFrame, heldFrames);
+            : activeElapsed;
         const state = sampleCompiledLayerVisualState(
           layer,
           baseFrame,
@@ -761,21 +802,38 @@ export function Stage({ style }: { style?: CSSProperties }) {
         );
         states.set(layer.id, state);
         const element = layerRefs.current.get(layer.id);
-        if (element) applyCompiledLayerVisualState(element, state);
+        if (element) applyCompiledLayerVisualState(element, state, contentTimeMs);
       }
       applyCompiledClipPaths(descriptor, layerRefs.current, states);
       applyCompiledMasks(descriptor, layerRefs.current, states);
       if (selectedLayerIds.length > 0) previewMoveable?.updateTarget();
-      animationFrame = requestAnimationFrame(render);
+      animationFrame =
+        timelineIsPlaying || shaderPreviewClock.running || previewLoopLayerId
+          ? requestAnimationFrame(render)
+          : 0;
     };
-    animationFrame = requestAnimationFrame(render);
+    const sync = () => {
+      cancelAnimationFrame(animationFrame);
+      render(performance.now());
+    };
+    const unsubscribeClock = shaderPreviewClock.subscribe(sync);
+    sync();
     return () => {
+      unsubscribeClock();
       cancelAnimationFrame(animationFrame);
       const frame = useTimelineStore.getState().currentFrame;
       previewTimeline?.seek(frame / composition.frameRate, true);
       previewMoveable?.updateTarget();
     };
-  }, [composition, isPlaying, previewLoopLayerId, selectedLayerIds]);
+  }, [
+    composition,
+    isPlaying,
+    previewLoopLayerId,
+    selectedLayerIds,
+    shaderPreviewClock,
+    loopPreviewClock,
+    maskTestValues,
+  ]);
 
   // The timeline effect above normalizes percentage transform origins back to pixel values. Its DOM
   // work must finish before Moveable measures the committed target, particularly after north/west
@@ -984,6 +1042,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
                       dataFields={composition.dataFields}
                       clipPath={clipPath}
                       compositionFrameRate={composition.frameRate}
+                      shaderPreviewClock={shaderPreviewClock}
                       patterns={composition.patterns}
                     />
                   );
