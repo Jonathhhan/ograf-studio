@@ -3,6 +3,16 @@ import { inspectShaderSource, resolveShaderParameters, getElementShaderPaint } f
 import { isGradientPaint } from './paint';
 import { normalizeShaderParameterValue, shaderColorToHex } from './shaderParameters';
 
+const NUMERIC_TEXT_PROPERTIES = new Set([
+  'fontSize',
+  'fontWeight',
+  'strokeWidth',
+  'lineHeight',
+  'letterSpacing',
+  'baselineShift',
+  'minFontSize',
+]);
+
 /** Immutable data overrides, shared by Studio, diagnostic capture and exported runtime. */
 export function applyElementDataValue(element: Element, property: string, value: unknown): Element {
   if (property === 'dropShadowColor' || property.startsWith('effects.')) return element;
@@ -56,6 +66,10 @@ export function applyElementDataValue(element: Element, property: string, value:
   }
   if (element.type === 'text' && property === 'content') {
     return { ...element, content: String(value), runs: [] };
+  }
+  if (element.type === 'text' && NUMERIC_TEXT_PROPERTIES.has(property)) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? ({ ...element, [property]: numeric } as Element) : element;
   }
   return {
     ...element,
