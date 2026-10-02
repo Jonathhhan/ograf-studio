@@ -47,6 +47,36 @@ export interface EllipseElement {
   strokeWidth: number;
 }
 
+export type ChartPreset =
+  | 'bar'
+  | 'horizontal-bar'
+  | 'stacked-bar'
+  | 'line'
+  | 'area'
+  | 'pie'
+  | 'doughnut'
+  | 'radar'
+  | 'polar-area';
+
+/** JSON-only Chart.js input; projects cannot include executable callbacks or plugins. */
+export interface ChartElement {
+  type: 'chart';
+  preset: ChartPreset;
+  data: {
+    labels: string[];
+    datasets: Array<{
+      label: string;
+      data: number[];
+      backgroundColor: string | string[];
+      borderColor: string;
+    }>;
+  };
+  textColor: string;
+  fontSize: number;
+  showLegend: boolean;
+  showGrid: boolean;
+}
+
 export interface TextRun {
   text: string;
   color?: string;
@@ -325,6 +355,7 @@ export interface ShaderResource {
 export type Element =
   | RectangleElement
   | EllipseElement
+  | ChartElement
   | TextElement
   | ImageElement
   | PathElement

@@ -76,6 +76,61 @@ function successful(result: unknown): boolean {
   );
 }
 
+function StructuredPreviewValue({
+  fieldKey,
+  type,
+  value,
+  onValidChange,
+}: {
+  fieldKey: string;
+  type: 'array' | 'object';
+  value: TestValue;
+  onValidChange: (value: TestValue) => void;
+}) {
+  const [draft, setDraft] = useState(() => JSON.stringify(value, null, 2));
+  const [error, setError] = useState('');
+  const lastEmitted = useRef(JSON.stringify(value));
+
+  useEffect(() => {
+    const incoming = JSON.stringify(value);
+    if (incoming === lastEmitted.current) return;
+    setDraft(JSON.stringify(value, null, 2));
+    setError('');
+    lastEmitted.current = incoming;
+  }, [value]);
+
+  return (
+    <div className="preview-json-field">
+      <textarea
+        aria-label={`${fieldKey} JSON`}
+        aria-invalid={Boolean(error)}
+        rows={6}
+        spellCheck={false}
+        value={draft}
+        onChange={(event) => {
+          const next = event.target.value;
+          setDraft(next);
+          try {
+            const parsed: unknown = JSON.parse(next);
+            if (
+              type === 'array'
+                ? !Array.isArray(parsed)
+                : !parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+            )
+              throw new Error(`Enter a JSON ${type}.`);
+            lastEmitted.current = JSON.stringify(parsed);
+            onValidChange(parsed as TestValue);
+            setError('');
+          } catch (reason) {
+            setError(reason instanceof Error ? reason.message : `Enter a JSON ${type}.`);
+          }
+        }}
+      />
+      {error && <span role="alert">{error}</span>}
+    </div>
+  );
+}
+
 export function PreviewExportPanel() {
   const { window, document: ownerDocument } = useEditorWindow();
   const project = useProjectStore((s) => s.project);
@@ -758,7 +813,17 @@ export function PreviewExportPanel() {
                     className="preview-data-row"
                   >
                     <span>{field.label || field.key}</span>
-                    {field.type === 'select' ? (
+                    {field.type === 'array' || field.type === 'object' ? (
+                      <StructuredPreviewValue
+                        key={field.id}
+                        fieldKey={field.key}
+                        type={field.type}
+                        value={dataForm[field.key] ?? field.defaultValue}
+                        onValidChange={(value) =>
+                          setDataForm((previous) => ({ ...previous, [field.key]: value }))
+                        }
+                      />
+                    ) : field.type === 'select' ? (
                       <select
                         value={String(dataForm[field.key] ?? field.defaultValue)}
                         onChange={(event) =>

@@ -128,6 +128,10 @@ realtime playback retain one efficient player. Certification compares Canvas pix
 across its backward/repeated seek. A successful Canvas result does not establish SVG, original
 After Effects, HbbTV, or other target-renderer parity, so report those separately.
 
+## Chart.js layers
+
+See [charts.md](./references/charts.md) for chart authoring and verification.
+
 ## Composable effects
 
 Use `add_effect`, `update_effect`, `duplicate_effect`, `remove_effect`, and `reorder_effects` inside

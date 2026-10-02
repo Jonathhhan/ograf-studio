@@ -744,6 +744,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     kind: z.enum([
       'rectangle',
       'ellipse',
+      'chart',
       'text',
       'image',
       'path',

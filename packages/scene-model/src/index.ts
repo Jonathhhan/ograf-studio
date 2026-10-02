@@ -55,3 +55,4 @@ export * from './playoutCompatibility';
 export { createId } from './id';
 export * from './patternLighting';
 export * from './stylePackColorLinks';
+export * from './chartData';

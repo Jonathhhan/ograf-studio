@@ -53,6 +53,7 @@ import {
 } from './mediaPaintRendering';
 import { hasElementMediaPaint } from '@ograf-editor/scene-model';
 import { resolveMediaTimelinePosition } from './mediaTimeline';
+import { disposeChart, mountChart } from './chartRendering';
 import { mountTextAnimationContent, renderTextAnimationAtFrame } from './textAnimationRendering';
 import { normalizeTextAnimation } from '@ograf-editor/scene-model';
 
@@ -428,6 +429,7 @@ export function disposeElementContent(container: HTMLElement): void {
     for (const audio of container.querySelectorAll('audio')) audio.pause();
   }
   disposeLayerEffects(container);
+  disposeChart(container);
   forgetShaderAnimationBase(container);
   disposeShaderPaintContent(container);
   disposeMediaPaintContent(container);
@@ -579,6 +581,10 @@ export function renderElementContent(
       }
       case 'pattern': {
         mountPattern(container, element);
+        break;
+      }
+      case 'chart': {
+        mountChart(container, element);
         break;
       }
       case 'rectangle': {

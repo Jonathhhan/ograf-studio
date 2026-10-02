@@ -4,6 +4,7 @@ import type {
   Asset,
   AudioElement,
   Composition,
+  ChartElement,
   CustomActionDefinition,
   MediaCue,
   Element,
@@ -127,6 +128,29 @@ export function createEllipseElement(overrides: Partial<EllipseElement> = {}): E
   };
 }
 
+export function createChartElement(overrides: Partial<ChartElement> = {}): ChartElement {
+  return {
+    type: 'chart',
+    preset: 'bar',
+    data: {
+      labels: ['Alpha', 'Beta', 'Gamma', 'Delta'],
+      datasets: [
+        {
+          label: 'Series 1',
+          data: [42, 35, 15, 8],
+          backgroundColor: ['#2563eb', '#dc2626', '#f59e0b', '#16a34a'],
+          borderColor: '#38bdf8',
+        },
+      ],
+    },
+    textColor: '#e5e7eb',
+    fontSize: 28,
+    showLegend: false,
+    showGrid: true,
+    ...overrides,
+  };
+}
+
 export function createImageElement(overrides: Partial<ImageElement> = {}): ImageElement {
   return {
     type: 'image',
@@ -227,6 +251,7 @@ function createLayer(name: string, element: Element): Layer {
 export type NewLayerKind =
   | 'rectangle'
   | 'ellipse'
+  | 'chart'
   | 'text'
   | 'image'
   | 'path'
@@ -239,6 +264,7 @@ export type NewLayerKind =
 /** The starting pose for a freshly created layer of this kind — a fresh object every call. */
 export function defaultTransformFor(kind: NewLayerKind): LayerTransform {
   if (kind === 'text') return createDefaultTransform({ height: 64 });
+  if (kind === 'chart') return createDefaultTransform({ width: 640, height: 360 });
   if (kind === 'rectangle' || kind === 'ellipse') {
     return createDefaultTransform({ width: 200, height: 200 });
   }
@@ -256,6 +282,10 @@ export function createRectangleLayer(): Layer {
 
 export function createEllipseLayer(): Layer {
   return createLayer('Ellipse', createEllipseElement());
+}
+
+export function createChartLayer(): Layer {
+  return createLayer('Chart', createChartElement());
 }
 
 export function createTextLayer(): Layer {
@@ -305,6 +335,8 @@ export function createLayerOfKind(kind: NewLayerKind): Layer {
       return createRectangleLayer();
     case 'ellipse':
       return createEllipseLayer();
+    case 'chart':
+      return createChartLayer();
     case 'text':
       return createTextLayer();
     case 'image':

@@ -106,6 +106,7 @@ import {
   type AnimatableLayerProperty,
   type Asset,
   type AudioElement,
+  type ChartElement,
   type BlendMode,
   type DesignToken,
   type DesignTokenTargetProperty,
@@ -193,6 +194,7 @@ export type ElementFields = { fill: Paint } & Omit<RectangleElement, 'type' | 'f
   Omit<PathElement, 'type' | 'fill'> &
   Omit<ImageSequenceElement, 'type' | 'fill'> &
   Omit<LottieElement, 'type' | 'fill'> &
+  Omit<ChartElement, 'type'> &
   Omit<ShaderElement, 'type'>;
 
 interface ProjectState {

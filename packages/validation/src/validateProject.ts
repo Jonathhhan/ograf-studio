@@ -34,6 +34,7 @@ import {
   applyDesignTokenBinding,
   BLEND_MODES,
   inspectLottieAnimationData,
+  parseChartData,
   inspectShaderElement,
   inspectShaderSource,
   normalizeShaderParameterValue,
@@ -1132,6 +1133,21 @@ function validateComposition(composition: Composition, errors: string[], warning
         continue;
       }
       const resolved = fieldDefinitionAtPath(field, binding.sourcePath ?? [], { fromArrayItem });
+      if (layer.element.type === 'chart' && binding.targetProperty === 'data') {
+        if (resolved?.type !== 'text' && resolved?.type !== 'textarea')
+          errors.push(
+            `${prefix}: layer "${layer.name}" chart data binding needs a text or textarea field.`,
+          );
+        else {
+          try {
+            parseChartData(valueAtSourcePath(field.defaultValue, binding.sourcePath));
+          } catch (error) {
+            errors.push(
+              `${prefix}: layer "${layer.name}" chart field default: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      }
       const shaderTarget = /^(fill|strokePaint)\.parameters\.(.+)$/.exec(
         migrateShaderBindingTarget(binding.targetProperty),
       );
@@ -1356,6 +1372,43 @@ function validateComposition(composition: Composition, errors: string[], warning
       for (const frame of layer.element.frames) {
         validateAssetReference(frame, `layer "${layer.name}"`);
       }
+    } else if (layer.element.type === 'chart') {
+      if (
+        ![
+          'bar',
+          'horizontal-bar',
+          'stacked-bar',
+          'line',
+          'area',
+          'pie',
+          'doughnut',
+          'radar',
+          'polar-area',
+        ].includes(layer.element.preset)
+      )
+        errors.push(`${prefix}: layer "${layer.name}" has an unknown Chart.js preset.`);
+      try {
+        parseChartData(layer.element.data);
+      } catch (error) {
+        errors.push(
+          `${prefix}: layer "${layer.name}" chart data: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (!/^#[\da-f]{6}$/i.test(layer.element.textColor))
+        errors.push(`${prefix}: layer "${layer.name}" chart textColor must be #RRGGBB.`);
+      if (
+        !Number.isFinite(layer.element.fontSize) ||
+        layer.element.fontSize < 8 ||
+        layer.element.fontSize > 96
+      )
+        errors.push(`${prefix}: layer "${layer.name}" chart label size must be 8–96 px.`);
+      if (
+        typeof layer.element.showLegend !== 'boolean' ||
+        typeof layer.element.showGrid !== 'boolean'
+      )
+        errors.push(
+          `${prefix}: layer "${layer.name}" chart legend/grid settings must be booleans.`,
+        );
     } else if (layer.element.type === 'shader') {
       const inspection = inspectShaderElement(layer.element);
       errors.push(

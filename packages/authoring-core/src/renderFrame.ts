@@ -129,6 +129,9 @@ function elementSvg(
     case 'shader':
       // WebGL pixels require the authoritative browser capture path.
       return `<rect width="${width}" height="${height}" fill="transparent"/>`;
+    case 'chart':
+      // Chart.js paints a Canvas; use browser capture for authoritative pixels.
+      return `<rect width="${width}" height="${height}" fill="transparent"/>`;
     case 'lottie':
       // The authoritative DOM/canvas capture path renders the exact Lottie frame. This lightweight
       // pure-SVG authoring overview cannot run a Canvas2D player, so retain the layer bounds.

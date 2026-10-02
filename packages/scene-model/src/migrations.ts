@@ -178,6 +178,14 @@ function normalizeMediaPaintElement(element: Element): Element {
 }
 
 function normalizeElement(element: Element): Element {
+  if (element.type === 'chart')
+    return {
+      ...element,
+      textColor: element.textColor ?? '#e5e7eb',
+      fontSize: element.fontSize ?? 28,
+      showLegend: element.showLegend ?? false,
+      showGrid: element.showGrid ?? true,
+    };
   if (element.type === 'shader') return migrateShaderElement(element);
   if (element.type === 'audio')
     return {

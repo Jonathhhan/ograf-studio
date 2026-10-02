@@ -32,6 +32,9 @@ function fieldSeed(layer: Layer, target: string): FieldSeed | null {
   if (target === 'src' && element.type === 'image') {
     return { type: 'image-url', defaultValue: element.src ?? '' };
   }
+  if (target === 'data' && element.type === 'chart') {
+    return { type: 'textarea', defaultValue: JSON.stringify(element.data) };
+  }
   if (target === 'fill' && 'fill' in element) {
     if (typeof element.fill === 'string') {
       return { type: 'color', defaultValue: element.fill };

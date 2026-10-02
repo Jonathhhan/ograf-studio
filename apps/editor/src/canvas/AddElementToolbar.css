@@ -10,6 +10,39 @@
   border-bottom: 1px solid var(--border);
 }
 
+.chart-picker-popover {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 120px;
+  z-index: 50;
+  width: 340px;
+  box-sizing: border-box;
+  padding: 8px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 50%);
+}
+
+.chart-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.add-element-toolbar .chart-picker-header button {
+  min-height: 20px;
+  padding: 0 5px;
+}
+
+.add-element-toolbar .chart-preset-gallery button {
+  min-height: 52px;
+  padding: 5px 2px;
+  border-radius: 4px;
+  background: var(--bg-panel-raised);
+}
+
 .element-tools {
   display: flex;
   flex: none;

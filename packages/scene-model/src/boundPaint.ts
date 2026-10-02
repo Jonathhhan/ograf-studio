@@ -2,6 +2,7 @@ import type { Element } from './types';
 import { inspectShaderSource, resolveShaderParameters, getElementShaderPaint } from './shader';
 import { isGradientPaint } from './paint';
 import { normalizeShaderParameterValue, shaderColorToHex } from './shaderParameters';
+import { parseChartData } from './chartData';
 
 const NUMERIC_TEXT_PROPERTIES = new Set([
   'fontSize',
@@ -15,6 +16,9 @@ const NUMERIC_TEXT_PROPERTIES = new Set([
 
 /** Immutable data overrides, shared by Studio, diagnostic capture and exported runtime. */
 export function applyElementDataValue(element: Element, property: string, value: unknown): Element {
+  if (element.type === 'chart' && property === 'data') {
+    return { ...element, data: parseChartData(value) };
+  }
   if (property === 'dropShadowColor' || property.startsWith('effects.')) return element;
   const shaderTarget = /^(?:(fill|strokePaint)\.)?parameters\.(.+)$/.exec(property);
   const slot = shaderTarget?.[1] === 'strokePaint' ? 'stroke' : 'fill';
@@ -79,6 +83,7 @@ export function applyElementDataValue(element: Element, property: string, value:
 
 /** The value `applyElementDataValue` would replace; `undefined` when the element lacks it. */
 export function readElementDataValue(element: Element, property: string): unknown {
+  if (element.type === 'chart' && property === 'data') return JSON.stringify(element.data);
   if (property === 'dropShadowColor' || property.startsWith('effects.')) return undefined;
   const shaderTarget = /^(?:(fill|strokePaint)\.)?parameters\.(.+)$/.exec(property);
   if (shaderTarget) {

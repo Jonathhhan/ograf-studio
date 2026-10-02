@@ -150,6 +150,7 @@ export const BINDABLE_PROPERTIES: Record<ElementType, BindableProperty[]> = {
     { value: 'autoFit', label: 'Text sizing' },
   ],
   image: [{ value: 'src', label: 'Image URL' }],
+  chart: [{ value: 'data', label: 'Chart data (JSON)' }],
   rectangle: [{ value: 'fill', label: 'Fill Paint' }],
   ellipse: [{ value: 'fill', label: 'Fill Paint' }],
   path: [{ value: 'fill', label: 'Fill Paint' }],

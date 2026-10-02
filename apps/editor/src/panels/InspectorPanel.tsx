@@ -83,6 +83,7 @@ import { PropertiesFilter } from './PropertiesFilter';
 import { usePropertiesFilter } from './propertiesFilterLogic';
 import { audioFileImportError } from './mediaFileImport';
 import { TextAnimationEditor } from './TextAnimationEditor';
+import { ChartEditor } from './ChartEditor';
 import './InspectorPanel.css';
 
 const TRANSFORM_FIELDS: { key: keyof LayerTransform; label: string; step?: number }[] = [
@@ -866,6 +867,10 @@ export function InspectorPanel() {
                 />
               </PropertyRow>
             </>
+          )}
+
+          {layer.element.type === 'chart' && (
+            <ChartEditor element={layer.element} onChange={setElement} />
           )}
 
           {layer.element.type === 'text' && (

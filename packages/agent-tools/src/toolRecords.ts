@@ -1691,6 +1691,7 @@ export function createOGrafToolRecords(
         elementTypes: [
           'rectangle',
           'ellipse',
+          'chart',
           'text',
           'image',
           'path',
@@ -1703,6 +1704,27 @@ export function createOGrafToolRecords(
           media: MEDIA_PAINT_CAPABILITIES,
         },
         elementSchemas: {
+          chart: {
+            renderer: 'Chart.js Canvas',
+            preset: [
+              'bar',
+              'horizontal-bar',
+              'stacked-bar',
+              'line',
+              'area',
+              'pie',
+              'doughnut',
+              'radar',
+              'polar-area',
+            ],
+            data: '{ labels: string[], datasets: [{ label, data: number[], backgroundColor, borderColor }] }',
+            binding: 'Bind data to a textarea GDD field containing validated JSON.',
+            fontSize: { type: 'number', default: 28, minimum: 8, maximum: 96 },
+            textColor: { type: 'hex-color', default: '#e5e7eb' },
+            showLegend: { type: 'boolean', default: false },
+            showGrid: { type: 'boolean', default: true },
+            timing: 'Animations disabled; deterministic under OGraf seeks.',
+          },
           rectangle: {
             defaultTransform: { width: 200, height: 200, shape: 'square' },
             fill: {
@@ -2564,6 +2586,7 @@ export function createOGrafToolRecords(
               'pattern',
               'image-sequence',
               'lottie',
+              'chart',
             ]),
           )
           .min(1)

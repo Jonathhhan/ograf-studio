@@ -218,7 +218,11 @@ describe('shader paint model', () => {
       'lottie',
     ] as const) {
       const layer = createLayerOfKind(kind);
-      if (layer.element.type === 'shader' || layer.element.type === 'audio')
+      if (
+        layer.element.type === 'shader' ||
+        layer.element.type === 'audio' ||
+        layer.element.type === 'chart'
+      )
         throw new Error('Expected canonical paintable object.');
       layer.element.fill = structuredClone(shader);
       expect(getElementShaderPaint(layer.element)).toEqual(shader);

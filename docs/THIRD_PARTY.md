@@ -19,3 +19,8 @@ of OGraf Studio.
 The app icon uses the official [OGraf website favicon](https://ograf.ebu.io/website/assets/icons/favicon.svg)
 without changes to its artwork or colours. The original SVG and PNG/Windows ICO renditions
 are distributed under the same upstream license.
+
+## Chart.js
+
+Chart layers use [Chart.js](https://github.com/chartjs/Chart.js), licensed under MIT. Exports
+containing a chart include its upstream license at `licenses/chartjs-LICENSE.txt`.

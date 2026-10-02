@@ -343,6 +343,30 @@
   margin: 1px 4px;
 }
 
+.preview-json-field {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 3px 4px;
+}
+
+.preview-json-field textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  resize: vertical;
+  font:
+    11px/1.35 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+
+.preview-json-field [role='alert'] {
+  color: #ff8b8b;
+  font-size: 11px;
+}
+
 .preview-developer > summary {
   cursor: pointer;
   color: var(--text-dim);

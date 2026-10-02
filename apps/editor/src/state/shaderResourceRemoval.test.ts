@@ -34,7 +34,11 @@ function fixture(kind: NewLayerKind = 'text') {
   const project = createProject();
   const composition = project.compositions[0]!;
   const layer = createLayerOfKind(kind);
-  if (layer.element.type === 'shader' || layer.element.type === 'audio')
+  if (
+    layer.element.type === 'shader' ||
+    layer.element.type === 'audio' ||
+    layer.element.type === 'chart'
+  )
     throw new Error('Expected canonical paintable object.');
   layer.element.fill = createShaderPaint({ name: 'Shared name' });
   if (layer.element.type === 'text') {

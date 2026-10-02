@@ -29,6 +29,8 @@ export const STRIPPED_IN_APP_GUIDANCE = [
   'ograf_import_svg_bundle',
   '## References',
   'references/examples.md',
+  'references/charts.md',
+  '## Chart.js layers',
 ] as const;
 
 const PREAMBLE = `# OGraf Studio in-app authoring agent

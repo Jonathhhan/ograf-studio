@@ -122,6 +122,19 @@ A small compatible animation is included at `examples/lottie/pulse.json`. Marker
 playback, dynamic Lottie text/data binding and renderer selection are not supported. Test your
 exported graphic in the intended playout environment.
 
+### Chart.js charts
+
+Choose **Chart** above the canvas, then select a type from the visual gallery in Properties.
+The gallery includes vertical, horizontal and stacked bars; line and area; pie and doughnut;
+radar and polar-area charts. Resize the layer on the canvas. Set text color, legend and grid in
+Properties, then edit series, rows, values and colors directly. **Advanced · edit JSON** handles
+bulk edits or multiple series. Each dataset needs one numeric value per label and `#RRGGBB`
+colors. **Add Data Binding** creates a text field containing this JSON so an
+OGraf playout can replace chart values through ordinary data updates. Charts are rendered by
+[Chart.js](https://www.chartjs.org/) in the editor and exported HTML renderer; Chart.js animation
+is disabled so seeking and captured frames remain deterministic. Use native Studio keyframes to
+animate the chart layer itself.
+
 ### Procedural patterns
 
 Choose **Resources → Patterns → Add pattern**, or the pattern tool above the canvas. Pick a
