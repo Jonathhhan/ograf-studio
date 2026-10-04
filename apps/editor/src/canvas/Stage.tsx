@@ -1,4 +1,4 @@
-import { previewBindingData } from '../state/dataBinding';
+import { previewBindingData, resolveDesignerElement } from '../state/dataBinding';
 import {
   copyLayers as copyLayerSelection,
   deleteLayers as deleteLayerSelection,
@@ -34,6 +34,7 @@ import {
   type Layer,
   type LayerTransform,
   type TextElement,
+  type FieldDefinition,
 } from '@ograf-editor/scene-model';
 import { ContextMenu } from '../components/ContextMenu';
 import { useLayerClipboardStore } from '../state/layerClipboardStore';
@@ -87,6 +88,16 @@ import { inlineTextEditTarget } from './inlineTextEditing';
 import { measureAutoSizedText } from '../panels/textAutoSize';
 import './Stage.css';
 
+function inlineDesignerText(layer: Layer, fields: FieldDefinition[]): TextElement | null {
+  if (layer.element.type !== 'text') return null;
+  try {
+    const element = resolveDesignerElement(layer, useTestDataStore.getState().values, fields);
+    return element.type === 'text' ? element : layer.element;
+  } catch {
+    return layer.element;
+  }
+}
+
 export function Stage({ style }: { style?: CSSProperties }) {
   const pathLayerId = usePathEditStore((s) => s.layerId);
   const [pathDraft, setPathDraft] = useState<string | null>(null);
@@ -127,7 +138,6 @@ export function Stage({ style }: { style?: CSSProperties }) {
   const previewLoopLayerId = useTimelineStore((state) => state.previewLoopLayerId);
   const updateLayerTransform = useProjectStore((s) => s.updateLayerTransform);
   const updateLayerElement = useProjectStore((s) => s.updateLayerElement);
-  const setTestValue = useTestDataStore((s) => s.setValue);
   const removeLayer = useProjectStore((s) => s.removeLayer);
   const removeLayerKeyframe = useProjectStore((s) => s.removeLayerKeyframe);
   const selectedLayerId = useSelectionStore((s) => s.selectedLayerId);
@@ -152,12 +162,12 @@ export function Stage({ style }: { style?: CSSProperties }) {
     (layer: Layer, value: string) => {
       const target = inlineTextEditTarget(layer, composition.dataFields);
       if (!target) return;
-      if (target.type === 'test-data') {
-        setTestValue(target.fieldId, value, composition.layers, composition.dataFields);
-        return;
-      }
       if (layer.element.type !== 'text') return;
-      const element: TextElement = { ...layer.element, content: value, runs: [] };
+      const element: TextElement = {
+        ...inlineDesignerText(layer, composition.dataFields)!,
+        content: value,
+        runs: [],
+      };
       updateLayerElement(layer.id, { content: value, runs: [] });
       if (element.autoFit === 'auto-size')
         updateLayerTransform(
@@ -166,13 +176,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
           measureAutoSizedText(element),
         );
     },
-    [
-      composition.dataFields,
-      composition.layers,
-      setTestValue,
-      updateLayerElement,
-      updateLayerTransform,
-    ],
+    [composition.dataFields, updateLayerElement, updateLayerTransform],
   );
   const handleInlineTextEditingChange = useCallback(
     (layerId: string, editing: boolean, caretPoint?: { x: number; y: number }) => {
@@ -182,13 +186,17 @@ export function Stage({ style }: { style?: CSSProperties }) {
     },
     [],
   );
-  const previewInlineText = useCallback((layer: Layer, value: string) => {
-    if (layer.element.type !== 'text' || layer.element.autoFit !== 'auto-size') return;
-    setInlineTextPreview({
-      layerId: layer.id,
-      transform: measureAutoSizedText({ ...layer.element, content: value, runs: [] }),
-    });
-  }, []);
+  const previewInlineText = useCallback(
+    (layer: Layer, value: string) => {
+      if (layer.element.type !== 'text' || layer.element.autoFit !== 'auto-size') return;
+      const displayed = inlineDesignerText(layer, composition.dataFields)!;
+      setInlineTextPreview({
+        layerId: layer.id,
+        transform: measureAutoSizedText({ ...displayed, content: value, runs: [] }),
+      });
+    },
+    [composition.dataFields],
+  );
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);

@@ -4,6 +4,7 @@ import {
   type FieldDefinition,
   type FieldValue,
 } from '@ograf-editor/scene-model';
+import { resolvePreviewFieldValue } from './previewFieldValue';
 
 function hasOwn(record: Record<string, FieldValue>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
@@ -19,7 +20,7 @@ export function resolvePreviewFormValue(
     (typeof testValue !== 'string' || !field.options.some((option) => option.value === testValue))
   )
     return field.defaultValue;
-  return testValue ?? field.defaultValue;
+  return resolvePreviewFieldValue(field, testValue)!;
 }
 
 function resolveFieldValue(
@@ -53,9 +54,7 @@ export function buildPreviewDataFromTestValues(
 ): Record<string, FieldValue> {
   return Object.fromEntries(
     composition.dataFields.map((field) => {
-      const value = hasOwn(testValuesByFieldId, field.id)
-        ? testValuesByFieldId[field.id]!
-        : field.defaultValue;
+      const value = resolvePreviewFieldValue(field, testValuesByFieldId[field.id])!;
       return [field.key, resolveFieldValue(composition, field, value)];
     }),
   );

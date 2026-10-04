@@ -41,6 +41,7 @@ interface MountedMediaPaint {
   fallback?: HTMLImageElement;
   abort: AbortController;
   mask: ReturnType<typeof createShaderPaintMask>;
+  coverage: CanvasImageSource | null;
   native: NativeContent;
   options: RenderOptions;
   ready: Promise<void>;
@@ -98,7 +99,13 @@ function mediaPaintBaseElement(element: Element): Element {
     const { fill: _fill, ...base } = element;
     return base;
   }
-  if (element.type === 'text') return { ...element, fill: 'transparent', color: 'transparent' };
+  if (element.type === 'text')
+    return {
+      ...element,
+      fill: 'transparent',
+      color: 'transparent',
+      runs: element.runs.map((run) => ({ ...run, color: 'transparent' })),
+    };
   if ('fill' in element) return { ...element, fill: 'transparent' } as Element;
   return element;
 }
@@ -223,12 +230,16 @@ function drawRequestedFrame(mounted: MountedMediaPaint): void {
       renderTextAnimationAtFrame(mounted.baseHost, mounted.baseElement, textFrame);
     }
     await Promise.all([mounted.ready, mounted.native.ready(mounted.baseHost), mounted.mask.ready]);
-    const coverage = await mounted.mask.update(elapsedMs);
+    const nextCoverage = await mounted.mask.update(elapsedMs);
     const source = await mediaSource(mounted);
+    if (mounted.disposed) return;
+    // null means the mask is unchanged, not that the moving media should become unmasked.
+    if (nextCoverage) mounted.coverage = nextCoverage;
     const { canvas, context, paint } = mounted;
     context.resetTransform();
+    context.globalCompositeOperation = 'source-over';
     context.clearRect(0, 0, canvas.width, canvas.height);
-    if (source) {
+    if (source && mounted.coverage) {
       const rect = mediaFitRect(
         sourceSize(source),
         canvas,
@@ -237,9 +248,10 @@ function drawRequestedFrame(mounted: MountedMediaPaint): void {
         paint.positionY,
       );
       context.drawImage(source, rect.x, rect.y, rect.width, rect.height);
-      if (coverage) {
-        context.globalCompositeOperation = 'destination-in';
-        context.drawImage(coverage, 0, 0, canvas.width, canvas.height);
+      context.globalCompositeOperation = 'destination-in';
+      try {
+        context.drawImage(mounted.coverage, 0, 0, canvas.width, canvas.height);
+      } finally {
         context.globalCompositeOperation = 'source-over';
       }
     }
@@ -404,6 +416,7 @@ export function mountMediaPaintContent(
     ...(fallback ? { fallback } : {}),
     abort,
     mask,
+    coverage: null,
     native,
     options,
     ready,
@@ -466,6 +479,7 @@ export function disposeMediaPaintContent(container: HTMLElement): void {
   mounted.disposed = true;
   mounted.abort.abort();
   mounted.mask.dispose();
+  mounted.coverage = null;
   mounted.native.dispose(mounted.baseHost);
   if (mounted.source instanceof HTMLVideoElement) {
     mounted.source.pause();

@@ -10,6 +10,7 @@ import {
   parseShaderAnimationProperty,
   TRANSFORM_ANIMATION_PROPERTIES,
   normalizeTextAnimation,
+  normalizeChartAnimation,
   type AnimatableLayerProperty,
   type LayerEffects,
   type LayerTransform,
@@ -18,6 +19,7 @@ import type { CompiledLayer } from '@ograf-editor/ograf-types';
 import { easingForGsap } from './easing';
 import { resolveBoundEffects, resolveBoundElement } from './renderElement';
 import { renderTextAnimationAtFrame } from './textAnimationRendering';
+import { renderChartAnimationAtFrame } from './chartRendering';
 import { applyCompiledMasks } from './maskRendering';
 import { sampleCompiledLayerVisualState, applyCompiledLayerVisualState } from './loopRendering';
 import { compiledLoopElapsedFrames } from './loopRendering';
@@ -180,6 +182,10 @@ export function buildRuntimeTimeline(
       if (child && state) applyCompiledLayerVisualState(child, state, tl.time() * 1000);
       if (child && layer.element.type === 'pattern')
         renderPatternAtElapsed(child, compiledLoopElapsedFrames(descriptor, layer, frame) ?? 0);
+      if (child && layer.element.type === 'chart') {
+        const resolved = resolveBoundElement(layer, data);
+        if (resolved.type === 'chart') renderChartAnimationAtFrame(child, resolved, frame);
+      }
       if (
         child &&
         layer.element.type === 'text' &&
@@ -217,6 +223,8 @@ export function buildRuntimeTimeline(
       layer.motionPath ||
       layer.mask ||
       layer.element.type === 'pattern' ||
+      (layer.element.type === 'chart' &&
+        normalizeChartAnimation(layer.element.animation).type !== 'none') ||
       (layer.element.type === 'text' &&
         normalizeTextAnimation(layer.element.textAnimation).type !== 'none') ||
       layer.lighting ||

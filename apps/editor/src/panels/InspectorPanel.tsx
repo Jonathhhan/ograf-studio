@@ -28,7 +28,12 @@ import {
 } from '../state/projectStore';
 import { useSelectionStore } from '../state/selectionStore';
 import { useShaderParameterPreviewStore } from '../state/shaderParameterPreviewStore';
-import { bindableProperties } from '../state/dataBinding';
+import {
+  bindableProperties,
+  resolveDesignerElement,
+  resolveDesignerEffects,
+} from '../state/dataBinding';
+import { useTestDataStore } from '../state/testDataStore';
 import { nextBindingProperty, playoutProperty } from '../state/bindingFieldCreation';
 import type {
   BlendMode,
@@ -375,6 +380,7 @@ const VISUAL_RULE_TRIGGER_LABELS: Record<VisualRuleTrigger, string> = {
 export function InspectorPanel() {
   const { window } = useEditorWindow();
   const composition = useActiveComposition();
+  const testValues = useTestDataStore((state) => state.values);
   const currentFrame = useTimelineStore((s) => s.currentFrame);
   const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
   const selectedLayerId = useSelectionStore((s) => s.selectedLayerId);
@@ -417,7 +423,24 @@ export function InspectorPanel() {
     [clearShaderParameterPreview, selectedLayerId],
   );
 
-  const layer = composition.layers.find((l) => l.id === selectedLayerId);
+  const authoredLayer = composition.layers.find((l) => l.id === selectedLayerId);
+  const layer = useMemo(() => {
+    if (!authoredLayer || authoredLayer.bindings.length === 0) return authoredLayer;
+    try {
+      return {
+        ...authoredLayer,
+        element: resolveDesignerElement(authoredLayer, testValues, composition.dataFields),
+        effects: resolveDesignerEffects(
+          authoredLayer,
+          authoredLayer.effects,
+          testValues,
+          composition.dataFields,
+        ),
+      };
+    } catch {
+      return authoredLayer;
+    }
+  }, [authoredLayer, testValues, composition.dataFields]);
   const lottieInspection = useMemo(
     () =>
       layer?.element.type === 'lottie' && layer.element.animationData
@@ -799,8 +822,8 @@ export function InspectorPanel() {
                     )?.label ?? binding.targetProperty,
                 )
                 .join(', ')}{' '}
-              {layer.bindings.length === 1 ? 'is' : 'are'} data-driven — values below are
-              design-time defaults.
+              {layer.bindings.length === 1 ? 'is' : 'are'} data-driven. Edit here to update the
+              bound default while keeping the binding.
             </p>
           )}
           {layer.element.type === 'rectangle' && (

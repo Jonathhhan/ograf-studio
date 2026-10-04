@@ -69,7 +69,11 @@ export function applyElementDataValue(element: Element, property: string, value:
     };
   }
   if (element.type === 'text' && property === 'content') {
-    return { ...element, content: String(value), runs: [] };
+    const content = String(value);
+    const authoredText = element.runs.length
+      ? element.runs.map((run) => run.text).join('')
+      : element.content;
+    return { ...element, content, runs: content === authoredText ? element.runs : [] };
   }
   if (element.type === 'text' && NUMERIC_TEXT_PROPERTIES.has(property)) {
     const numeric = Number(value);

@@ -216,7 +216,7 @@ export function PaintEditor({
           <input
             type="color"
             value={asColor(value)}
-            onChange={(event) => onChange(event.target.value)}
+            onInput={(event) => onChange(event.currentTarget.value)}
           />
         </PropertyRow>
       ) : isGradientPaint(value) ? (
@@ -243,10 +243,10 @@ export function PaintEditor({
                   aria-label={`Stop ${index + 1} color`}
                   type="color"
                   value={asColor(stop.color)}
-                  onChange={(event) =>
+                  onInput={(event) =>
                     updateGradient({
                       stops: value.stops.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, color: event.target.value } : item,
+                        itemIndex === index ? { ...item, color: event.currentTarget.value } : item,
                       ),
                     })
                   }

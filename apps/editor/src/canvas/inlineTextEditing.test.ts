@@ -8,21 +8,31 @@ describe('inline text editing target', () => {
     expect(inlineTextEditTarget(createTextLayer(), [])).toEqual({ type: 'authored' });
   });
 
-  it('edits test data for a simple content binding', () => {
+  it('keeps inline authored editing available for a simple content binding', () => {
     const layer = createTextLayer(),
       field = createFieldDefinition('text', { key: 'headline', label: 'Headline' });
     layer.bindings = [{ fieldId: field.id, targetProperty: 'content' }];
     expect(inlineTextEditTarget(layer, [field])).toEqual({
-      type: 'test-data',
+      type: 'bound',
       fieldId: field.id,
       label: 'Headline',
     });
   });
 
-  it('does not pretend nested or mapped bindings are directly editable', () => {
+  it('keeps nested and mapped text bindings editable', () => {
     const layer = createTextLayer(),
       field = createFieldDefinition('object', { key: 'player' });
     layer.bindings = [{ fieldId: field.id, targetProperty: 'content', sourcePath: ['name'] }];
+    expect(inlineTextEditTarget(layer, [field])).toMatchObject({
+      type: 'bound',
+      fieldId: field.id,
+    });
+    layer.bindings[0]!.valueMap = { player: 'Player name' };
+    expect(inlineTextEditTarget(layer, [field])).toMatchObject({
+      type: 'bound',
+      fieldId: field.id,
+    });
+    layer.isLocked = true;
     expect(inlineTextEditTarget(layer, [field])).toBeNull();
   });
 });

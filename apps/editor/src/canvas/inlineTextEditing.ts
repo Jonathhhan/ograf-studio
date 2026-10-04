@@ -1,7 +1,7 @@
 import type { FieldDefinition, Layer } from '@ograf-editor/scene-model';
 
 export type InlineTextEditTarget =
-  { type: 'authored' } | { type: 'test-data'; fieldId: string; label: string };
+  { type: 'authored' } | { type: 'bound'; fieldId: string; label: string };
 
 export interface InlineTextCaretPoint {
   x: number;
@@ -16,10 +16,9 @@ export function inlineTextEditTarget(
   if (layer.element.type !== 'text' || layer.isLocked) return null;
   const binding = layer.bindings.find((candidate) => candidate.targetProperty === 'content');
   if (!binding) return { type: 'authored' };
-  if ((binding.sourcePath?.length ?? 0) > 0 || binding.valueMap) return null;
   const field = fields.find((candidate) => candidate.id === binding.fieldId);
-  if (!field || field.type === 'array' || field.type === 'object') return null;
-  return { type: 'test-data', fieldId: field.id, label: field.label || field.key };
+  if (!field) return { type: 'authored' };
+  return { type: 'bound', fieldId: field.id, label: field.label || field.key };
 }
 
 export function inlineTextValue(element: HTMLElement): string {

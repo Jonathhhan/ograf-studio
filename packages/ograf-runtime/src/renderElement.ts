@@ -53,7 +53,7 @@ import {
 } from './mediaPaintRendering';
 import { hasElementMediaPaint } from '@ograf-editor/scene-model';
 import { resolveMediaTimelinePosition } from './mediaTimeline';
-import { disposeChart, mountChart } from './chartRendering';
+import { disposeChart, mountChart, renderChartAnimationAtFrame } from './chartRendering';
 import { mountTextAnimationContent, renderTextAnimationAtFrame } from './textAnimationRendering';
 import { normalizeTextAnimation } from '@ograf-editor/scene-model';
 
@@ -480,7 +480,10 @@ export function applyAnimatedPaint(
   if (serialized) {
     const paint = JSON.parse(serialized) as Paint;
     const fillHost = content.querySelector<HTMLElement>('[data-ograf-path-fill]') ?? content;
-    fillHost.style.background = paintToCss(getPaintAtFrame(paint, tracks, frame));
+    const background = paintToCss(getPaintAtFrame(paint, tracks, frame));
+    // The background shorthand resets background-clip, turning gradient text into a filled box.
+    if (isGradientPaint(paint)) fillHost.style.backgroundImage = background;
+    else fillHost.style.background = background;
   }
   const strokeTrack = tracks.strokeWidth ?? [];
   if (strokeTrack.length > 0) {
@@ -686,6 +689,7 @@ export function renderElementContent(
           for (const run of element.runs) {
             const span = document.createElement('span');
             span.textContent = run.text;
+            span.style.fontSize = 'inherit';
             if (run.color) span.style.color = run.color;
             if (run.fontWeight !== undefined) span.style.fontWeight = String(run.fontWeight);
             if (run.fontStyle) span.style.fontStyle = run.fontStyle;
@@ -1113,6 +1117,11 @@ export function renderAnimatedElementAtTime(
 ): void {
   if (renderMediaPaintAtTime(container, elapsedMs)) return;
   if (renderShaderPaintAtTime(container, elapsedMs)) return;
+  if (element.type === 'chart') {
+    const frameRate = Math.max(1, Number(container.dataset.ografFrameRate) || 25);
+    renderChartAnimationAtFrame(container, element, (elapsedMs / 1000) * frameRate);
+    return;
+  }
   if (element.type === 'text') {
     const frameRate = Math.max(1, Number(container.dataset.ografFrameRate) || 25);
     renderTextAnimationAtFrame(container, element, (elapsedMs / 1000) * frameRate);

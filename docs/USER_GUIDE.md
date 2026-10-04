@@ -131,9 +131,14 @@ Properties, then edit series, rows, values and colors directly. **Advanced · ed
 bulk edits or multiple series. Each dataset needs one numeric value per label and `#RRGGBB`
 colors. **Add Data Binding** creates a text field containing this JSON so an
 OGraf playout can replace chart values through ordinary data updates. Charts are rendered by
-[Chart.js](https://www.chartjs.org/) in the editor and exported HTML renderer; Chart.js animation
-is disabled so seeking and captured frames remain deterministic. Use native Studio keyframes to
-animate the chart layer itself.
+[Chart.js](https://www.chartjs.org/) in the editor and exported HTML renderer.
+
+Use **Animation** in the chart's Properties to choose **Grow**, **Reveal**, **Fade** or **None**.
+New charts use Grow. Set duration and start delay in frames; Grow's stagger delays consecutive items.
+For example, a duration of 25 frames lasts one second in a 25 fps project. Choose easing to shape
+the motion. **Replay on data update** replays the animation when playout sends changed chart data.
+Timeline playback, scrubbing and OGraf preview use the same animation timing; native Studio
+keyframes can also move or fade the whole layer.
 
 ### Procedural patterns
 
@@ -376,8 +381,9 @@ The selected incoming segment keeps the detailed Bézier-handle editor and numer
 Text properties provide Automatic, Left-to-right, and Right-to-left base direction plus a BCP 47
 language tag for browser shaping and accessibility. **Enable mixed styles** divides authored text
 into ordered editable runs; each run can override color, weight, italics, and font family while the
-layer retains one transform, outline, animation, and data identity. A runtime content binding
-intentionally replaces styled runs with plain operator text to avoid applying stale character ranges.
+layer retains one transform, outline, animation, and data identity. A content binding preserves
+styled runs while its value matches the authored text. New operator text replaces them with plain
+text to avoid applying stale character ranges.
 
 ### Text animation presets
 
@@ -539,6 +545,12 @@ property and binds it immediately, even when the project has no fields yet. The 
 with that property's current value, so adding the binding does not change the graphic. Choose a
 different existing field in the binding's **Field** menu if you want to reuse one, or open **Data**
 to rename and edit the new field.
+
+Bound controls remain editable in Properties. Designer edits update the bound field's default
+without removing its data link; a mapped control updates the active option's mapping instead.
+Double-click text on the canvas to edit it directly, including nested and mapped bindings. These
+edits are saved and undoable. An edited test-data leaf returns to its authored default while
+unrelated preview values remain available. Playout can still override the values at runtime.
 
 ## Menus and shortcuts
 

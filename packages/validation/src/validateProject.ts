@@ -35,6 +35,7 @@ import {
   BLEND_MODES,
   inspectLottieAnimationData,
   parseChartData,
+  chartAnimationErrors,
   inspectShaderElement,
   inspectShaderSource,
   normalizeShaderParameterValue,
@@ -1373,6 +1374,11 @@ function validateComposition(composition: Composition, errors: string[], warning
         validateAssetReference(frame, `layer "${layer.name}"`);
       }
     } else if (layer.element.type === 'chart') {
+      errors.push(
+        ...chartAnimationErrors(layer.element.animation).map(
+          (error) => `${prefix}: layer "${layer.name}": ${error}`,
+        ),
+      );
       if (
         ![
           'bar',

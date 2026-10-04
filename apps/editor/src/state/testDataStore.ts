@@ -12,6 +12,7 @@ import {
   type VisualRuleEffect,
 } from '@ograf-editor/scene-model';
 import { editorVisualRuleEngine } from './dataBinding';
+import { clearPreviewPath } from './previewFieldValue';
 
 export type TestValue = FieldValue;
 
@@ -83,6 +84,8 @@ interface TestDataState {
     layers?: Layer[],
     fields?: FieldDefinition[],
   ) => void;
+  /** Remove only designer-edited preview leaves, so their current authored defaults can show. */
+  clearOverrides: (resets: { fieldId: string; sourcePath: string[] }[]) => void;
   /** Runs one rule's show/hide/property actions on the canvas as if its trigger fired. */
   simulateVisualRule: (
     hostLayerId: string,
@@ -125,6 +128,20 @@ export const useTestDataStore = create<TestDataState>((set) => ({
           values,
         ),
       };
+    }),
+  clearOverrides: (resets) =>
+    set((state) => {
+      let values = state.values;
+      for (const { fieldId, sourcePath } of resets) {
+        if (!Object.hasOwn(values, fieldId)) continue;
+        const previous = values[fieldId];
+        const next = clearPreviewPath(previous, sourcePath);
+        if (next === previous) continue;
+        if (values === state.values) values = { ...values };
+        if (next === undefined) delete values[fieldId];
+        else values[fieldId] = next;
+      }
+      return { values };
     }),
   simulateVisualRule: (hostLayerId, rule, layers, fields) =>
     set((state) => {

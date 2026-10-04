@@ -1723,7 +1723,17 @@ export function createOGrafToolRecords(
             textColor: { type: 'hex-color', default: '#e5e7eb' },
             showLegend: { type: 'boolean', default: false },
             showGrid: { type: 'boolean', default: true },
-            timing: 'Animations disabled; deterministic under OGraf seeks.',
+            animation: {
+              type: ['none', 'grow', 'reveal', 'fade'],
+              default: 'grow',
+              durationFrames: { type: 'integer', default: 25, minimum: 1, maximum: 1500 },
+              delayFrames: { type: 'integer', default: 0, minimum: 0, maximum: 1500 },
+              staggerFrames: { type: 'integer', default: 2, minimum: 0, maximum: 100 },
+              easing: { type: 'EasingPreset', default: 'cubic-out' },
+              replayOnUpdate: { type: 'boolean', default: true },
+            },
+            timing:
+              'Frame-sampled animation from lifecycle Start; deterministic under OGraf seeks.',
           },
           rectangle: {
             defaultTransform: { width: 200, height: 200, shape: 'square' },
@@ -2102,6 +2112,8 @@ export function createOGrafToolRecords(
         },
         bindings: {
           operations: ['set_layer_bindings', 'set_layer_binding (legacy single-binding replace)'],
+          designerEdits:
+            'Properties, inline text, update_element and effect edits synchronize the bound default or active mapping while preserving the binding. Nested edits preserve sibling values. Runtime data still overrides authored defaults.',
           semantics:
             'A layer may bind multiple independent element properties. Bindings are applied in order and a target property may appear only once. sourcePath is a segment array for nested object leaves; array paths are item-relative inside a registered runtime collection prototype.',
           visualRules: {

@@ -311,8 +311,8 @@ field for `fill.stops[N].color`. Animate an existing stop position through `set_
 
 For one or more data bindings on a layer, call `set_layer_bindings` with an ordered `bindings`
 array. Each entry accepts `{fieldId,targetProperty}` or `{fieldKey,targetProperty}`; do not guess
-target-property names, and do not repeat one target property. Use `set_layer_binding` only when an
-intentional legacy-compatible single-binding replacement should also discard any additional rows.
+target-property names, and do not repeat one target property. The legacy `set_layer_binding` replaces
+all rows. Designer element/effect edits synchronize bound defaults or mapped values while preserving links.
 `update_data_field` accepts `fieldId` or unique `fieldKey` and can change key, label, default, and
 required state in place. It can also change `fieldType`, operator `description`, ordered
 `options: [{value,label}]`, `fileExtensions`, and `constraints` (`minLength`, `maxLength`, `minimum`,

@@ -169,7 +169,7 @@ void mainImage(out vec4 color, in vec2 coord) { color = vec4(gain); }`,
     const timeline = buildRuntimeTimeline(compiled, new Map([['layer', element]]));
     timeline.seek(5 / 25, true);
 
-    expect(content.style).toMatchObject({ background: expect.stringContaining('50%') });
+    expect(content.style).toMatchObject({ backgroundImage: expect.stringContaining('50%') });
     timeline.kill();
   });
 

@@ -327,8 +327,8 @@ separate tokens for highlight/shade. Verify recoloring and backward seeking with
 - Timeline exposes a value graph for every selected numeric property track; graph drags remain
   ordinary key frame/value edits and preserve the existing incoming easing/Bézier contract.
 - Text supports ordered `runs` with color/weight/style/font overrides plus explicit `direction` and
-  BCP 47 `language`. Keep run text concatenated exactly to `content`; runtime content bindings clear
-  runs and produce plain operator text.
+  BCP 47 `language`. Keep run text equal to `content`; a binding preserves styles for unchanged text
+  and clears runs for new operator text.
 - Text `textAnimation` supports deterministic `typewriter`, `fade`, `rise`, `pop`, and
   `word-reveal` presets without character layers. Patch the complete object through
   `update_element`: `split` is `grapheme|word`, `durationFrames` is positive, and word reveal

@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
-import { parseChartData, type ChartElement } from '@ograf-editor/scene-model';
+import {
+  normalizeChartAnimation,
+  parseChartData,
+  type ChartElement,
+  type EasingPreset,
+} from '@ograf-editor/scene-model';
 import { ChartPresetGallery } from './ChartPresetGallery';
+import { EASING_OPTION_GROUPS } from './easingOptions';
 import './ChartEditor.css';
 
 function NumericCell({
@@ -49,6 +55,9 @@ export function ChartEditor({
   const [dataText, setDataText] = useState(() => JSON.stringify(element.data, null, 2));
   const [error, setError] = useState('');
   const [requestedDatasetIndex, setRequestedDatasetIndex] = useState(0);
+  const animation = normalizeChartAnimation(element.animation);
+  const updateAnimation = (patch: Partial<NonNullable<ChartElement['animation']>>) =>
+    onChange({ animation: { ...animation, ...patch } });
   const datasetIndex = Math.min(requestedDatasetIndex, element.data.datasets.length - 1);
   const dataset = element.data.datasets[datasetIndex]!;
   useEffect(() => {
@@ -125,6 +134,95 @@ export function ChartEditor({
     <div className="chart-editor">
       <div className="chart-editor-label">Chart type</div>
       <ChartPresetGallery selected={element.preset} onSelect={(preset) => onChange({ preset })} />
+      <label className="chart-editor-option">
+        <span>Animation</span>
+        <select
+          aria-label="Chart animation"
+          value={animation.type}
+          onChange={(event) =>
+            updateAnimation({
+              type: event.target.value as NonNullable<ChartElement['animation']>['type'],
+            })
+          }
+        >
+          <option value="none">None</option>
+          <option value="grow">Grow</option>
+          <option value="reveal">Reveal</option>
+          <option value="fade">Fade</option>
+        </select>
+      </label>
+      {animation.type !== 'none' && (
+        <>
+          <div
+            className={`chart-animation-timing${animation.type === 'grow' ? ' has-stagger' : ''}`}
+          >
+            <label>
+              <span>Duration (frames)</span>
+              <NumericCell
+                value={animation.durationFrames}
+                min={1}
+                max={1500}
+                label="Chart animation duration in frames"
+                onCommit={(durationFrames) =>
+                  updateAnimation({ durationFrames: Math.round(durationFrames) })
+                }
+              />
+            </label>
+            <label>
+              <span>Delay (frames)</span>
+              <NumericCell
+                value={animation.delayFrames}
+                min={0}
+                max={1500}
+                label="Chart animation delay in frames"
+                onCommit={(delayFrames) =>
+                  updateAnimation({ delayFrames: Math.round(delayFrames) })
+                }
+              />
+            </label>
+            {animation.type === 'grow' && (
+              <label title="Frames between consecutive chart items">
+                <span>Stagger (frames)</span>
+                <NumericCell
+                  value={animation.staggerFrames}
+                  min={0}
+                  max={100}
+                  label="Chart animation stagger in frames"
+                  onCommit={(staggerFrames) =>
+                    updateAnimation({ staggerFrames: Math.round(staggerFrames) })
+                  }
+                />
+              </label>
+            )}
+          </div>
+          <label className="chart-editor-option">
+            <span>Easing</span>
+            <select
+              aria-label="Chart animation easing"
+              value={animation.easing}
+              onChange={(event) => updateAnimation({ easing: event.target.value as EasingPreset })}
+            >
+              {EASING_OPTION_GROUPS.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.options.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          <label className="chart-editor-option">
+            <span>Replay on data update</span>
+            <input
+              type="checkbox"
+              checked={animation.replayOnUpdate}
+              onChange={(event) => updateAnimation({ replayOnUpdate: event.target.checked })}
+            />
+          </label>
+        </>
+      )}
       <label className="chart-editor-option">
         <span>Text color</span>
         <input

@@ -39,6 +39,7 @@ import { normalizeAuthoredTransform } from './authoredTransform';
 import { normalizeCornerRadii } from './cornerRadii';
 import { normalizeShaderElement } from './shader';
 import { normalizeTextAnimation } from './textAnimation';
+import { DEFAULT_CHART_ANIMATION, normalizeChartAnimation } from './chartAnimation';
 
 const BASE_TRANSFORM: LayerTransform = {
   x: 100,
@@ -148,6 +149,7 @@ export function createChartElement(overrides: Partial<ChartElement> = {}): Chart
     showLegend: false,
     showGrid: true,
     ...overrides,
+    animation: normalizeChartAnimation(overrides.animation ?? DEFAULT_CHART_ANIMATION),
   };
 }
 

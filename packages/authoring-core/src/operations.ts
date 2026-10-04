@@ -77,6 +77,7 @@ import {
   normalizeLayerEffects,
   inspectShaderElement,
   syncShaderParameterFields,
+  syncDesignerBindingDefaults,
   syncCompositionShaderParameterFields,
   instantiateComponentDefinition,
   materializeBug,
@@ -1844,6 +1845,7 @@ export function applyAuthoringOperations(
       case 'update_element': {
         const layer = layerFor(composition, operation.layerId);
         assertUnlocked(layer);
+        const before = clone({ element: layer.element, effects: layer.effects });
         const legacyShaderPatch =
           operation.patch.type === 'shader' &&
           layer.element.type === 'rectangle' &&
@@ -1958,6 +1960,16 @@ export function applyAuthoringOperations(
             ...(elementPatch.textAnimation as Record<string, unknown>),
           });
         }
+        if (
+          layer.element.type === 'text' &&
+          elementPatch.content !== undefined &&
+          !('runs' in elementPatch)
+        ) {
+          const authoredText = layer.element.runs.length
+            ? layer.element.runs.map((run) => run.text).join('')
+            : layer.element.content;
+          if (String(elementPatch.content) !== authoredText) elementPatch.runs = [];
+        }
         Object.assign(layer.element, elementPatch);
         if (
           (layer.element.type === 'text' ||
@@ -2002,6 +2014,7 @@ export function applyAuthoringOperations(
           }
         }
         pruneInvalidGradientStopTracks(layer);
+        syncDesignerBindingDefaults(composition, layer, before, Object.keys(elementPatch));
         break;
       }
       case 'update_transform': {
@@ -2055,6 +2068,7 @@ export function applyAuthoringOperations(
           if (!getEffectStack(layer.effects).some((effect) => effect.id === operation.effectId))
             throw new Error(`Group effect not found on every member: ${operation.effectId}`);
         for (const layer of layers) {
+          const before = clone({ element: layer.element, effects: layer.effects });
           const effect = updateEffect(layer, operation.effectId, operation.patch);
           for (const [param, value] of Object.entries(operation.patch.params ?? {}))
             if (typeof value === 'number')
@@ -2065,6 +2079,12 @@ export function applyAuthoringOperations(
                   frame,
                   value,
                 );
+          syncDesignerBindingDefaults(
+            composition,
+            layer,
+            before,
+            Object.keys(operation.patch.params ?? {}).map((param) => effectProperty(effect, param)),
+          );
         }
         summary.affectedLayerIds.push(...layers.map((layer) => layer.id));
         break;
@@ -2103,6 +2123,7 @@ export function applyAuthoringOperations(
       case 'update_effects': {
         const layer = layerFor(composition, operation.layerId);
         assertUnlocked(layer);
+        const before = clone({ element: layer.element, effects: layer.effects });
         layer.effects = ensureLegacyEffects(
           normalizeLayerEffects({ ...layer.effects, ...operation.patch }),
           operation.patch,
@@ -2115,6 +2136,7 @@ export function applyAuthoringOperations(
             }
           }
         }
+        syncDesignerBindingDefaults(composition, layer, before, Object.keys(operation.patch));
         break;
       }
       case 'set_property_key': {

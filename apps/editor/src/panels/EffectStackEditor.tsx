@@ -15,7 +15,9 @@ import {
   type EffectType,
   type Layer,
 } from '@ograf-editor/scene-model';
-import { useProjectStore } from '../state/projectStore';
+import { useProjectStore, useActiveComposition } from '../state/projectStore';
+import { useTestDataStore } from '../state/testDataStore';
+import { resolveDesignerEffects } from '../state/dataBinding';
 import { shaderPaintWithPatch } from '../state/shaderResources';
 import { SHADER_RESOURCE_MIME, shaderEffectPatchFromResourceDrag } from '../state/shaderDrag';
 import { ShaderSourceEditor } from './ShaderSourceEditor';
@@ -39,6 +41,8 @@ export function EffectStackEditor({
   frame: number;
   groupLayers?: Layer[];
 }) {
+  const fields = useActiveComposition().dataFields;
+  const previewValues = useTestDataStore((state) => state.values);
   const [type, setType] = useState<EffectType>('glow'),
     [error, setError] = useState(''),
     [dragOver, setDragOver] = useState(false),
@@ -56,7 +60,12 @@ export function EffectStackEditor({
   const isGroup = groupLayers.length > 1,
     targetIds = groupLayers.map((candidate) => candidate.id),
     groupLocked = groupLayers.some((candidate) => candidate.isLocked);
-  const effects = getLayerEffectsAtFrame(layer, frame),
+  const effects = resolveDesignerEffects(
+      layer,
+      getLayerEffectsAtFrame(layer, frame),
+      previewValues,
+      fields,
+    ),
     stack = getEffectStack(effects).filter(
       (effect) =>
         !isGroup ||

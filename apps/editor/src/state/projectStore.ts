@@ -76,6 +76,7 @@ import {
   normalizeTextAnimation,
   syncShaderParameterFields,
   syncCompositionShaderParameterFields,
+  syncDesignerBindingDefaults,
   createTransition,
   defaultTransformForRole,
   findLayerKeyframeAtFrame,
@@ -173,6 +174,9 @@ import { planLifecycleRetime, type LifecycleRetimePlan } from './lifecycleRetime
 import { buildSvgBundle } from './svgBundleImport';
 import { placeImages, prepareImage, readImageSize, type ImagePlacement } from './imageImport';
 import { createNextBinding, createPlayoutBinding, playoutProperty } from './bindingFieldCreation';
+import { useTestDataStore } from './testDataStore';
+import { resolveDesignerElement, resolveDesignerEffects } from './dataBinding';
+import { resolvePreviewFieldValue } from './previewFieldValue';
 import {
   defaultShaderResourceName,
   isStoredShaderResourceTarget,
@@ -1152,6 +1156,55 @@ export const useProjectStore = create<ProjectStore>()(
   immer((set, get) => {
     const initialProject = createProject();
     const initialComposition = initialProject.compositions[0]!;
+    const designerEdit = (
+      layerIds: string | readonly string[],
+      properties: readonly string[] | ((layer: Layer) => readonly string[]),
+      mutate: (state: ProjectStore, composition: Composition, layers: Layer[]) => void | false,
+    ): void => {
+      const values = useTestDataStore.getState().values;
+      const resets: Array<{ fieldId: string; sourcePath: string[] }> = [];
+      set((state) => {
+        const composition = getActiveComposition(state.project, state.activeCompositionId);
+        const ids = new Set(typeof layerIds === 'string' ? [layerIds] : layerIds);
+        const layers = composition.layers.filter((layer) => ids.has(layer.id));
+        if (layers.length !== ids.size || layers.some((layer) => layer.isLocked)) return;
+        const fields = current(composition.dataFields);
+        const before = layers.map((layer) => {
+          const authored = current(layer);
+          try {
+            return {
+              element: resolveDesignerElement(authored, values, fields),
+              effects: resolveDesignerEffects(authored, authored.effects, values, fields),
+            };
+          } catch {
+            // Invalid test input must not prevent the designer from repairing the authored value.
+            return { element: authored.element, effects: authored.effects };
+          }
+        });
+        const targets = layers.map((layer) =>
+          typeof properties === 'function' ? properties(layer) : properties,
+        );
+        const preview = Object.fromEntries(
+          fields.flatMap((field) => {
+            const value = resolvePreviewFieldValue(field, values[field.id]);
+            return value === undefined ? [] : [[field.id, value]];
+          }),
+        );
+        if (mutate(state, composition, layers) === false) return;
+        layers.forEach((layer, index) =>
+          resets.push(
+            ...syncDesignerBindingDefaults(
+              composition,
+              layer,
+              before[index]!,
+              targets[index]!,
+              preview,
+            ),
+          ),
+        );
+      });
+      useTestDataStore.getState().clearOverrides(resets);
+    };
     return {
       project: initialProject,
       activeCompositionId: initialProject.mainCompositionId,
@@ -2255,9 +2308,8 @@ export const useProjectStore = create<ProjectStore>()(
         }),
 
       updateLayerElement: (layerId, patch) =>
-        set((state) => {
-          const composition = getActiveComposition(state.project, state.activeCompositionId);
-          const layer = composition.layers.find((l) => l.id === layerId);
+        designerEdit(layerId, Object.keys(patch), (state, composition, layers) => {
+          const layer = layers[0]!;
           if (layer && !layer.isLocked) {
             const shaderPaints = getElementShaderPaints({
               ...layer.element,
@@ -2273,6 +2325,14 @@ export const useProjectStore = create<ProjectStore>()(
                 ...patch.textAnimation,
               });
             }
+            if (
+              layer.element.type === 'text' &&
+              patch.content !== undefined &&
+              patch.content !== layer.element.content &&
+              patch.runs === undefined
+            ) {
+              layer.element.runs = [];
+            }
             Object.assign(layer.element, patch);
             enforceMediaRuntimeProfile(state.project);
             syncShaderParameterFields(composition, layer);
@@ -2281,39 +2341,42 @@ export const useProjectStore = create<ProjectStore>()(
         }),
 
       updateLayerShaderParameter: (layerId, frame, slot, name, value) =>
-        set((state) => {
-          const composition = getActiveComposition(state.project, state.activeCompositionId);
-          const layer = composition.layers.find((candidate) => candidate.id === layerId);
-          if (!layer || layer.isLocked || !getElementShaderPaint(layer.element, slot)) return;
-          const roundedFrame = Math.max(
-            0,
-            Math.min(getTotalFrames(composition), Math.round(frame)),
-          );
-          const incoming = applyElementDataValue(
-            layer.element,
-            shaderParameterTarget(name, slot),
-            value,
-          );
-          const authoredChanges: Record<string, number> = {};
-          for (const property of getShaderAnimatableProperties(layer.element)) {
-            const parsed = parseShaderAnimationProperty(property)!;
-            if (parsed.slot !== slot || parsed.name !== name) continue;
-            const before = getLayerPropertyValueAtFrame(layer, property, roundedFrame);
-            const next = getShaderAnimationValue(incoming, property);
-            if (Math.abs(next - before) < 1e-9) continue;
-            if (useTimelineStore.getState().autoKeyframe) {
-              const key = upsertPropertyKeyframe(layer, property, roundedFrame, next);
-              syncAggregateKeyframe(layer, roundedFrame, key.easing);
-            } else {
-              offsetExistingPropertyKeys(layer, property, next - before);
-              authoredChanges[property] = next;
+        designerEdit(
+          layerId,
+          [shaderParameterTarget(name, slot)],
+          (_state, composition, layers) => {
+            const layer = layers[0]!;
+            if (!layer || layer.isLocked || !getElementShaderPaint(layer.element, slot)) return;
+            const roundedFrame = Math.max(
+              0,
+              Math.min(getTotalFrames(composition), Math.round(frame)),
+            );
+            const incoming = applyElementDataValue(
+              layer.element,
+              shaderParameterTarget(name, slot),
+              value,
+            );
+            const authoredChanges: Record<string, number> = {};
+            for (const property of getShaderAnimatableProperties(layer.element)) {
+              const parsed = parseShaderAnimationProperty(property)!;
+              if (parsed.slot !== slot || parsed.name !== name) continue;
+              const before = getLayerPropertyValueAtFrame(layer, property, roundedFrame);
+              const next = getShaderAnimationValue(incoming, property);
+              if (Math.abs(next - before) < 1e-9) continue;
+              if (useTimelineStore.getState().autoKeyframe) {
+                const key = upsertPropertyKeyframe(layer, property, roundedFrame, next);
+                syncAggregateKeyframe(layer, roundedFrame, key.easing);
+              } else {
+                offsetExistingPropertyKeys(layer, property, next - before);
+                authoredChanges[property] = next;
+              }
             }
-          }
-          if (Object.keys(authoredChanges).length) {
-            layer.element = applyShaderAnimationValues(layer.element, authoredChanges);
-            syncShaderParameterFields(composition, layer);
-          }
-        }),
+            if (Object.keys(authoredChanges).length) {
+              layer.element = applyShaderAnimationValues(layer.element, authoredChanges);
+              syncShaderParameterFields(composition, layer);
+            }
+          },
+        ),
 
       createShaderResource: (paint) => {
         let target: StoredShaderResourceTarget | undefined;
@@ -2327,7 +2390,9 @@ export const useProjectStore = create<ProjectStore>()(
         return target!;
       },
 
-      updateShaderResource: (target, patch) =>
+      updateShaderResource: (target, patch) => {
+        const values = useTestDataStore.getState().values;
+        const resets: Array<{ fieldId: string; sourcePath: string[] }> = [];
         set((state) => {
           if (isStoredShaderResourceTarget(target)) {
             const { resource, paint } = resolveShaderResource(state.project, target);
@@ -2338,6 +2403,7 @@ export const useProjectStore = create<ProjectStore>()(
             state.project,
             target,
           );
+          const before = { element: current(layer.element), effects: current(layer.effects) };
           if (layer.isLocked) throw new Error(`Shader resource object "${layer.name}" is locked.`);
           const next = shaderPaintWithPatch(paint, patch);
           if (target.slot === 'stroke') {
@@ -2360,11 +2426,45 @@ export const useProjectStore = create<ProjectStore>()(
               components: [],
             };
             syncShaderParameterFields(scope, layer);
+            resets.push(
+              ...syncDesignerBindingDefaults(
+                scope,
+                layer,
+                before,
+                Object.keys(patch.parameters ?? {}).map((name) =>
+                  shaderParameterTarget(name, target.slot),
+                ),
+                Object.fromEntries(
+                  scope.dataFields.map((field) => [
+                    field.id,
+                    resolvePreviewFieldValue(field, values[field.id])!,
+                  ]),
+                ),
+              ),
+            );
             component.dataFields = scope.dataFields;
           } else {
             syncShaderParameterFields(composition, layer);
+            resets.push(
+              ...syncDesignerBindingDefaults(
+                composition,
+                layer,
+                before,
+                Object.keys(patch.parameters ?? {}).map((name) =>
+                  shaderParameterTarget(name, target.slot),
+                ),
+                Object.fromEntries(
+                  composition.dataFields.map((field) => [
+                    field.id,
+                    resolvePreviewFieldValue(field, values[field.id])!,
+                  ]),
+                ),
+              ),
+            );
           }
-        }),
+        });
+        useTestDataStore.getState().clearOverrides(resets);
+      },
 
       removeShaderResource: (target) =>
         set((state) => {
@@ -2431,9 +2531,8 @@ export const useProjectStore = create<ProjectStore>()(
         }),
 
       updateLayerTextStroke: (layerId, frame, patch) =>
-        set((state) => {
-          const composition = getActiveComposition(state.project, state.activeCompositionId);
-          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+        designerEdit(layerId, Object.keys(patch), (_state, composition, layers) => {
+          const layer = layers[0]!;
           if (!layer || layer.isLocked || layer.element.type !== 'text') return;
           if (patch.strokeColor !== undefined) {
             layer.element.strokeColor = patch.strokeColor;
@@ -2466,9 +2565,8 @@ export const useProjectStore = create<ProjectStore>()(
         }),
 
       updateLayerPaint: (layerId, frame, paint) =>
-        set((state) => {
-          const composition = getActiveComposition(state.project, state.activeCompositionId);
-          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+        designerEdit(layerId, ['fill', 'color'], (state, composition, layers) => {
+          const layer = layers[0]!;
           if (
             !layer ||
             layer.isLocked ||
@@ -2582,12 +2680,19 @@ export const useProjectStore = create<ProjectStore>()(
           if (layer && !layer.isLocked) addEffect(layer, type, patch);
         }),
       updateLayerEffect: (layerId, effectId, patch, frame) =>
-        set((state) => {
-          const composition = getActiveComposition(state.project, state.activeCompositionId),
-            layer = composition.layers.find((l) => l.id === layerId);
-          if (!layer || layer.isLocked) return;
-          updateEffectAtFrame(composition, layer, effectId, patch, frame);
-        }),
+        designerEdit(
+          layerId,
+          (layer) => {
+            const effect = getEffectStack(layer.effects).find((entry) => entry.id === effectId);
+            return effect
+              ? Object.keys(patch.params ?? {}).map((name) => effectProperty(effect, name))
+              : [];
+          },
+          (_state, composition, layers) => {
+            const layer = layers[0]!;
+            updateEffectAtFrame(composition, layer, effectId, patch, frame);
+          },
+        ),
       removeLayerEffect: (layerId, effectId) =>
         set((state) => {
           const layer = getActiveComposition(state.project, state.activeCompositionId).layers.find(
@@ -2620,22 +2725,29 @@ export const useProjectStore = create<ProjectStore>()(
         });
       },
       updateGroupEffect: (layerIds, effectId, patch, frame) =>
-        set((state) => {
-          const composition = getActiveComposition(state.project, state.activeCompositionId),
-            wanted = new Set(layerIds),
-            layers = composition.layers.filter((layer) => wanted.has(layer.id));
-          if (
-            layers.length !== wanted.size ||
-            layers.some(
-              (layer) =>
-                layer.isLocked ||
-                !getEffectStack(layer.effects).some((effect) => effect.id === effectId),
+        designerEdit(
+          layerIds,
+          (layer) => {
+            const effect = getEffectStack(layer.effects).find((entry) => entry.id === effectId);
+            return effect
+              ? Object.keys(patch.params ?? {}).map((name) => effectProperty(effect, name))
+              : [];
+          },
+          (_state, composition, layers) => {
+            const wanted = new Set(layerIds);
+            if (
+              layers.length !== wanted.size ||
+              layers.some(
+                (layer) =>
+                  layer.isLocked ||
+                  !getEffectStack(layer.effects).some((effect) => effect.id === effectId),
+              )
             )
-          )
-            return;
-          for (const layer of layers)
-            updateEffectAtFrame(composition, layer, effectId, patch, frame);
-        }),
+              return false;
+            for (const layer of layers)
+              updateEffectAtFrame(composition, layer, effectId, patch, frame);
+          },
+        ),
       removeGroupEffect: (layerIds, effectId) =>
         set((state) => {
           const composition = getActiveComposition(state.project, state.activeCompositionId),
@@ -2699,9 +2811,8 @@ export const useProjectStore = create<ProjectStore>()(
           }
         }),
       updateLayerEffects: (layerId, frame, patch) =>
-        set((state) => {
-          const composition = getActiveComposition(state.project, state.activeCompositionId);
-          const layer = composition.layers.find((candidate) => candidate.id === layerId);
+        designerEdit(layerId, Object.keys(patch), (_state, composition, layers) => {
+          const layer = layers[0]!;
           if (!layer || layer.isLocked) return;
           const roundedFrame = Math.max(
             0,
@@ -3806,6 +3917,8 @@ export const useProjectStore = create<ProjectStore>()(
               'The document changed. Choose the image again in the current document.',
             );
           let ids: string[] = [];
+          const resets: Array<{ fieldId: string; sourcePath: string[] }> = [];
+          const previewValues = useTestDataStore.getState().values;
           set((state) => {
             const current = getActiveComposition(state.project, state.activeCompositionId);
             if (
@@ -3822,6 +3935,10 @@ export const useProjectStore = create<ProjectStore>()(
             const currentSource = current.layers.find(
               (l) => l.id === options.replaceLayerId,
             )?.element;
+            const replacement = current.layers.find((layer) => layer.id === options.replaceLayerId);
+            const before = replacement
+              ? { element: { ...replacement.element }, effects: replacement.effects }
+              : undefined;
             if (
               options.replaceLayerId &&
               originalSource?.type === 'image' &&
@@ -3836,8 +3953,24 @@ export const useProjectStore = create<ProjectStore>()(
             for (const id of ids) {
               const layer = current.layers.find((l) => l.id === id)!;
               if (!options.replaceLayerId) materializeAnimationTracks(layer);
+              else if (before)
+                resets.push(
+                  ...syncDesignerBindingDefaults(
+                    current,
+                    layer,
+                    before,
+                    ['src'],
+                    Object.fromEntries(
+                      current.dataFields.map((field) => [
+                        field.id,
+                        resolvePreviewFieldValue(field, previewValues[field.id])!,
+                      ]),
+                    ),
+                  ),
+                );
             }
           });
+          useTestDataStore.getState().clearOverrides(resets);
           return ids;
         } finally {
           unsubscribe();

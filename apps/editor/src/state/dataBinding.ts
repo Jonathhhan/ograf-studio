@@ -29,6 +29,7 @@ import {
   type VisualRuleEngine,
 } from '@ograf-editor/scene-model';
 import type { TestValue } from './testDataStore';
+import { resolvePreviewFieldValue } from './previewFieldValue';
 
 export type EditorVisualRuleEngine = VisualRuleEngine<
   VisualRuleCondition,
@@ -48,7 +49,7 @@ export function editorVisualRuleEngine(
   const layerIds = new Set(layers.map((layer) => layer.id));
   const root = (fieldId: string, values: Record<string, TestValue>) => {
     const field = fields.get(fieldId);
-    const value = Object.hasOwn(values, fieldId) ? values[fieldId] : field?.defaultValue;
+    const value = resolvePreviewFieldValue(field, values[fieldId]);
     return field?.type === 'array' && Array.isArray(value) ? value[0] : value;
   };
   return {
@@ -162,11 +163,25 @@ export const BINDABLE_PROPERTIES: Record<ElementType, BindableProperty[]> = {
   shader: [],
 };
 
-/**
- * The element a layer should render with, given live test data — the authored `element` is left
- * untouched; each bound property is overridden only for display when a test value is present.
- * Fill bindings may carry a complete gradient object; other bindable properties stringify.
- */
+/** Bound designer controls show the current field values without applying runtime visual rules. */
+export function resolveDesignerElement(
+  layer: Layer,
+  testValues: Record<string, TestValue>,
+  dataFields: readonly FieldDefinition[] = [],
+): Element {
+  return layer.bindings.reduce<Element>((resolved, binding) => {
+    const field = dataFields.find((candidate) => candidate.id === binding.fieldId);
+    const rootValue = resolvePreviewFieldValue(field, testValues[binding.fieldId]);
+    const itemValue =
+      field?.type === 'array' && Array.isArray(rootValue) ? rootValue[0] : rootValue;
+    const value = valueAtSourcePath(itemValue, binding.sourcePath);
+    if (value === undefined) return resolved;
+    const mapped = binding.valueMap?.[String(value)] ?? value;
+    return applyElementDataValue(resolved, binding.targetProperty, mapped);
+  }, layer.element);
+}
+
+/** Render data bindings plus visual-rule output while keeping the authored element untouched. */
 export function resolveEffectiveElement(
   layer: Layer,
   testValues: Record<string, TestValue>,
@@ -175,19 +190,7 @@ export function resolveEffectiveElement(
   patterns: TilingPattern[] = [],
   ruleEffect: VisualRuleEffect | undefined = ownVisualRuleEffect(layer, testValues, dataFields),
 ): Element {
-  let element = layer.bindings.reduce<Element>((resolved, binding) => {
-    const hasTestValue = Object.prototype.hasOwnProperty.call(testValues, binding.fieldId);
-    const rootValue = hasTestValue
-      ? testValues[binding.fieldId]
-      : dataFields.find((field) => field.id === binding.fieldId)?.defaultValue;
-    const field = dataFields.find((candidate) => candidate.id === binding.fieldId);
-    const itemValue =
-      field?.type === 'array' && Array.isArray(rootValue) ? rootValue[0] : rootValue;
-    const value = valueAtSourcePath(itemValue, binding.sourcePath);
-    if (value === undefined) return resolved;
-    const mapped = binding.valueMap?.[String(value)] ?? value;
-    return applyElementDataValue(resolved, binding.targetProperty, mapped);
-  }, layer.element);
+  let element = resolveDesignerElement(layer, testValues, dataFields);
   for (const [property, value] of Object.entries(ruleEffect?.properties ?? {})) {
     if (!isEffectRuleProperty(property)) element = applyElementDataValue(element, property, value);
   }
@@ -240,17 +243,15 @@ export function previewBindingData(
   fields: FieldDefinition[],
   values: Record<string, TestValue>,
 ): Record<string, unknown> {
-  return Object.fromEntries(
-    fields.map((f) => [f.key, Object.hasOwn(values, f.id) ? values[f.id] : f.defaultValue]),
-  );
+  return Object.fromEntries(fields.map((f) => [f.key, resolvePreviewFieldValue(f, values[f.id])]));
 }
 
-export function resolveEffectiveEffects(
+/** Binding-only effect values for designer controls, preserving authored asset references. */
+export function resolveDesignerEffects(
   layer: Layer,
   effects: LayerEffects,
   testValues: Record<string, TestValue>,
-  dataFields: FieldDefinition[],
-  ruleEffect: VisualRuleEffect | undefined = ownVisualRuleEffect(layer, testValues, dataFields),
+  dataFields: readonly FieldDefinition[],
 ): LayerEffects {
   let resolved = effects;
   for (const binding of layer.bindings) {
@@ -260,9 +261,7 @@ export function resolveEffectiveEffects(
     )
       continue;
     const field = dataFields.find((f) => f.id === binding.fieldId);
-    const root = Object.hasOwn(testValues, binding.fieldId)
-      ? testValues[binding.fieldId]
-      : field?.defaultValue;
+    const root = resolvePreviewFieldValue(field, testValues[binding.fieldId]);
     const value = valueAtSourcePath(
       field?.type === 'array' && Array.isArray(root) ? root[0] : root,
       binding.sourcePath,
@@ -275,6 +274,17 @@ export function resolveEffectiveEffects(
           : withEffectParameter(resolved, binding.targetProperty, mapped);
     }
   }
+  return resolved;
+}
+
+export function resolveEffectiveEffects(
+  layer: Layer,
+  effects: LayerEffects,
+  testValues: Record<string, TestValue>,
+  dataFields: FieldDefinition[],
+  ruleEffect: VisualRuleEffect | undefined = ownVisualRuleEffect(layer, testValues, dataFields),
+): LayerEffects {
+  let resolved = resolveDesignerEffects(layer, effects, testValues, dataFields);
   for (const [property, value] of Object.entries(ruleEffect?.properties ?? {})) {
     if (property === 'dropShadowColor') resolved = { ...resolved, dropShadowColor: String(value) };
     else if (parseEffectProperty(property)) {

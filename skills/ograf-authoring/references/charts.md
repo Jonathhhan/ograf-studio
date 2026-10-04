@@ -29,7 +29,26 @@ axis/legend text in authored composition pixels (8–96), so use larger sizes on
 
 Bind target property `data` to a `textarea` GDD field containing the JSON object as text when
 playout should replace labels/values. Validate and capture changed data with `dataOverrides`.
-Chart.js animation and tooltip interaction are disabled in the exported runtime; use OGraf
-keyframes for layer motion. Its Canvas drawing is deterministic under `goToTime` and requires an
-HTML Canvas-capable renderer. The approximate SVG diagnostic does not show chart pixels. Use
-browser capture and certify both real-time and non-real-time profiles before saving/exporting.
+Set `element.animation` to configure chart motion:
+
+```json
+{
+  "type": "grow",
+  "durationFrames": 25,
+  "delayFrames": 0,
+  "staggerFrames": 2,
+  "easing": "cubic-out",
+  "replayOnUpdate": true
+}
+```
+
+Presets are `none`, `grow`, `reveal`, and `fade`; new charts default to Grow. Duration is 1–1500
+frames, delay is 0–1500 frames, and Grow's stagger is 0–100 frames between consecutive items. Animation
+starts at the lifecycle Start frame and can replay after changed chart-bound data reaches
+`updateAction`. Native OGraf keyframes can additionally move or fade the whole layer. Capture an
+early, middle, and settled frame to verify animation; compare `goToTime` captures with playback.
+
+Chart drawing and animation use the OGraf clock and are deterministic under `goToTime`. Canvas
+rendering requires an HTML Canvas-capable renderer. Tooltip interaction is disabled. The
+approximate SVG diagnostic does not show chart pixels. Use browser capture and certify both
+real-time and non-real-time profiles before saving/exporting.

@@ -30,6 +30,7 @@ import { isMediaPaint, normalizeMediaPaint } from './mediaPaint';
 import { normalizeLayerAutoLayout } from './autoLayout';
 import { parseShaderAnimationProperty } from './shaderAnimation';
 import { normalizeTextAnimation } from './textAnimation';
+import { normalizeChartAnimation } from './chartAnimation';
 import type {
   Composition,
   Element,
@@ -185,6 +186,7 @@ function normalizeElement(element: Element): Element {
       fontSize: element.fontSize ?? 28,
       showLegend: element.showLegend ?? false,
       showGrid: element.showGrid ?? true,
+      animation: normalizeChartAnimation(element.animation),
     };
   if (element.type === 'shader') return migrateShaderElement(element);
   if (element.type === 'audio')

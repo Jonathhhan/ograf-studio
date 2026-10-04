@@ -17,6 +17,7 @@ import {
 import { compileCustomActions, compileDataSchema } from '@ograf-editor/codegen';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { useTestDataStore, type TestValue } from '../state/testDataStore';
+import { resolvePreviewFieldValue } from '../state/previewFieldValue';
 import { Panel } from './Panel';
 import { PaintEditor } from './PaintEditor';
 import './DataPanel.css';
@@ -355,7 +356,7 @@ export function DataPanel() {
                       <span>{field.label || field.key}</span>
                       <DefaultValueInput
                         field={field}
-                        value={testValues[field.id] ?? field.defaultValue}
+                        value={resolvePreviewFieldValue(field, testValues[field.id])!}
                         onChange={(value) =>
                           setTestValue(field.id, value, composition.layers, composition.dataFields)
                         }

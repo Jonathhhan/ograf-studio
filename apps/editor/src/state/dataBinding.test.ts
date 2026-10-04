@@ -3,8 +3,46 @@ import {
   createFieldDefinition,
   createRectangleLayer,
   createTextLayer,
+  createLayerVisualRule,
 } from '@ograf-editor/scene-model';
-import { resolveEffectiveElement } from './dataBinding';
+import {
+  resolveDesignerElement,
+  resolveDesignerEffects,
+  resolveEffectiveElement,
+  resolveEffectiveEffects,
+} from './dataBinding';
+
+describe('designer binding values', () => {
+  it('shows editable bound values while runtime visual rules keep their own output', () => {
+    const layer = createRectangleLayer();
+    const fill = createFieldDefinition('color', { defaultValue: '#00ff00' });
+    const shadow = createFieldDefinition('color', { defaultValue: '#0000ff' });
+    const fields = [fill, shadow];
+    layer.bindings = [
+      { fieldId: fill.id, targetProperty: 'fill' },
+      { fieldId: shadow.id, targetProperty: 'dropShadowColor' },
+    ];
+    layer.visualRules = [
+      createLayerVisualRule({
+        fieldId: fill.id,
+        operator: 'equals',
+        value: '#00ff00',
+        actions: [
+          { type: 'property', targetProperty: 'fill', value: '#ff0000' },
+          { type: 'property', targetProperty: 'dropShadowColor', value: '#ff0000' },
+        ],
+      }),
+    ];
+    expect(resolveDesignerElement(layer, {}, fields)).toMatchObject({ fill: '#00ff00' });
+    expect(resolveDesignerEffects(layer, layer.effects, {}, fields)).toMatchObject({
+      dropShadowColor: '#0000ff',
+    });
+    expect(resolveEffectiveElement(layer, {}, [], fields)).toMatchObject({ fill: '#ff0000' });
+    expect(resolveEffectiveEffects(layer, layer.effects, {}, fields)).toMatchObject({
+      dropShadowColor: '#ff0000',
+    });
+  });
+});
 
 describe('resolveEffectiveElement', () => {
   it('uses the declared field default when no explicit test value exists', () => {

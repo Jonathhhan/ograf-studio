@@ -58,6 +58,18 @@ export type ChartPreset =
   | 'radar'
   | 'polar-area';
 
+export interface ChartAnimation {
+  /** Frame-sampled entrance, shared by timeline playback and OGraf seeking. */
+  type: 'none' | 'grow' | 'reveal' | 'fade';
+  durationFrames: number;
+  delayFrames: number;
+  /** Additional start delay per label or data point. */
+  staggerFrames: number;
+  easing: EasingPreset;
+  /** Replay the entrance when bound chart data changes through updateAction. */
+  replayOnUpdate: boolean;
+}
+
 /** JSON-only Chart.js input; projects cannot include executable callbacks or plugins. */
 export interface ChartElement {
   type: 'chart';
@@ -75,6 +87,8 @@ export interface ChartElement {
   fontSize: number;
   showLegend: boolean;
   showGrid: boolean;
+  /** Absent preserves the static rendering of charts authored before animation support. */
+  animation?: ChartAnimation;
 }
 
 export interface TextRun {

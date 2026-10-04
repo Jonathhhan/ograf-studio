@@ -37,6 +37,7 @@ import {
   getShaderAnimationValue,
   hasElementMediaPaint,
   normalizeTextAnimation,
+  normalizeChartAnimation,
   parseShaderAnimationProperty,
   shaderAnimationPropertySpec,
   hasElementShaderPaint,
@@ -78,6 +79,7 @@ import {
 } from './runtimeVisualRules';
 import { MediaCueRuntime } from './mediaCueRuntime';
 import { renderTextAnimationAtFrame } from './textAnimationRendering';
+import { chartAnimationEndFrame, renderChartAnimationAtFrame } from './chartRendering';
 
 /** How deep rule -> custom action -> rule chains may go before rules stop answering. */
 const MAX_RULE_CUSTOM_ACTION_DEPTH = 4;
@@ -211,6 +213,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
   #contentAnimationFrame: number | null = null;
   #textAnimationFrame: number | null = null;
   #textAnimationEpochs = new Map<string, number>();
+  #chartAnimationFrame: number | null = null;
+  #chartAnimationEpochs = new Map<string, number>();
   #contentPlaybackError: Error | null = null;
   #operationQueue: Promise<void> = Promise.resolve();
   #renderType: LoadParams['renderType'] = 'realtime';
@@ -351,6 +355,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#timeline?.kill();
       this.#clearContentAnimationFrames();
       this.#clearTextAnimationFrames();
+      this.#clearChartAnimationFrames();
       this.#stopLoopRendering();
       this.#cancelUpdateAnimations();
       for (const timer of this.#clickTimers.values()) clearTimeout(timer);
@@ -437,6 +442,76 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     }
     this.#ensureTextAnimationRendering();
     return triggered;
+  }
+
+  #clearChartAnimationFrames(): void {
+    if (this.#chartAnimationFrame !== null) this.#cancelFrame(this.#chartAnimationFrame);
+    this.#chartAnimationFrame = null;
+    this.#chartAnimationEpochs.clear();
+    for (const host of this.#layerEls.values()) delete host.dataset.ografChartAnimationFrame;
+  }
+
+  #startChartAnimations(skipAnimation: boolean, changedKeys?: Set<string>): void {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    for (const layer of this.activeDescriptor.layers) {
+      if (layer.element.type !== 'chart') continue;
+      const element = this.#resolveLayerElement(layer);
+      if (element.type !== 'chart') continue;
+      const animation = normalizeChartAnimation(element.animation);
+      if (animation.type === 'none') continue;
+      if (
+        changedKeys &&
+        (!animation.replayOnUpdate ||
+          !(layer.bindings ?? (layer.binding ? [layer.binding] : [])).some(
+            (binding) => binding.targetProperty === 'data' && changedKeys.has(binding.dataKey),
+          ))
+      )
+        continue;
+      const host = this.#layerEls.get(layer.id);
+      if (!host) continue;
+      const settle = skipAnimation || this.#renderType !== 'realtime';
+      const frame = settle ? chartAnimationEndFrame(element) : 0;
+      host.dataset.ografChartAnimationFrame = String(frame);
+      renderChartAnimationAtFrame(host, element, frame);
+      if (settle) this.#chartAnimationEpochs.delete(layer.id);
+      else this.#chartAnimationEpochs.set(layer.id, now);
+    }
+    this.#ensureChartAnimationRendering();
+  }
+
+  #ensureChartAnimationRendering(): void {
+    if (
+      this.#renderType !== 'realtime' ||
+      this.#chartAnimationEpochs.size === 0 ||
+      this.#chartAnimationFrame !== null ||
+      typeof requestAnimationFrame === 'undefined'
+    )
+      return;
+    const render = (now: number) => {
+      this.#chartAnimationFrame = null;
+      for (const [layerId, epoch] of this.#chartAnimationEpochs) {
+        const layer = this.activeDescriptor.layers.find((candidate) => candidate.id === layerId);
+        const host = this.#layerEls.get(layerId);
+        const element = layer ? this.#resolveLayerElement(layer) : null;
+        if (!host || element?.type !== 'chart') {
+          this.#chartAnimationEpochs.delete(layerId);
+          continue;
+        }
+        const endFrame = chartAnimationEndFrame(element);
+        const frame = Math.min(
+          endFrame,
+          Math.max(0, ((now - epoch) / 1000) * this.activeDescriptor.frameRate),
+        );
+        host.dataset.ografChartAnimationFrame = String(frame);
+        renderChartAnimationAtFrame(host, element, frame);
+        // Keep the completed snapshot while parked at a Step or during OUT. Returning to the
+        // lifecycle's earlier frame must not replay the chart's entrance after an update.
+        if (frame >= endFrame) this.#chartAnimationEpochs.delete(layerId);
+      }
+      if (this.#chartAnimationEpochs.size > 0)
+        this.#chartAnimationFrame = this.#requestFrame(render);
+    };
+    this.#chartAnimationFrame = this.#requestFrame(render);
   }
 
   #cancelUpdateAnimations(): void {
@@ -1176,6 +1251,13 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
             (this.#timeline?.time() ?? 0) * this.activeDescriptor.frameRate,
           );
         }
+        if (element.type === 'chart') {
+          renderChartAnimationAtFrame(
+            el,
+            element,
+            (this.#timeline?.time() ?? 0) * this.activeDescriptor.frameRate,
+          );
+        }
       }
     }
     this.#syncCollectionVisibility();
@@ -1353,6 +1435,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#stopLoopRendering();
       this.#clearContentAnimationFrames();
       this.#clearTextAnimationFrames();
+      this.#clearChartAnimationFrames();
       this.#contentPlaybackError = null;
       this.#mediaCueRuntime?.reset();
       this.#renderType = params.renderType;
@@ -1389,6 +1472,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       this.#activeTween = null;
       this.#clearContentAnimationFrames();
       this.#clearTextAnimationFrames();
+      this.#clearChartAnimationFrames();
       this.#stopLoopRendering();
       this.#cancelUpdateAnimations();
       this.#schedule = [];
@@ -1450,6 +1534,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       if (params.skipAnimation || !hasTransition || keys.size === 0) {
         this.#applyData(params.data);
         if (!params.skipAnimation) this.#replayUpdatedText(changedTextKeys);
+        this.#startChartAnimations(Boolean(params.skipAnimation), changedTextKeys);
         await this.#awaitContentReady();
         return { statusCode: 200 };
       }
@@ -1457,6 +1542,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       if (generation !== this.#updateGeneration) return { statusCode: 200 };
       this.#applyData(params.data);
       this.#replayUpdatedText(changedTextKeys);
+      this.#startChartAnimations(false, changedTextKeys);
       await this.#awaitContentReady();
       await this.#animateBoundContent(keys, 'in');
       if (generation !== this.#updateGeneration) return { statusCode: 200 };
@@ -1500,6 +1586,8 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const exitsToEnd =
         previousStep !== undefined && target.keyframeId === this.descriptor.endKeyframeId;
+      if (previousStep === undefined && target.currentStep !== undefined)
+        this.#startChartAnimations(Boolean(params.skipAnimation));
       if (exitsToEnd) this.#beginDirectLifecycleTransition(targetFrame, now);
       else {
         this.#beginLoopExit(
@@ -1594,7 +1682,13 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           ...this.#lastData,
           ...(params.payload as Record<string, unknown>),
         });
+        const chartKeys = new Set(
+          Object.entries(params.payload as Record<string, unknown>)
+            .filter(([key, value]) => !Object.is(this.#lastData[key], value))
+            .map(([key]) => key),
+        );
         this.#applyData(params.payload, ruleDepth);
+        this.#startChartAnimations(Boolean(params.skipAnimation), chartKeys);
         await this.#awaitContentReady();
       }
       // A rule that runs this custom action may be answered by rules again, but not endlessly.
@@ -1659,6 +1753,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     const due = this.#schedule.filter((a) => a.timestamp <= timestamp);
     this.#directLifecycleTransition = null;
     this.#loopExitCorrection = null;
+    for (const host of this.#layerEls.values()) delete host.dataset.ografChartAnimationFrame;
 
     let step: number | undefined;
     let targetKeyframeId = this.descriptor.startKeyframeId;
@@ -1693,6 +1788,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     let lifecycleEpoch: number | undefined;
     const customActionEpochs = new Map<string, number>();
     const textAnimationEpochs = new Map<string, number>();
+    const chartAnimationEpochs = new Map<string, { timestamp: number; skip: boolean }>();
 
     // Rule state is rebuilt from the schedule on every seek, like data and loop epochs: data
     // changes, lifecycle events and delayed rules are queued at their OGraf time and replayed in
@@ -1836,6 +1932,28 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           }
           const previousRuleData = data;
           data = { ...data, ...(updateParams.data as Record<string, unknown>) };
+          for (const layer of this.activeDescriptor.layers) {
+            if (layer.element.type !== 'chart') continue;
+            const chartAnimation = normalizeChartAnimation(layer.element.animation);
+            if (
+              chartAnimation.type === 'none' ||
+              !chartAnimation.replayOnUpdate ||
+              !(layer.bindings ?? (layer.binding ? [layer.binding] : [])).some(
+                (binding) => binding.targetProperty === 'data' && changedKeys.has(binding.dataKey),
+              )
+            )
+              continue;
+            const transition = layer.updateTransition;
+            const transitionFrames =
+              updateParams.skipAnimation || transition?.style === 'none'
+                ? 0
+                : transition?.durationFrames || this.descriptor.updateTransitionFrames || 0;
+            chartAnimationEpochs.set(layer.id, {
+              timestamp:
+                scheduled.timestamp + (transitionFrames / this.activeDescriptor.frameRate) * 500,
+              skip: Boolean(updateParams.skipAnimation),
+            });
+          }
           if (!updateParams.skipAnimation) {
             for (const layer of this.activeDescriptor.layers) {
               if (layer.element.type !== 'text') continue;
@@ -1894,6 +2012,18 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         const previousStep = step;
         const outgoingEpochs = loopEpochsAt(scheduled.timestamp);
         const target = this.#resolvePlayTarget(step, playParams);
+        if (previousStep === undefined && target.currentStep !== undefined) {
+          for (const layer of this.activeDescriptor.layers) {
+            if (
+              layer.element.type === 'chart' &&
+              normalizeChartAnimation(layer.element.animation).type !== 'none'
+            )
+              chartAnimationEpochs.set(layer.id, {
+                timestamp: scheduled.timestamp,
+                skip: Boolean(playParams.skipAnimation),
+              });
+          }
+        }
         step = target.currentStep;
         targetKeyframeId = target.keyframeId;
         const targetSeconds = keyframeSeconds(targetKeyframeId);
@@ -1997,6 +2127,26 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
           updateKeys = new Set();
           const previousRuleData = data;
           data = { ...data, ...(customParams.payload as Record<string, unknown>) };
+          const changedKeys = new Set(
+            Object.entries(customParams.payload as Record<string, unknown>)
+              .filter(([key, value]) => !Object.is(previousRuleData[key], value))
+              .map(([key]) => key),
+          );
+          for (const layer of this.activeDescriptor.layers) {
+            if (layer.element.type !== 'chart') continue;
+            const chartAnimation = normalizeChartAnimation(layer.element.animation);
+            if (
+              chartAnimation.type !== 'none' &&
+              chartAnimation.replayOnUpdate &&
+              (layer.bindings ?? (layer.binding ? [layer.binding] : [])).some(
+                (binding) => binding.targetProperty === 'data' && changedKeys.has(binding.dataKey),
+              )
+            )
+              chartAnimationEpochs.set(layer.id, {
+                timestamp: scheduled.timestamp,
+                skip: Boolean(customParams.skipAnimation),
+              });
+          }
           displayData = { ...data };
           queueRuleWork(scheduled.timestamp, {
             kind: 'data',
@@ -2050,6 +2200,21 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
       host.dataset.ografTextAnimationFrame = String(frame);
       renderTextAnimationAtFrame(host, element, frame);
     }
+    for (const layer of this.activeDescriptor.layers) {
+      if (layer.element.type !== 'chart') continue;
+      const host = this.#layerEls.get(layer.id);
+      const element = this.#resolveLayerElement(layer, displayData);
+      if (!host || element.type !== 'chart') continue;
+      const epoch = chartAnimationEpochs.get(layer.id);
+      const frame =
+        epoch === undefined
+          ? positionSeconds * this.activeDescriptor.frameRate
+          : epoch.skip
+            ? chartAnimationEndFrame(element)
+            : Math.max(0, ((timestamp - epoch.timestamp) / 1000) * this.activeDescriptor.frameRate);
+      host.dataset.ografChartAnimationFrame = String(frame);
+      renderChartAnimationAtFrame(host, element, frame);
+    }
   }
 
   async goToTime(params: GoToTimeParams): Promise<ReturnPayload | undefined> {
@@ -2060,6 +2225,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
     try {
       this.#clearContentAnimationFrames();
       this.#stopLoopRendering();
+      this.#clearChartAnimationFrames();
       this.#timeline?.pause();
       this.#activeTween?.kill();
       this.#activeTween = null;
@@ -2091,6 +2257,7 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
   ): Promise<ReturnPayload | undefined> {
     try {
       this.#schedule = [...params.schedule].sort((a, b) => a.timestamp - b.timestamp);
+      this.#clearChartAnimationFrames();
       this.#scheduleBaseData = { ...this.#lastData };
       if (this.#schedule.length === 0) {
         for (const host of this.#layerEls.values()) delete host.dataset.ografTextAnimationFrame;

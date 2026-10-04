@@ -477,8 +477,8 @@ export function LayerNode({
       style={style}
     >
       <div className="layer-content-host" ref={contentRef} />
-      {editingInlineText && inlineTarget?.type === 'test-data' ? (
-        <div className="layer-inline-text-badge">Editing field: {inlineTarget.label}</div>
+      {editingInlineText && inlineTarget?.type === 'bound' ? (
+        <div className="layer-inline-text-badge">Bound to: {inlineTarget.label}</div>
       ) : null}
       {visibleError ? (
         <div className="layer-content-placeholder" title={visibleError} role="alert">

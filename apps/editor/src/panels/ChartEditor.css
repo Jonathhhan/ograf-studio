@@ -58,6 +58,30 @@
   justify-content: space-between;
   font-size: 11px;
 }
+.chart-editor-option select {
+  min-width: 0;
+  max-width: 66%;
+}
+.chart-animation-timing {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+.chart-animation-timing.has-stagger {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.chart-animation-timing label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.chart-animation-timing input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
 .chart-editor textarea {
   width: 100%;
   box-sizing: border-box;

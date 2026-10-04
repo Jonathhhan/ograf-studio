@@ -163,6 +163,7 @@ function nativeTextFixture() {
     element,
     contexts,
     computed,
+    original,
     setStrokeWidth(width: number) {
       computed.webkitTextStrokeWidth = `${width}px`;
       style.cssText = `font-size:41.2px;-webkit-text-stroke-width:${width}px`;
@@ -170,7 +171,240 @@ function nativeTextFixture() {
   };
 }
 
+function nestedTextFixture() {
+  const fixture = nativeTextFixture();
+  const document = fixture.host.ownerDocument;
+  const computed = {
+    ...fixture.computed,
+    direction: 'ltr',
+    opacity: '1',
+    visibility: 'visible',
+  };
+  type TextNode = { nodeType: 3; textContent: string; rects: DOMRect[] };
+  type ElementNode = {
+    nodeType: 1;
+    ownerDocument: Document;
+    style: { cssText: string; setProperty: ReturnType<typeof vi.fn>; transform?: string };
+    computed: typeof computed;
+    children: ElementNode[];
+    childNodes: Array<ElementNode | TextNode>;
+    firstChild: ElementNode | TextNode | null;
+    textContent: string;
+    getAttribute: (key: string) => string | null;
+    getBoundingClientRect: () => DOMRect;
+    querySelectorAll: () => ElementNode[];
+    cloneNode: () => ElementNode;
+  };
+  function text(value: string, x: number, y: number, columns = value.length): TextNode {
+    return {
+      nodeType: 3,
+      textContent: value,
+      rects: [...value].map(
+        (_character, index) =>
+          ({
+            left: x + (index % columns) * 20,
+            top: y + Math.floor(index / columns) * 50,
+            width: 20,
+            height: 40,
+          }) as DOMRect,
+      ),
+    };
+  }
+  function node(
+    childNodes: Array<ElementNode | TextNode>,
+    patch: Partial<typeof computed> = {},
+    options: { cursor?: boolean; bounds?: DOMRect } = {},
+  ): ElementNode {
+    const children = childNodes.filter((child): child is ElementNode => child.nodeType === 1);
+    const style = { ...computed, ...patch };
+    const result: ElementNode = {
+      nodeType: 1,
+      ownerDocument: document,
+      style: {
+        get cssText() {
+          return JSON.stringify(style);
+        },
+        setProperty: vi.fn(),
+      },
+      computed: style,
+      children,
+      childNodes,
+      firstChild: childNodes[0] ?? null,
+      get textContent() {
+        return childNodes.map((child) => child.textContent).join('');
+      },
+      getAttribute: (key) => (options.cursor && key === 'data-ograf-text-cursor' ? 'bar' : null),
+      getBoundingClientRect: () =>
+        options.bounds ?? ({ left: 0, top: 0, width: 200, height: 100 } as DOMRect),
+      querySelectorAll: () => children.flatMap((child) => [child, ...child.querySelectorAll()]),
+      cloneNode: () =>
+        node(
+          childNodes.map((child) => (child.nodeType === 1 ? child.cloneNode() : { ...child })),
+          style,
+          options,
+        ),
+    };
+    return result;
+  }
+  const defaultView = document.defaultView!;
+  Object.assign(defaultView, {
+    getComputedStyle: (element: ElementNode) => element.computed ?? computed,
+  });
+  Object.assign(document, {
+    createRange: () => {
+      let target: TextNode;
+      let offset = 0;
+      return {
+        setStart: (value: TextNode, index: number) => {
+          target = value;
+          offset = index;
+        },
+        setEnd: vi.fn(),
+        detach: vi.fn(),
+        getClientRects: () => [target.rects[offset]],
+      };
+    },
+  });
+  const createElement = document.createElement.bind(document);
+  const paints: Array<{ text: string; font: string; alpha: number; direction: string }> = [];
+  Object.assign(document, {
+    createElement: (tag: string) => {
+      const result = createElement(tag);
+      if (tag !== 'div') {
+        const context = fixture.contexts.at(-1)!;
+        context.fillText.mockImplementation((value: string) =>
+          paints.push({
+            text: value,
+            font: context.font,
+            alpha: context.globalAlpha,
+            direction: context.direction,
+          }),
+        );
+        Object.assign(context, { transform: vi.fn() });
+      }
+      return result;
+    },
+  });
+  return {
+    ...fixture,
+    node,
+    text,
+    paints,
+    mount(root: ElementNode) {
+      Object.assign(fixture.host, { children: [root] });
+      fixture.element.content = root.textContent;
+    },
+  };
+}
+
 describe('shader fill coverage', () => {
+  it('draws nested styled runs using each native font, direction and wrapped line position', async () => {
+    const fixture = nestedTextFixture();
+    const bold = fixture.node([fixture.text('A B', 10, 5)], {
+      fontWeight: '900',
+      fontFamily: 'Brand Sans, Arial',
+    });
+    const italic = fixture.node([fixture.text('CD', 90, 5, 1)], {
+      fontStyle: 'italic',
+      fontSize: '32px',
+      direction: 'rtl',
+    });
+    fixture.mount(fixture.node([fixture.node([bold, italic])]));
+    const mask = createShaderPaintMask(fixture.host, fixture.element, { width: 200, height: 100 });
+
+    await mask.update();
+
+    expect(fixture.contexts[0]!.fillText.mock.calls).toEqual([
+      ['A B', 10, 35],
+      ['C', 90, 35],
+      ['D', 90, 85],
+    ]);
+    expect(fixture.paints).toMatchObject([
+      { text: 'A B', font: 'normal 900 41.2px Brand Sans, Arial', direction: 'ltr' },
+      { text: 'C', font: 'italic 700 32px Arial', direction: 'rtl' },
+      { text: 'D', font: 'italic 700 32px Arial', direction: 'rtl' },
+    ]);
+    expect(await mask.update(100)).toBeNull();
+    mask.dispose();
+  });
+
+  it('uses animated segment visibility and opacity, skips the cursor, and invalidates cached alpha', async () => {
+    const fixture = nestedTextFixture();
+    const visible = fixture.node([fixture.text('A', 10, 5)], { opacity: '0.5' });
+    const hidden = fixture.node([fixture.text('B', 30, 5)], { visibility: 'hidden' });
+    const faded = fixture.node([fixture.text('C', 50, 5)], { opacity: '0' });
+    const cursor = fixture.node([fixture.text('|', 70, 5)], {}, { cursor: true });
+    fixture.mount(
+      fixture.node([fixture.node([visible, hidden, faded, cursor], { opacity: '0.5' })]),
+    );
+    const mask = createShaderPaintMask(fixture.host, fixture.element, { width: 200, height: 100 });
+
+    await mask.update();
+
+    expect(fixture.paints).toEqual([
+      { text: 'A', font: 'normal 700 41.2px Arial', alpha: 0.25, direction: 'ltr' },
+    ]);
+    expect(await mask.update(100)).toBeNull();
+    hidden.computed.visibility = 'visible';
+    expect(await mask.update(200)).not.toBeNull();
+    expect(fixture.paints.slice(1)).toMatchObject([
+      { text: 'A', alpha: 0.25 },
+      { text: 'B', alpha: 0.5 },
+    ]);
+    mask.dispose();
+  });
+
+  it('replays nested animation matrices after clipping the reveal parent and measures transforms only once', async () => {
+    vi.stubGlobal(
+      'DOMMatrix',
+      class {
+        a = 1;
+        b = 0;
+        c = 0;
+        d = 1;
+        e = 0;
+        f = 20;
+        constructor(_value: string) {}
+      },
+    );
+    const fixture = nestedTextFixture();
+    const inner = fixture.node(
+      [fixture.text('Goal', 50, 10)],
+      {
+        transform: 'matrix(1, 0, 0, 1, 0, 20)',
+        transformOrigin: '0px 0px',
+      },
+      { bounds: { left: 50, top: 10, width: 80, height: 40 } as DOMRect },
+    );
+    const reveal = fixture.node(
+      [inner],
+      { overflowX: 'hidden', overflowY: 'hidden' },
+      {
+        bounds: { left: 50, top: 10, width: 80, height: 40 } as DOMRect,
+      },
+    );
+    const root = fixture.node([reveal]);
+    const cloned = root.cloneNode();
+    root.cloneNode = () => cloned;
+    fixture.mount(root);
+    const mask = createShaderPaintMask(fixture.host, fixture.element, { width: 200, height: 100 });
+
+    await mask.update();
+
+    const context = fixture.contexts[0]! as (typeof fixture.contexts)[number] & {
+      transform: ReturnType<typeof vi.fn>;
+    };
+    expect(context.rect).toHaveBeenCalledWith(50, 10, 80, 40);
+    expect(context.clip).toHaveBeenCalledOnce();
+    expect(context.transform).toHaveBeenCalledExactlyOnceWith(1, 0, 0, 1, 0, 20);
+    expect(context.clip.mock.invocationCallOrder[0]).toBeLessThan(
+      context.transform.mock.invocationCallOrder[0]!,
+    );
+    expect(cloned.children[0]!.children[0]!.style.transform).toBe('none');
+    expect(context.fillText).toHaveBeenCalledWith('Goal', 50, 40);
+    mask.dispose();
+  });
+
   it('uses the same native shaped lines for fill and centered glyph stroke without filling the stroke mask', async () => {
     const fixture = nativeTextFixture();
     const fill = createShaderPaintMask(fixture.host, fixture.element, { width: 200, height: 100 });

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CompiledGraphicDescriptor, ScheduledAction } from '@ograf-editor/ograf-types';
 import {
   applyShaderAnimationValues,
+  createChartElement,
   createDefaultTransform,
   createLayerEffects,
   createLayerLoopClip,
@@ -57,15 +58,32 @@ const mock = vi.hoisted(() => {
     return ++nextFrameId;
   });
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
-  return { Host, paint: vi.fn(), content: vi.fn(), render: vi.fn(), frames };
+  return {
+    Host,
+    paint: vi.fn(),
+    content: vi.fn(),
+    render: vi.fn(),
+    chart: vi.fn((host: HTMLElement, element: Element, frame: number) => ({
+      element,
+      frame: Number(host.dataset.ografChartAnimationFrame ?? frame),
+    })),
+    frames,
+  };
 });
 vi.mock('./buildRuntimeTimeline', () => ({
   buildRuntimeTimeline: () => {
     let seconds = 0;
     return {
       time: () => seconds,
+      duration: () => 3,
       seek: (value: number) => {
         seconds = value;
+      },
+      tweenTo: (value: number, options: { onUpdate?: () => void; onComplete?: () => void }) => {
+        seconds = value;
+        options.onUpdate?.();
+        options.onComplete?.();
+        return { kill() {} };
       },
       kill() {},
       pause() {},
@@ -73,6 +91,10 @@ vi.mock('./buildRuntimeTimeline', () => ({
   },
 }));
 vi.mock('./documentFonts', () => ({ registerDocumentFonts: async () => {} }));
+vi.mock('./chartRendering', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./chartRendering')>()),
+  renderChartAnimationAtFrame: mock.chart,
+}));
 vi.mock('lottie-web/build/player/lottie_light_canvas.js', () => ({ default: {} }));
 vi.mock('./maskRendering', () => ({ applyCompiledMasks: () => {} }));
 vi.mock('./renderElement', async (importOriginal) => {
@@ -445,4 +467,178 @@ describe('scheduled shader lifecycle replay', () => {
       expect(await graphic.dispose()).toMatchObject({ statusCode: 200 });
     },
   );
+});
+
+function chartDescriptor(): CompiledGraphicDescriptor {
+  const result = descriptor();
+  return {
+    ...result,
+    layers: [
+      {
+        ...result.layers[0]!,
+        id: 'chart',
+        element: createChartElement({
+          animation: {
+            type: 'grow',
+            durationFrames: 20,
+            delayFrames: 0,
+            staggerFrames: 0,
+            easing: 'linear',
+            replayOnUpdate: true,
+          },
+        }),
+        bindings: [{ dataKey: 'chartData', targetProperty: 'data' }],
+        loop: null,
+      },
+    ],
+  };
+}
+
+function chartData(values: number[]): string {
+  const element = createChartElement();
+  return JSON.stringify({
+    ...element.data,
+    datasets: [{ ...element.data.datasets[0]!, data: values }],
+  });
+}
+
+function latestChartSample() {
+  const sample = mock.chart.mock.results.at(-1)?.value;
+  if (!sample || sample.element.type !== 'chart') throw Error('Expected chart render');
+  return { frame: sample.frame, data: sample.element.data };
+}
+
+describe('chart lifecycle animation replay', () => {
+  it('replays changed JSON data at its scheduled update and reproduces backward seeks', async () => {
+    class Graphic extends GraphicElement {
+      static descriptor = chartDescriptor();
+    }
+    const graphic = new Graphic();
+    const initialData = chartData([10, 20, 30, 40]);
+    const updatedData = chartData([40, 30, 20, 10]);
+    graphic.connectedCallback();
+    expect(
+      await graphic.load({
+        renderType: 'non-realtime',
+        renderCharacteristics: { resolution: { width: 640, height: 360 }, frameRate: 10 },
+        data: { chartData: initialData },
+      }),
+    ).toMatchObject({ statusCode: 200 });
+    expect(
+      await graphic.setActionsSchedule({
+        schedule: [
+          { timestamp: 0, action: { type: 'playAction', params: {} } },
+          {
+            timestamp: 1000,
+            action: { type: 'updateAction', params: { data: { chartData: updatedData } } },
+          },
+          {
+            timestamp: 1200,
+            action: { type: 'updateAction', params: { data: { chartData: updatedData } } },
+          },
+          { timestamp: 1500, action: { type: 'stopAction', params: { skipAnimation: true } } },
+        ],
+      }),
+    ).toMatchObject({ statusCode: 200 });
+    const sample = async (timestamp: number) => {
+      expect(await graphic.goToTime({ timestamp })).toMatchObject({ statusCode: 200 });
+      return latestChartSample();
+    };
+    const onOut = await sample(1500);
+    expect(onOut).toEqual({ frame: 5, data: JSON.parse(updatedData) });
+    expect(await sample(500)).toEqual({ frame: 5, data: JSON.parse(initialData) });
+    expect(await sample(1500)).toEqual(onOut);
+    expect(await sample(1000)).toEqual({ frame: 0, data: JSON.parse(updatedData) });
+    expect(await graphic.dispose()).toMatchObject({ statusCode: 200 });
+  });
+
+  it('settles skipped play and update animations at their completed frame', async () => {
+    class Graphic extends GraphicElement {
+      static descriptor = chartDescriptor();
+    }
+    const graphic = new Graphic();
+    const updatedData = chartData([40, 30, 20, 10]);
+    graphic.connectedCallback();
+    await graphic.load({
+      renderType: 'non-realtime',
+      renderCharacteristics: { resolution: { width: 640, height: 360 }, frameRate: 10 },
+      data: { chartData: chartData([10, 20, 30, 40]) },
+    });
+    await graphic.setActionsSchedule({
+      schedule: [
+        { timestamp: 0, action: { type: 'playAction', params: { skipAnimation: true } } },
+        {
+          timestamp: 500,
+          action: {
+            type: 'updateAction',
+            params: { data: { chartData: updatedData }, skipAnimation: true },
+          },
+        },
+      ],
+    });
+    expect(await graphic.goToTime({ timestamp: 100 })).toMatchObject({ statusCode: 200 });
+    expect(latestChartSample().frame).toBe(20);
+    expect(await graphic.goToTime({ timestamp: 600 })).toMatchObject({ statusCode: 200 });
+    expect(latestChartSample()).toEqual({ frame: 20, data: JSON.parse(updatedData) });
+    expect(await graphic.dispose()).toMatchObject({ statusCode: 200 });
+  });
+
+  it('finishes in realtime at a parked Step and replays only changed chart data', async () => {
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    class Graphic extends GraphicElement {
+      static descriptor = chartDescriptor();
+    }
+    const graphic = new Graphic();
+    const initialData = chartData([10, 20, 30, 40]);
+    const updatedData = chartData([40, 30, 20, 10]);
+    try {
+      graphic.connectedCallback();
+      expect(
+        await graphic.load({
+          renderType: 'realtime',
+          renderCharacteristics: { resolution: { width: 640, height: 360 }, frameRate: 10 },
+          data: { chartData: initialData },
+        }),
+      ).toMatchObject({ statusCode: 200 });
+      expect(await graphic.playAction({})).toMatchObject({ statusCode: 200, currentStep: 0 });
+      expect(latestChartSample().frame).toBe(0);
+      expect(mock.frames).toHaveLength(1);
+      now = 1000;
+      mock.frames.shift()!(now);
+      expect(latestChartSample().frame).toBe(10);
+      now = 2500;
+      mock.frames.shift()!(now);
+      expect(latestChartSample().frame).toBe(20);
+      expect(mock.frames).toHaveLength(0);
+
+      expect(await graphic.updateAction({ data: { chartData: initialData } })).toMatchObject({
+        statusCode: 200,
+      });
+      expect(latestChartSample().frame).toBe(20);
+      expect(mock.frames).toHaveLength(0);
+      now = 3000;
+      expect(await graphic.updateAction({ data: { chartData: updatedData } })).toMatchObject({
+        statusCode: 200,
+      });
+      expect(latestChartSample()).toEqual({ frame: 0, data: JSON.parse(updatedData) });
+      expect(mock.frames).toHaveLength(1);
+      now = 5000;
+      mock.frames.shift()!(now);
+      expect(latestChartSample().frame).toBe(20);
+      expect(mock.frames).toHaveLength(0);
+
+      expect(await graphic.stopAction({ skipAnimation: true })).toMatchObject({ statusCode: 200 });
+      expect(latestChartSample().frame).toBe(20);
+      expect(mock.frames).toHaveLength(0);
+      expect(
+        await graphic.updateAction({ data: { chartData: initialData }, skipAnimation: true }),
+      ).toMatchObject({ statusCode: 200 });
+      expect(latestChartSample()).toEqual({ frame: 20, data: JSON.parse(initialData) });
+      expect(mock.frames).toHaveLength(0);
+    } finally {
+      clock.mockRestore();
+      expect(await graphic.dispose()).toMatchObject({ statusCode: 200 });
+    }
+  });
 });
