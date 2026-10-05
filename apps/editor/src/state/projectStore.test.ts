@@ -1,3 +1,9 @@
+import {
+  getLayerTransformAtFrame,
+  resolveWorldTransforms,
+  worldTransformMatrix,
+  localTransformMatrix,
+} from '@ograf-editor/scene-model';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useTimelineStore } from './timelineStore';
 import { compileDataSchema } from '@ograf-editor/codegen';
@@ -293,4 +299,34 @@ it('retains empty expression editors and removes stale enable flags atomically',
   expect(layer().expressionsEnabled).toBeUndefined();
   store.updateLayerExpressions(id, { x: '' });
   expect(layer().expressionsEnabled?.x).not.toBe(false);
+});
+
+it('reparents in local coordinates, preserves the authored world pose and rejects cycles atomically', () => {
+  const store = useProjectStore.getState();
+  store.newProject();
+  const p = store.addLayer('rectangle'),
+    c = store.addLayer('rectangle');
+  store.updateLayerTransform(p, 0, { x: 50, y: 20, scaleX: 2, scaleY: 1, rotation: 30 });
+  store.updateLayerTransform(c, 0, { x: 200, y: 100, rotation: 45 });
+  const comp = () =>
+    getActiveComposition(
+      useProjectStore.getState().project,
+      useProjectStore.getState().activeCompositionId,
+    );
+  const before = getLayerTransformAtFrame(
+    comp().layers.find((l) => l.id === c)!,
+    0,
+  );
+  useProjectStore.getState().setTransformParent(c, p);
+  const worlds = resolveWorldTransforms(
+    comp().layers,
+    new Map(comp().layers.map((l) => [l.id, getLayerTransformAtFrame(l, 0)])),
+  );
+  worldTransformMatrix(worlds.get(c)!).forEach((v, i) =>
+    expect(v).toBeCloseTo(localTransformMatrix(before)[i]!, 5),
+  );
+  const saved = JSON.stringify(comp());
+  expect(() => useProjectStore.getState().setTransformParent(p, c)).toThrow('cycle');
+  expect(JSON.stringify(comp())).toBe(saved);
+  expect(() => useProjectStore.getState().setLayerParent(c, p)).toThrow('Detach');
 });

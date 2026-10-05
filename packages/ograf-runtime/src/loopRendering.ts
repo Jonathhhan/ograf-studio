@@ -105,8 +105,8 @@ export function interpolateCompiledLayerVisualState(
   for (const property of TRANSFORM_ANIMATION_PROPERTIES) {
     const eased = incomingProgress(layer, property, targetFrame, clampedProgress);
     transform[property] = interpolate(
-      source.transform[property],
-      target.transform[property],
+      source.transform[property] ?? (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
+      target.transform[property] ?? (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
       eased,
     );
   }
@@ -178,9 +178,18 @@ export function sampleCompiledLayerVisualState(
 ): CompiledLayerVisualState {
   const initial = firstTransform(layer);
   const transform = Object.fromEntries(
-    TRANSFORM_ANIMATION_PROPERTIES.map((property) => [
+    TRANSFORM_ANIMATION_PROPERTIES.filter(
+      (property) =>
+        !['scaleX', 'scaleY', 'skewX'].includes(property) ||
+        initial[property] !== undefined ||
+        layer.animationTracks[property]?.length,
+    ).map((property) => [
       property,
-      getTrackValueAtFrame(layer.animationTracks[property] ?? [], baseFrame, initial[property]),
+      getTrackValueAtFrame(
+        layer.animationTracks[property] ?? [],
+        baseFrame,
+        initial[property] ?? (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
+      ),
     ]),
   ) as unknown as LayerTransform;
   let effects = { ...resolveBoundEffects(layer, data) };
@@ -216,7 +225,8 @@ export function sampleCompiledLayerVisualState(
         transform[transformProperty] = getTrackValueAtFrame(
           keys,
           localFrame,
-          transform[transformProperty],
+          transform[transformProperty] ??
+            (transformProperty === 'scaleX' || transformProperty === 'scaleY' ? 1 : 0),
         );
       } else if (EFFECT_ANIMATION_PROPERTIES.some((candidate) => candidate === property)) {
         const effectProperty = property as (typeof EFFECT_ANIMATION_PROPERTIES)[number];

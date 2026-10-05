@@ -1,3 +1,4 @@
+import { worldTransformMatrix } from './transformHierarchy';
 import type { Composition, ElementType, Layer, LayerMask, LayerTransform } from './types';
 import { getElementShaderPaint } from './shader';
 import { effectEnabled, getEffectStack } from './effectStack';
@@ -83,6 +84,14 @@ export function assertMaskSourcesRemovable(
   composition: Composition,
   removedIds: ReadonlySet<string>,
 ): void {
+  const transformConsumers = composition.layers.filter(
+    (l) => !removedIds.has(l.id) && l.transformParentId && removedIds.has(l.transformParentId),
+  );
+  if (transformConsumers.length)
+    throw Error(
+      'Detach transform children before deleting their parent: ' +
+        transformConsumers.map((l) => l.name).join(', '),
+    );
   const consumers = composition.layers.filter(
     (l) => !removedIds.has(l.id) && l.mask && removedIds.has(l.mask.sourceLayerId),
   );
@@ -93,14 +102,7 @@ export function assertMaskSourcesRemovable(
 }
 
 export type AffineMatrix = [number, number, number, number, number, number];
-export function transformMatrix(t: LayerTransform): AffineMatrix {
-  const angle = (t.rotation * Math.PI) / 180,
-    c = Math.cos(angle),
-    s = Math.sin(angle);
-  const ox = t.width * t.transformOriginX,
-    oy = t.height * t.transformOriginY;
-  return [c, s, -s, c, t.x + ox - c * ox + s * oy, t.y + oy - s * ox - c * oy];
-}
+export const transformMatrix = worldTransformMatrix;
 export function relativeTransformMatrix(
   source: LayerTransform,
   target: LayerTransform,
@@ -108,6 +110,7 @@ export function relativeTransformMatrix(
   const [a, b, c, d, e, f] = transformMatrix(source),
     [u, v, w, x, y, z] = transformMatrix(target);
   const determinant = u * x - v * w;
+  if (Math.abs(determinant) < 1e-12) return [0, 0, 0, 0, 0, 0];
   return [
     (x * a - w * b) / determinant,
     (-v * a + u * b) / determinant,

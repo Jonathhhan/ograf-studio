@@ -89,6 +89,9 @@ export const SCRIPT_TRANSFORM_CATALOG = {
   width: number,
   height: number,
   rotation: number,
+  scaleX: number,
+  scaleY: number,
+  skewX: number,
   opacity: number,
   transformOriginX: number,
   transformOriginY: number,
@@ -132,6 +135,18 @@ const sampling: Record<string, ScriptPropertyDefinition> = {
     readOnly: true,
     description: 'property(name): value and authored valueAtTime(seconds).',
   },
+  toWorld: {
+    type: 'function',
+    readOnly: true,
+    description: 'Local [x,y] to world coordinates at optional time in seconds.',
+  },
+  toComp: { type: 'function', readOnly: true, description: '2D alias of toWorld.' },
+  fromWorld: {
+    type: 'function',
+    readOnly: true,
+    description: 'World [x,y] to local coordinates. Rejects singular transforms.',
+  },
+  fromComp: { type: 'function', readOnly: true, description: '2D alias of fromWorld.' },
   sourceRectAtTime: {
     type: 'function',
     readOnly: true,

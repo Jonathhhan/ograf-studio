@@ -68,17 +68,18 @@ export function roundedRectangleSvgPath(
   height: number,
   value: CornerRadiiInput,
 ): string {
+  // Circular arcs match CSS border-radius; quadratic curves bulge toward the corners.
   const radius = clampCornerRadii(value, width, height);
   return [
     `M ${radius.topLeft} 0`,
     `H ${width - radius.topRight}`,
-    `Q ${width} 0 ${width} ${radius.topRight}`,
+    `A ${radius.topRight} ${radius.topRight} 0 0 1 ${width} ${radius.topRight}`,
     `V ${height - radius.bottomRight}`,
-    `Q ${width} ${height} ${width - radius.bottomRight} ${height}`,
+    `A ${radius.bottomRight} ${radius.bottomRight} 0 0 1 ${width - radius.bottomRight} ${height}`,
     `H ${radius.bottomLeft}`,
-    `Q 0 ${height} 0 ${height - radius.bottomLeft}`,
+    `A ${radius.bottomLeft} ${radius.bottomLeft} 0 0 1 0 ${height - radius.bottomLeft}`,
     `V ${radius.topLeft}`,
-    `Q 0 0 ${radius.topLeft} 0`,
+    `A ${radius.topLeft} ${radius.topLeft} 0 0 1 ${radius.topLeft} 0`,
     'Z',
   ].join(' ');
 }

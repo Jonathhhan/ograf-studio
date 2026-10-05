@@ -1,3 +1,9 @@
+import {
+  inverseMatrix,
+  multiplyMatrices,
+  poseFromMatrix,
+  type Matrix2D,
+} from '@ograf-editor/scene-model';
 import { previewBindingData } from '../state/dataBinding';
 import { hasActiveTransformExpression } from '@ograf-editor/scene-model';
 import { useTestDataStore } from '../state/testDataStore';
@@ -408,6 +414,24 @@ export function Stage({ style }: { style?: CSSProperties }) {
     target: HTMLElement | SVGElement,
     extra?: { width?: number; height?: number },
   ): Partial<LayerTransform> => {
+    const node = target as HTMLElement;
+    const layer = composition.layers.find((l) => l.id === node.dataset.layerId);
+    if (layer?.transformParentId || node.dataset.ografAffine === 'true') {
+      const dom = new DOMMatrix(node.style.transform);
+      let matrix: Matrix2D = [dom.a, dom.b, dom.c, dom.d, dom.e, dom.f];
+      if (layer?.transformParentId) {
+        const parent = layerRefs.current.get(layer.transformParentId);
+        if (!parent) throw Error('Transform parent is unavailable');
+        const pm = new DOMMatrix(parent.style.transform);
+        matrix = multiplyMatrices(inverseMatrix([pm.a, pm.b, pm.c, pm.d, pm.e, pm.f]), matrix);
+      }
+      const pose = getLayerTransformAtFrame(layer!, useTimelineStore.getState().currentFrame);
+      const { worldMatrix, ...patch } = poseFromMatrix(matrix, {
+        ...pose,
+        ...extra,
+      }) as typeof pose & { worldMatrix?: Matrix2D };
+      return patch;
+    }
     const { x, y, rotation } = parseCssTransform((target as HTMLElement).style.transform);
     return normalizeAuthoredTransformPatch({ x, y, rotation, ...extra });
   };
@@ -421,8 +445,8 @@ export function Stage({ style }: { style?: CSSProperties }) {
     new Map<
       string,
       {
-        authored: Pick<LayerTransform, 'x' | 'y' | 'width' | 'height' | 'rotation'>;
-        displayed: Pick<LayerTransform, 'x' | 'y' | 'width' | 'height' | 'rotation'>;
+        authored: LayerTransform;
+        displayed: LayerTransform;
       }
     >(),
   );
@@ -433,24 +457,36 @@ export function Stage({ style }: { style?: CSSProperties }) {
     if (!layer) return;
     const authored = getLayerTransformAtFrame(layer, useTimelineStore.getState().currentFrame);
     const displayed = {
+      ...authored,
       ...renderedLayerGeometry(target as HTMLElement, authored),
       rotation: parseCssTransform((target as HTMLElement).style.transform).rotation,
     };
+    if (layer.transformParentId || (target as HTMLElement).dataset.ografAffine === 'true')
+      Object.assign(displayed, readTransformPatch(target));
     transformStartRef.current.set(layer.id, { authored, displayed });
   };
   const compensateScriptedDrag = (layerId: string, patch: Partial<LayerTransform>) => {
     const start = transformStartRef.current.get(layerId);
     const layer = composition.layers.find((candidate) => candidate.id === layerId);
     if (start && layer) {
-      for (const property of ['x', 'y', 'width', 'height', 'rotation'] as const) {
+      for (const property of [
+        'x',
+        'y',
+        'width',
+        'height',
+        'rotation',
+        'scaleX',
+        'scaleY',
+        'skewX',
+      ] as const) {
         if (
           patch[property] === undefined ||
           (!composition.scripting?.enabled && !hasActiveTransformExpression(layer, property))
         )
           continue;
         patch[property] = authoredPositionAfterDrag(
-          start.authored[property],
-          start.displayed[property],
+          start.authored[property] ?? (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
+          start.displayed[property] ?? (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
           patch[property]!,
         );
       }
@@ -460,6 +496,7 @@ export function Stage({ style }: { style?: CSSProperties }) {
   };
 
   const applySnapping = (target: HTMLElement | SVGElement) => {
+    if ((target as HTMLElement).dataset.ografAffine === 'true') return; // Existing snap math assumes world x/y without shear.
     const layerId = layerIdForTarget(target);
     const layer = composition.layers.find((candidate) => candidate.id === layerId);
     if (!layer) return;
@@ -597,14 +634,20 @@ export function Stage({ style }: { style?: CSSProperties }) {
     for (const event of events) {
       const layerId = layerIdForTarget(event.target);
       if (layerId) {
-        let parentId = composition.layers.find((layer) => layer.id === layerId)?.parentId ?? null;
+        let parentId =
+          composition.layers.find((layer) => layer.id === layerId)?.transformParentId ??
+          composition.layers.find((layer) => layer.id === layerId)?.parentId ??
+          null;
         let ancestorMovesWithGroup = false;
         while (parentId) {
           if (eventLayerIds.has(parentId)) {
             ancestorMovesWithGroup = true;
             break;
           }
-          parentId = composition.layers.find((layer) => layer.id === parentId)?.parentId ?? null;
+          parentId =
+            composition.layers.find((layer) => layer.id === parentId)?.transformParentId ??
+            composition.layers.find((layer) => layer.id === parentId)?.parentId ??
+            null;
         }
         if (ancestorMovesWithGroup && options.skipParentedDescendants !== false) continue;
         const target = event.target as HTMLElement;

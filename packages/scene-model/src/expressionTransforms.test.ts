@@ -501,7 +501,7 @@ layer('Smiley').x = bounds.width;`,
     target.expressions!.height = 'Object.keys(layer("Broken")).length';
     const diagnostics: ExpressionDiagnostic[] = [];
     const result = resolveExpressionTransforms([target, source, broken], {}, diagnostics);
-    expect(result.get('Target')).toMatchObject({ x: 200, y: 200, width: 200, height: 6 });
+    expect(result.get('Target')).toMatchObject({ x: 200, y: 200, width: 200, height: 9 });
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]!.layerId).toBe('Broken');
   });

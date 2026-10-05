@@ -59,6 +59,7 @@ export function compileDescriptor(
       : undefined;
     return {
       id: layer.id,
+      ...(layer.transformParentId ? { transformParentId: layer.transformParentId } : {}),
       name: layer.name,
       isVisible: layer.isVisible,
       blendMode: layer.blendMode,

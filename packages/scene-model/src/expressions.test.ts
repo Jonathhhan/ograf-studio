@@ -70,7 +70,7 @@ describe('expressionTimelineScope', () => {
 describe('evaluateExpression', () => {
   it('enumerates reference keys without evaluating them and resolves only accessed properties', () => {
     const resolve = vi.fn((_name: string, property: string) => (property === 'width' ? 42 : 1));
-    expect(evaluateExpression('Object.keys(layer("A")).length', {}, resolve)).toBe(6);
+    expect(evaluateExpression('Object.keys(layer("A")).length', {}, resolve)).toBe(9);
     expect(resolve).not.toHaveBeenCalled();
     expect(evaluateExpression('layer("A").width', {}, resolve)).toBe(42);
     expect(resolve).toHaveBeenCalledTimes(1);
@@ -80,7 +80,7 @@ describe('evaluateExpression', () => {
         resolveLayerById: resolve,
       }),
     ).toBe(42);
-    expect(resolve).toHaveBeenCalledTimes(6);
+    expect(resolve).toHaveBeenCalledTimes(9);
   });
 
   it('supports native JavaScript functions, loops, arrays, objects and Math', () => {

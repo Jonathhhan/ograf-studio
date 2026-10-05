@@ -35,6 +35,9 @@ export const TRANSFORM_ANIMATION_PROPERTIES: Array<keyof LayerTransform> = [
   'width',
   'height',
   'rotation',
+  'scaleX',
+  'scaleY',
+  'skewX',
   'opacity',
   'transformOriginX',
   'transformOriginY',
@@ -105,6 +108,13 @@ export function isAnimatableLayerPropertyApplicable(
   layer: Layer,
   property: AnimatableLayerProperty,
 ): boolean {
+  if (
+    ['scaleX', 'scaleY', 'skewX'].includes(property) &&
+    !layer.animationTracks?.[property]?.length &&
+    !layer.loop?.tracks[property]?.length &&
+    !layer.keyframes.some((k) => k.transform[property as keyof LayerTransform] !== undefined)
+  )
+    return false;
   if (parseShaderAnimationProperty(property))
     return shaderAnimationPropertySpec(layer.element, property) !== undefined;
   if (parseEffectProperty(property))
@@ -346,7 +356,10 @@ function staticPropertyValue(layer: Layer, property: AnimatableLayerProperty): n
   if (TRANSFORM_ANIMATION_PROPERTIES.includes(property as keyof LayerTransform)) {
     const first = sortLayerKeyframes(layer.keyframes)[0];
     if (!first) throw new Error(`Layer "${layer.name}" has no animation keyframes.`);
-    return first.transform[property as keyof LayerTransform];
+    return (
+      first.transform[property as keyof LayerTransform] ??
+      (property === 'scaleX' || property === 'scaleY' ? 1 : 0)
+    );
   }
   const stopIndex = gradientStopIndexForProperty(property);
   if (stopIndex !== null) {
@@ -387,11 +400,18 @@ export function getResolvedLayerAnimationTracks(layer: Layer): LayerAnimationTra
       continue;
     }
     if (parseShaderAnimationProperty(property)) continue;
+    if (
+      ['scaleX', 'scaleY', 'skewX'].includes(property) &&
+      !layer.keyframes.some((k) => k.transform[property as keyof LayerTransform] !== undefined)
+    )
+      continue;
     if (TRANSFORM_ANIMATION_PROPERTIES.includes(property as keyof LayerTransform)) {
       tracks[property] = sortLayerKeyframes(layer.keyframes).map((keyframe) => ({
         id: `${keyframe.id}:${property}`,
         frame: keyframe.frame,
-        value: keyframe.transform[property as keyof LayerTransform],
+        value:
+          keyframe.transform[property as keyof LayerTransform] ??
+          (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
         easing: keyframe.easing,
       }));
     } else {
@@ -478,6 +498,12 @@ export function findLayerKeyframeAtFrame(layer: Layer, frame: number): LayerKeyf
 export function getLayerTransformAtFrame(layer: Layer, frame: number): LayerTransform {
   const result = {} as LayerTransform;
   for (const property of TRANSFORM_ANIMATION_PROPERTIES) {
+    if (
+      ['scaleX', 'scaleY', 'skewX'].includes(property) &&
+      !layer.animationTracks[property]?.length &&
+      !layer.keyframes.some((k) => k.transform[property] !== undefined)
+    )
+      continue;
     result[property] = getLayerPropertyValueAtFrame(layer, property, frame);
   }
   return result;

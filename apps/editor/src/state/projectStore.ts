@@ -1,3 +1,10 @@
+import {
+  resolveWorldTransforms,
+  inverseMatrix,
+  multiplyMatrices,
+  worldTransformMatrix,
+  poseFromMatrix,
+} from '@ograf-editor/scene-model';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import {
@@ -355,6 +362,7 @@ interface ProjectActions {
   groupLayers: (layerIds: string[]) => string | null;
   ungroupLayers: (layerIds: string[]) => void;
   setLayerParent: (layerId: string, parentId: string | null) => void;
+  setTransformParent: (layerId: string, parentId: string | null) => void;
   setLayerClipChildren: (layerId: string, clipChildren: boolean) => void;
   setLayerMask: (layerId: string, mask: Layer['mask'], hideSource?: boolean) => void;
   setLayerMaskOnly: (layerId: string, value: boolean) => void;
@@ -649,14 +657,16 @@ function offsetLayerTransform(layer: Layer, frame: number, patch: Partial<LayerT
     keyof LayerTransform,
     number,
   ][]) {
-    const delta = value - before[property];
+    const delta =
+      value - (before[property] ?? (property === 'scaleX' || property === 'scaleY' ? 1 : 0));
     if (!Number.isFinite(delta) || Math.abs(delta) < 1e-9) continue;
     offsetExistingPropertyKeys(layer, property, delta);
     for (const key of layer.keyframes)
       key.transform[property] = normalizeOffsetProperty(
         layer,
         property,
-        key.transform[property] + delta,
+        (key.transform[property] ?? (property === 'scaleX' || property === 'scaleY' ? 1 : 0)) +
+          delta,
       );
   }
 }
@@ -847,6 +857,9 @@ function appendLayerCopies(
       name,
       groupId: source.groupId ? (groupMap.get(source.groupId) ?? null) : null,
       parentId: source.parentId ? (idMap.get(source.parentId) ?? null) : null,
+      ...(source.transformParentId
+        ? { transformParentId: idMap.get(source.transformParentId) ?? source.transformParentId }
+        : {}),
       mask: source.mask
         ? idMap.has(source.mask.sourceLayerId) ||
           composition.layers.some((layer) => layer.id === source.mask!.sourceLayerId)
@@ -873,8 +886,12 @@ function appendLayerCopies(
           keyframe.frame,
           {
             ...keyframe.transform,
-            x: keyframe.transform.x + offset,
-            y: keyframe.transform.y + offset,
+            x:
+              keyframe.transform.x +
+              (source.transformParentId && idMap.has(source.transformParentId) ? 0 : offset),
+            y:
+              keyframe.transform.y +
+              (source.transformParentId && idMap.has(source.transformParentId) ? 0 : offset),
           },
           { easing: keyframe.easing },
         ),
@@ -888,7 +905,11 @@ function appendLayerCopies(
         (keyframes ?? []).map((keyframe) =>
           createLayerPropertyKeyframe(
             keyframe.frame,
-            keyframe.value + (property === 'x' || property === 'y' ? offset : 0),
+            keyframe.value +
+              ((property === 'x' || property === 'y') &&
+              !(source.transformParentId && idMap.has(source.transformParentId))
+                ? offset
+                : 0),
             {
               easing: keyframe.easing,
               curve: keyframe.curve ? { ...keyframe.curve } : undefined,
@@ -1339,7 +1360,7 @@ export const useProjectStore = create<ProjectStore>()(
               layer,
               property,
               roundedFrame,
-              transform[property],
+              transform[property] ?? (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
               created.easing,
             );
           }
@@ -1388,7 +1409,8 @@ export const useProjectStore = create<ProjectStore>()(
               layer,
               property,
               roundedFrame,
-              created.transform[property],
+              created.transform[property] ??
+                (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
               created.easing,
             );
           }
@@ -2559,6 +2581,37 @@ export const useProjectStore = create<ProjectStore>()(
           );
         }),
 
+      setTransformParent: (layerId, parentId) =>
+        set((state) => {
+          const composition = getActiveComposition(state.project, state.activeCompositionId);
+          const layer = composition.layers.find((l) => l.id === layerId);
+          if (!layer || layer.isLocked) return;
+          const frame = useTimelineStore.getState().currentFrame;
+          const poses = new Map(
+            composition.layers.map((l) => [l.id, getLayerTransformAtFrame(l, frame)]),
+          );
+          const worlds = resolveWorldTransforms(composition.layers, poses);
+          const nodes = composition.layers.map((l) =>
+            l.id === layerId ? { ...l, transformParentId: parentId } : l,
+          );
+          resolveWorldTransforms(nodes, poses); // Reject missing parents and cycles before writing.
+          const old = worldTransformMatrix(worlds.get(layerId)!);
+          const local = parentId
+            ? multiplyMatrices(inverseMatrix(worldTransformMatrix(worlds.get(parentId)!)), old)
+            : old;
+          const pose = poseFromMatrix(local, poses.get(layerId)!);
+          layer.transformParentId = parentId;
+          layer.parentId = null;
+          // Preserve the current pose, not the entire animation under animated parents.
+          for (const property of TRANSFORM_ANIMATION_PROPERTIES)
+            upsertPropertyKeyframe(
+              layer,
+              property,
+              frame,
+              pose[property] ?? (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
+              'linear',
+            );
+        }),
       setLayerParent: (layerId, parentId) =>
         set((state) => {
           const composition = getActiveComposition(state.project, state.activeCompositionId);
@@ -2571,6 +2624,8 @@ export const useProjectStore = create<ProjectStore>()(
             descendantLayers(composition, layerId).some((item) => item.id === parentId)
           )
             return;
+          if (parentId && layer.transformParentId)
+            throw Error('Detach the transform parent before assigning a layout parent.');
           layer.parentId = parentId;
         }),
 

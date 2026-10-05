@@ -37,7 +37,7 @@ describe('transform-aware clipping', () => {
       transform({ x: 40, y: 30, width: 120, height: 80, rotation: -15 }),
       12,
     );
-    expect(path.match(/ Q /g)).toHaveLength(4);
+    expect(path.match(/ A 12 12 0 0 1 /g)).toHaveLength(4);
   });
 
   it('uses each clipping-parent corner radius independently', () => {
@@ -79,4 +79,36 @@ describe('transform-aware clipping', () => {
     expect(visible!.width).toBeGreaterThan(100);
     expect(visible!.height).toBeGreaterThan(60);
   });
+});
+
+it('clips a fully rounded square with circles and clamps oversized radii like CSS', () => {
+  const child = transform({ width: 60, height: 60 });
+  const path =
+    'M 30 0 L 30 0 A 30 30 0 0 1 60 30 L 60 30 A 30 30 0 0 1 30 60 L 30 60 A 30 30 0 0 1 0 30 L 0 30 A 30 30 0 0 1 30 0 Z';
+  expect(clipPathSvgForParentBounds(child, child, 30)).toBe(path);
+  expect(clipPathSvgForParentBounds(child, child, 100)).toBe(path);
+  expect(clipPathForParentBounds(child, child, 30)).toBe(`path("${path}")`);
+});
+
+it('preserves quarter circles when both parent and child rotate around different anchors', () => {
+  const child = transform({
+    x: 10,
+    y: 20,
+    rotation: -90,
+    transformOriginX: 0,
+    transformOriginY: 0,
+  });
+  const parent = transform({ x: 40, y: 50, width: 60, height: 60, rotation: 90 });
+  // Parent-local (30,0) -> world (100,80) -> child-local (-60,90).
+  expect(clipPathSvgForParentBounds(child, parent, 30)).toBe(
+    'M -60 90 L -60 90 A 30 30 0 0 1 -90 60 L -90 60 A 30 30 0 0 1 -60 30 L -60 30 A 30 30 0 0 1 -30 60 L -30 60 A 30 30 0 0 1 -60 90 Z',
+  );
+});
+
+it('preserves sharp corners in a mixed rounded clip', () => {
+  const box = transform({ width: 60, height: 60 });
+  const path = clipPathSvgForParentBounds(box, box, { topRight: 30 });
+  expect(path).toContain('A 30 30 0 0 1 60 30');
+  expect(path.match(/ A 0 0 0 0 1 /g)).toHaveLength(3);
+  expect(path).not.toContain('Q');
 });

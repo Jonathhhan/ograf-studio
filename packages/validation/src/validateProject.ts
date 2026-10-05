@@ -492,6 +492,35 @@ function validateComposition(composition: Composition, errors: string[], warning
         errors.push(`${prefix}: layer "${layer.name}" ${problem}.`);
       }
     }
+    if (layer.transformParentId) {
+      const seen = new Set([layer.id]);
+      let id: string | null | undefined = layer.transformParentId;
+      while (id) {
+        if (seen.has(id)) {
+          errors.push(prefix + ': cyclic transformParentId chain for ' + layer.name);
+          break;
+        }
+        seen.add(id);
+        const parent = composition.layers.find((l) => l.id === id);
+        if (!parent) {
+          errors.push(prefix + ': missing transformParentId ' + id);
+          break;
+        }
+        if (parent.isGuide && !layer.isGuide)
+          errors.push(prefix + ': on-air transform parent cannot be a guide');
+        id = parent.transformParentId;
+      }
+      if (
+        composition.runtimeCollections.some(
+          (c) =>
+            c.prototypeLayerIds.includes(layer.id) ||
+            c.prototypeLayerIds.includes(layer.transformParentId!),
+        )
+      )
+        errors.push(prefix + ': transform parenting across collection prototypes is not supported');
+      if (layer.parentId)
+        errors.push(prefix + ': transform-parented layer cannot also have a layout parent');
+    }
     if (layer.parentId && !layerIds.has(layer.parentId)) {
       errors.push(`${prefix}: layer "${layer.name}" references a missing transform parent.`);
     }

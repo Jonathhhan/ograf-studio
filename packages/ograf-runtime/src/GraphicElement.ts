@@ -489,7 +489,9 @@ export abstract class GraphicElement extends HTMLElement implements Graphic {
         if (!layer.loop.tracks[property]?.length) continue;
         if (TRANSFORM_ANIMATION_PROPERTIES.includes(property as keyof LayerTransform)) {
           const key = property as keyof LayerTransform;
-          transform[key] = looped.transform[key] - base.transform[key];
+          transform[key] =
+            (looped.transform[key] ?? (key === 'scaleX' || key === 'scaleY' ? 1 : 0)) -
+            (base.transform[key] ?? (key === 'scaleX' || key === 'scaleY' ? 1 : 0));
         } else if (EFFECT_ANIMATION_PROPERTIES.some((candidate) => candidate === property)) {
           const key = property as (typeof EFFECT_ANIMATION_PROPERTIES)[number];
           effects[key] = looped.effects[key] - base.effects[key];

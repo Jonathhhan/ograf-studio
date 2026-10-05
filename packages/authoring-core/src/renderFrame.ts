@@ -1,3 +1,4 @@
+import { resolveWorldTransforms, worldTransformMatrix } from '@ograf-editor/scene-model';
 import { getElementFill, hasElementShaderPaint, svgPaint } from '@ograf-editor/scene-model';
 import {
   effectStackToSvg,
@@ -167,6 +168,7 @@ function layerSvg(
   composition: Composition,
   data: Record<string, FieldValue>,
   options: {
+    worldPoses?: Map<string, LayerTransform>;
     transform?: LayerTransform;
     scriptVisuals?: ScriptLayerVisuals | undefined;
     itemValue?: FieldValue;
@@ -261,7 +263,9 @@ function layerSvg(
       )
     : undefined;
   const clipId = `clip-${escapeXml(layer.id)}${escapeXml(options.idSuffix ?? '')}`;
-  const parentTransform = parent ? { ...getLayerTransformAtFrame(parent, frame) } : null;
+  const parentTransform = parent
+    ? { ...(options.worldPoses?.get(parent.id) ?? getLayerTransformAtFrame(parent, frame)) }
+    : null;
   if (parentTransform) {
     parentTransform.x += options.offsetX ?? 0;
     parentTransform.y += options.offsetY ?? 0;
@@ -300,7 +304,7 @@ function layerSvg(
             source.id,
             {
               transform: {
-                ...getLayerTransformAtFrame(source, frame),
+                ...(options.worldPoses?.get(source.id) ?? getLayerTransformAtFrame(source, frame)),
                 x: getLayerTransformAtFrame(source, frame).x + (options.offsetX ?? 0),
                 y: getLayerTransformAtFrame(source, frame).y + (options.offsetY ?? 0),
               },
@@ -313,7 +317,7 @@ function layerSvg(
         maskId,
       )
     : '';
-  return `<defs>${filters ? `<filter id="${filterId}" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" x="${-filterPadding}" y="${-filterPadding}" width="${transform.width + 2 * filterPadding}" height="${transform.height + 2 * filterPadding}">${filters}</filter>` : ''}${clip}${mask}</defs><g transform="translate(${transform.x} ${transform.y}) rotate(${transform.rotation} ${originX} ${originY})" opacity="${transform.opacity}"${layer.blendMode === 'normal' ? '' : ` style="mix-blend-mode:${layer.blendMode}"`}${filters ? ` filter="url(#${filterId})"` : ''}${mask ? ` mask="url(#${maskId})"` : ''}>${clip ? `<g clip-path="url(#${clipId})">${content}</g>` : content}</g>`;
+  return `<defs>${filters ? `<filter id="${filterId}" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" x="${-filterPadding}" y="${-filterPadding}" width="${transform.width + 2 * filterPadding}" height="${transform.height + 2 * filterPadding}">${filters}</filter>` : ''}${clip}${mask}</defs><g transform="${options.worldPoses ? `matrix(${worldTransformMatrix(transform).join(' ')})` : `translate(${transform.x} ${transform.y}) rotate(${transform.rotation} ${originX} ${originY})`}" opacity="${transform.opacity}"${layer.blendMode === 'normal' ? '' : ` style="mix-blend-mode:${layer.blendMode}"`}${filters ? ` filter="url(#${filterId})"` : ''}${mask ? ` mask="url(#${maskId})"` : ''}>${clip ? `<g clip-path="url(#${clipId})">${content}</g>` : content}</g>`;
 }
 
 export function renderCompositionFrameSvg(
@@ -400,7 +404,7 @@ export function renderCompositionFrameSvg(
       ...expressionTimelineScope(timelineFrames, frame),
     };
   };
-  const expressionTransforms = resolveExpressionTransforms(
+  let expressionTransforms = resolveExpressionTransforms(
     composition.layers.flatMap((layer) => {
       const collection = composition.runtimeCollections.find((entry) =>
         entry.prototypeLayerIds.includes(layer.id),
@@ -425,7 +429,7 @@ export function renderCompositionFrameSvg(
               ? root[index]
               : root;
           const value = valueAtSourcePath(item, binding.sourcePath);
-          return value === undefined ? undefined : binding.valueMap?.[String(value)] ?? value;
+          return value === undefined ? undefined : (binding.valueMap?.[String(value)] ?? value);
         };
         const resolveBoundElement = () =>
           layer.bindings.reduce<Element>((resolved, binding) => {
@@ -530,7 +534,7 @@ export function renderCompositionFrameSvg(
         {
           id: `expression:${candidate.id}:${property}`,
           frame: normalizedFrame,
-          value: transform[property],
+          value: transform[property] ?? (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
           easing: 'linear',
         },
       ];
@@ -541,6 +545,20 @@ export function renderCompositionFrameSvg(
       animationTracks,
     };
   });
+  const worldPoses = resolveWorldTransforms(
+    composition.layers,
+    new Map(
+      composition.layers.map((layer) => [
+        layer.id,
+        getLayerTransformAtFrame(layer, normalizedFrame),
+      ]),
+    ),
+  );
+  const affine =
+    composition.layers.some((l) => l.transformParentId) ||
+    [...worldPoses.values()].some(
+      (p) => (p.scaleX ?? 1) !== 1 || (p.scaleY ?? 1) !== 1 || (p.skewX ?? 0) !== 0,
+    );
   const background =
     composition.backgroundColor === 'transparent'
       ? ''
@@ -555,7 +573,10 @@ export function renderCompositionFrameSvg(
     .map((layer) => {
       const collection = collectionByLayerId.get(layer.id);
       if (!collection) {
-        return layerSvg(layer, normalizedFrame, composition.frameRate, composition, data);
+        return layerSvg(layer, normalizedFrame, composition.frameRate, composition, data, {
+          transform: worldPoses.get(layer.id)!,
+          ...(affine ? { worldPoses } : {}),
+        });
       }
       if (emittedCollections.has(collection.id)) return '';
       emittedCollections.add(collection.id);

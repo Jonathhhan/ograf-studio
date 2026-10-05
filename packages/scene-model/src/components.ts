@@ -57,6 +57,8 @@ export function buildComponentDefinition(
     name: name.trim() || `Component ${composition.components.length + 1}`,
     layers: layers.map((source) => {
       const layer = clone(source);
+      if (layer.transformParentId && !wanted.has(layer.transformParentId))
+        throw Error('Include transform parents when creating a component.');
       if (layer.parentId && !wanted.has(layer.parentId)) layer.parentId = null;
       layer.componentLink = null;
       return layer;
@@ -96,6 +98,8 @@ export function instantiateComponentDefinition(
     layer.id = layerIds[source.id]!;
     layer.name = `${definition.name} — ${source.name}`;
     layer.groupId = groupId;
+    if (source.transformParentId)
+      layer.transformParentId = layerIds[source.transformParentId] ?? source.transformParentId;
     layer.componentLink = linked
       ? { componentId: definition.id, instanceId, sourceLayerId: source.id }
       : null;

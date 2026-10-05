@@ -1,3 +1,9 @@
+import {
+  worldTransformMatrix,
+  inverseMatrix,
+  multiplyMatrices,
+  matrixPoint,
+} from './transformHierarchy';
 import type { LayerTransform } from './types';
 import { clampCornerRadii, type CornerRadiiInput } from './cornerRadii';
 
@@ -11,31 +17,10 @@ const rounded = (value: number) => Math.round(value * 1000) / 1000;
 const pointText = (point: GeometryPoint) => `${rounded(point.x)} ${rounded(point.y)}`;
 
 function localToWorld(point: GeometryPoint, transform: LayerTransform): GeometryPoint {
-  const originX = transform.transformOriginX * transform.width;
-  const originY = transform.transformOriginY * transform.height;
-  const radians = (transform.rotation * Math.PI) / 180;
-  const cosine = Math.cos(radians);
-  const sine = Math.sin(radians);
-  const x = point.x - originX;
-  const y = point.y - originY;
-  return {
-    x: transform.x + originX + x * cosine - y * sine,
-    y: transform.y + originY + x * sine + y * cosine,
-  };
+  return matrixPoint(worldTransformMatrix(transform), point);
 }
-
 function worldToLocal(point: GeometryPoint, transform: LayerTransform): GeometryPoint {
-  const originX = transform.transformOriginX * transform.width;
-  const originY = transform.transformOriginY * transform.height;
-  const radians = (-transform.rotation * Math.PI) / 180;
-  const cosine = Math.cos(radians);
-  const sine = Math.sin(radians);
-  const x = point.x - transform.x - originX;
-  const y = point.y - transform.y - originY;
-  return {
-    x: originX + x * cosine - y * sine,
-    y: originY + x * sine + y * cosine,
-  };
+  return matrixPoint(inverseMatrix(worldTransformMatrix(transform)), point);
 }
 
 export function transformBoundsPolygon(transform: LayerTransform): GeometryPoint[] {
@@ -61,20 +46,39 @@ export function clipPathSvgForParentBounds(
   parent: LayerTransform,
   borderRadius: CornerRadiiInput = 0,
 ): string {
+  let relative;
+  try {
+    relative = multiplyMatrices(
+      inverseMatrix(worldTransformMatrix(child)),
+      worldTransformMatrix(parent),
+    );
+  } catch {
+    return 'M 0 0 Z';
+  } // Zero-scale target has no visible area.
+  const [a, b, c, d] = relative,
+    xx = a * a + c * c,
+    yy = b * b + d * d,
+    xy = a * b + c * d;
+  const spread = Math.hypot(xx - yy, 2 * xy),
+    major = Math.sqrt(Math.max(0, (xx + yy + spread) / 2)),
+    minor = Math.sqrt(Math.max(0, (xx + yy - spread) / 2));
+  const angle = spread < 1e-12 ? 0 : (Math.atan2(2 * xy, xx - yy) * 90) / Math.PI;
+  const n = (v: number) => Math.round(v * 1e9) / 1e9;
+  const arc = (r: number, end: GeometryPoint) =>
+    `A ${n(r * major)} ${n(r * minor)} ${n(angle)} 0 ${a * d - b * c < 0 ? 0 : 1} ${pointText(end)}`;
   const radius = clampCornerRadii(borderRadius, parent.width, parent.height);
   const convert = (x: number, y: number) => parentPointInChild({ x, y }, child, parent);
   const topLeftStart = convert(radius.topLeft, 0);
   const topRightStart = convert(parent.width - radius.topRight, 0);
-  const topRightControl = convert(parent.width, 0);
+
   const topRightEnd = convert(parent.width, radius.topRight);
   const bottomRightStart = convert(parent.width, parent.height - radius.bottomRight);
-  const bottomRightControl = convert(parent.width, parent.height);
+
   const bottomRightEnd = convert(parent.width - radius.bottomRight, parent.height);
   const bottomLeftStart = convert(radius.bottomLeft, parent.height);
-  const bottomLeftControl = convert(0, parent.height);
+
   const bottomLeftEnd = convert(0, parent.height - radius.bottomLeft);
   const topLeftEdge = convert(0, radius.topLeft);
-  const topLeftControl = convert(0, 0);
 
   if (Object.values(radius).every((value) => value <= EPSILON)) {
     const corners = [
@@ -88,13 +92,13 @@ export function clipPathSvgForParentBounds(
   return [
     `M ${pointText(topLeftStart)}`,
     `L ${pointText(topRightStart)}`,
-    `Q ${pointText(topRightControl)} ${pointText(topRightEnd)}`,
+    arc(radius.topRight, topRightEnd),
     `L ${pointText(bottomRightStart)}`,
-    `Q ${pointText(bottomRightControl)} ${pointText(bottomRightEnd)}`,
+    arc(radius.bottomRight, bottomRightEnd),
     `L ${pointText(bottomLeftStart)}`,
-    `Q ${pointText(bottomLeftControl)} ${pointText(bottomLeftEnd)}`,
+    arc(radius.bottomLeft, bottomLeftEnd),
     `L ${pointText(topLeftEdge)}`,
-    `Q ${pointText(topLeftControl)} ${pointText(topLeftStart)}`,
+    arc(radius.topLeft, topLeftStart),
     'Z',
   ].join(' ');
 }

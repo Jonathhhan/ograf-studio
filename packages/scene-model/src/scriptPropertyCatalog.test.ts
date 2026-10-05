@@ -15,7 +15,14 @@ describe('script property catalog contract', () => {
         { element: layer.element, effects: layer.effects, isVisible: true, blendMode: 'normal' },
         { id: layer.id, name: layer.name },
         () => {},
-        { property: () => {}, sourceRectAtTime: () => {} },
+        {
+          property: () => {},
+          sourceRectAtTime: () => {},
+          toWorld: () => {},
+          fromWorld: () => {},
+          toComp: () => {},
+          fromComp: () => {},
+        },
       );
       const catalog = scriptLayerPropertyCatalog(type, 'composition');
       expect(Object.getOwnPropertyNames(reference).sort()).toEqual(Object.keys(catalog).sort());

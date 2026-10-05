@@ -1,3 +1,4 @@
+import { inverseMatrix, matrixPoint, type Matrix2D } from './transformHierarchy';
 import { scriptConsole, withScriptLogContext } from './scriptConsole';
 import {
   defineScriptVectors,
@@ -11,7 +12,17 @@ import type { EasingPreset, KeyframeRole, LayerTransform } from './types';
 export type ExpressionScope = Record<string, unknown>;
 export type ExpressionLayerResolver = (name: string, property: string) => number;
 export const EXPRESSION_API_VERSION = 1;
-export const EXPRESSION_PROPERTIES = ['x', 'y', 'width', 'height', 'rotation', 'opacity'] as const;
+export const EXPRESSION_PROPERTIES = [
+  'x',
+  'y',
+  'width',
+  'height',
+  'rotation',
+  'opacity',
+  'scaleX',
+  'scaleY',
+  'skewX',
+] as const;
 export const EXPRESSION_FIELDS = [
   'text',
   'position',
@@ -33,6 +44,7 @@ export interface ExpressionRect {
   height: number;
 }
 export interface ExpressionLayerSampling {
+  worldMatrixAtTime?: (seconds: number) => Matrix2D;
   valueAtTime: (property: string, seconds: number) => number;
   sourceRectAtTime: (seconds: number, includeExtents: boolean) => ExpressionRect;
   transformAtTime?: (seconds: number) => LayerTransform;
@@ -163,6 +175,29 @@ export function sourceRectMethod(sampling: () => ExpressionLayerSampling, time: 
   };
 }
 
+/** 2D composition/world coordinates share one space; no implicit 3D projection. */
+export function coordinateMethods(sampling: () => ExpressionLayerSampling, time: number) {
+  const convert = (point: unknown, seconds = time, inverse = false) => {
+    if (
+      !Array.isArray(point) ||
+      point.length !== 2 ||
+      !point.every((v) => typeof v === 'number' && Number.isFinite(v))
+    )
+      throw Error('Expected a finite 2D point');
+    if (!Number.isFinite(seconds)) throw Error('Sample time must be finite');
+    const sampler = sampling();
+    if (!sampler.worldMatrixAtTime) throw Error('World transforms unavailable');
+    const matrix = sampler.worldMatrixAtTime(seconds),
+      p = matrixPoint(inverse ? inverseMatrix(matrix) : matrix, { x: point[0], y: point[1] });
+    return [p.x, p.y];
+  };
+  return {
+    toWorld: (p: unknown, t?: number) => convert(p, t),
+    toComp: (p: unknown, t?: number) => convert(p, t),
+    fromWorld: (p: unknown, t?: number) => convert(p, t, true),
+    fromComp: (p: unknown, t?: number) => convert(p, t, true),
+  };
+}
 /** Enumerable getters support normal object operations without eagerly resolving dependencies. */
 function layerReference(
   resolve: (property: string) => number,
@@ -187,6 +222,9 @@ function layerReference(
   });
   if (sampling)
     Object.defineProperty(target, 'sourceRectAtTime', { value: sourceRectMethod(sampling, time) });
+  if (sampling)
+    for (const [name, method] of Object.entries(coordinateMethods(sampling, time)))
+      Object.defineProperty(target, name, { value: method });
   return Object.preventExtensions(target);
 }
 
@@ -229,6 +267,10 @@ function evaluationScope(
       value: sourceRectMethod(sampling, time),
     });
     Object.defineProperty(context, 'sourceRectAtTime', { value: sourceRectMethod(sampling, time) });
+    for (const [name, method] of Object.entries(coordinateMethods(sampling, time))) {
+      Object.defineProperty(thisLayer, name, { value: method });
+      Object.defineProperty(context, name, { value: method });
+    }
   }
   defineScriptVectors(thisLayer, (property) => numeric(scope[property]));
   defineScriptVectors(context, (property) => numeric(scope[property]));

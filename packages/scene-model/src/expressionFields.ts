@@ -9,7 +9,14 @@ export function expressionFieldForProperty(property: string): LayerExpressionPro
   if (property === 'x' || property === 'y') return 'position';
   if (property === 'width' || property === 'height') return 'size';
   if (property === 'transformOriginX' || property === 'transformOriginY') return 'transformOrigin';
-  if (property === 'rotation' || property === 'opacity') return property;
+  if (
+    property === 'rotation' ||
+    property === 'opacity' ||
+    property === 'scaleX' ||
+    property === 'scaleY' ||
+    property === 'skewX'
+  )
+    return property;
   return undefined;
 }
 

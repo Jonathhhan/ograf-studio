@@ -7,6 +7,11 @@ export interface LayerTransform {
   width: number;
   height: number;
   rotation: number;
+  /** Local geometric scale (1 = unchanged), independent of layout dimensions. */
+  scaleX?: number;
+  scaleY?: number;
+  /** Local shear angle in degrees, applied before rotation. */
+  skewX?: number;
   opacity: number;
   transformOriginX: number;
   transformOriginY: number;
@@ -577,7 +582,10 @@ export type LayerExpressionProperty =
   | 'width'
   | 'height'
   | 'rotation'
-  | 'opacity';
+  | 'opacity'
+  | 'scaleX'
+  | 'scaleY'
+  | 'skewX';
 
 export interface Layer {
   id: string;
@@ -592,6 +600,8 @@ export interface Layer {
   groupId: string | null;
   /** Authoring-time transform parent. Parent translation edits cascade into descendants. */
   parentId: string | null;
+  /** Local-coordinate transform parent; independent of layout/clip parenting. */
+  transformParentId?: string | null;
   /** Clip direct children to this layer's animated, rotation-aware bounds and rectangle radius. */
   clipChildren: boolean;
   /** A mask-only layer remains available to matte consumers without painting on air. */

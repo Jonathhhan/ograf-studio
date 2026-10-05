@@ -1,3 +1,4 @@
+import { resolveWorldTransforms, worldTransformMatrix } from '@ograf-editor/scene-model';
 import { renderPatternAtElapsed } from './patternRendering';
 import { applyScriptElement, resolveBoundElement, applyAnimatedPaint } from './renderElement';
 import { applyScriptEffects } from './effectCompositing';
@@ -75,6 +76,30 @@ export function applyCompiledMasks(
         state.effects = visuals.effects;
         state.paintTracks = {};
       } else scripted.delete(target);
+    }
+  }
+  const hasAffine =
+    descriptor.layers.some((l) => l.transformParentId) ||
+    [...states.values()].some(
+      (s) =>
+        (s.transform.scaleX ?? 1) !== 1 ||
+        (s.transform.scaleY ?? 1) !== 1 ||
+        (s.transform.skewX ?? 0) !== 0,
+    );
+  if (hasAffine) {
+    const worlds = resolveWorldTransforms(
+      descriptor.layers,
+      new Map([...states].map(([id, s]) => [id, s.transform])),
+    );
+    for (const [id, pose] of worlds) {
+      const state = states.get(id)!;
+      state.transform = pose;
+      const target = elements.get(id);
+      if (target) {
+        if (target.dataset) target.dataset.ografAffine = 'true';
+        target.style.transformOrigin = '0 0';
+        target.style.transform = 'matrix(' + worldTransformMatrix(pose).join(',') + ')';
+      }
     }
   }
   applyCompiledClipPaths(descriptor, elements, states);

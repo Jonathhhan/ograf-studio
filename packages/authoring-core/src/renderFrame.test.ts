@@ -443,7 +443,7 @@ describe('renderCompositionFrameSvg', () => {
     expect(svg).toContain('25%');
     expect(svg).toContain('<clipPath');
     expect(svg).toContain('<path d="M');
-    expect(svg).toContain(' Q ');
+    expect(svg).toMatch(/<clipPath[^>]*><path d="[^"]* A 6 6 0 0 1 /);
     expect(svg).toContain('style="isolation:isolate"');
     expect(svg).toContain('style="mix-blend-mode:multiply"');
   });

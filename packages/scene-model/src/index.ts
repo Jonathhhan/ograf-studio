@@ -78,3 +78,4 @@ export * from './scriptLayerProperties';
 export * from './scriptPropertyCatalog';
 export * from './expressionFields';
 export * from './jsonResources';
+export * from './transformHierarchy';

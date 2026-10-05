@@ -1,3 +1,5 @@
+import { resolveWorldTransforms, worldTransformMatrix } from './transformHierarchy';
+import { coordinateMethods } from './expressions';
 import {
   scriptLayerReference,
   textExpressionReference,
@@ -37,6 +39,7 @@ export interface ExpressionDiagnostic {
 }
 
 export interface ExpressionLayerState {
+  transformParentId?: string | null;
   id: string;
   name?: string;
   transform: LayerTransform;
@@ -168,8 +171,37 @@ export function resolveExpressionTransforms(
         }
         return transform;
       },
+      worldMatrixAtTime: (seconds) => {
+        const poses = new Map<string, LayerTransform>();
+        // Only evaluate the referenced chain; unrelated expressions cannot introduce cycles here.
+        const chain: ExpressionLayerState[] = [];
+        const seen = new Set<string>();
+        let node: ExpressionLayerState | undefined = layer;
+        while (node) {
+          if (seen.has(node.id)) throw Error('Transform parent cycle');
+          seen.add(node.id);
+          chain.push(node);
+          if (!node.transformParentId) break;
+          node = byId.get(node.transformParentId);
+          if (!node) throw Error('Missing transform parent');
+        }
+        for (const entry of chain) {
+          const pose = { ...poseAt(entry, seconds) };
+          for (const property of [
+            ...EXPRESSION_PROPERTIES,
+            'transformOriginX',
+            'transformOriginY',
+          ] as const)
+            pose[property] = readReference(entry, property, seconds);
+          poses.set(entry.id, pose);
+        }
+        return worldTransformMatrix(resolveWorldTransforms(chain, poses).get(layer.id)!);
+      },
       valueAtTime: (property, seconds) => {
-        return sampler.transformAtTime!(seconds)[property as keyof LayerTransform];
+        return (
+          sampler.transformAtTime!(seconds)[property as keyof LayerTransform] ??
+          (property === 'scaleX' || property === 'scaleY' ? 1 : 0)
+        );
       },
       sourceRectAtTime: (seconds, includeExtents) => {
         const visuals =
@@ -245,8 +277,9 @@ export function resolveExpressionTransforms(
     const expression = layer.expressions?.[property];
     const pose = poseAt(layer, seconds);
     const authored = isScriptVectorName(property)
-      ? readScriptVector(property, (component) => pose[component as keyof LayerTransform])
-      : pose[property as keyof LayerTransform];
+      ? readScriptVector(property, (component) => pose[component as keyof LayerTransform] ?? 0)
+      : (pose[property as keyof LayerTransform] ??
+        (property === 'scaleX' || property === 'scaleY' ? 1 : 0));
     if (!expression?.trim() || layer.expressionsEnabled?.[property] === false) return authored;
     if (visiting.has(key)) {
       const path = [...visiting, key];
@@ -403,6 +436,12 @@ export function resolveExpressionTransforms(
         'transformOriginX',
         'transformOriginY',
       ] as const) {
+        if (
+          ['scaleX', 'scaleY', 'skewX'].includes(property) &&
+          layer.transform[property] === undefined &&
+          !layer.expressions?.[property as LayerExpressionProperty]
+        )
+          continue;
         const field = expressionFieldForProperty(property)!;
         const target = layer.expressions?.[field]?.trim()
           ? field
@@ -471,11 +510,23 @@ export function resolveExpressionTransforms(
         {
           property: (property: string) =>
             sampledProperty(
-              (name) => transform[name as ExpressionProperty],
+              (name) =>
+                transform[name as ExpressionProperty] ??
+                (name === 'scaleX' || name === 'scaleY' ? 1 : 0),
               property,
               () => sample,
             ),
           sourceRectAtTime: sourceRectMethod(() => sample, currentTime),
+          ...coordinateMethods(
+            () => ({
+              ...sample,
+              worldMatrixAtTime: (seconds) =>
+                seconds === currentTime
+                  ? worldTransformMatrix(resolveWorldTransforms(layers, draft).get(layer.id)!)
+                  : sample.worldMatrixAtTime!(seconds),
+            }),
+            currentTime,
+          ),
         },
         (seconds, includeExtents, visuals, applyVisualWrites, applyTransformWrites) => {
           const at = seconds ?? currentTime;
@@ -515,7 +566,9 @@ export function resolveExpressionTransforms(
     evaluateCompositionScript(
       scripting.source,
       scope,
-      (name, property) => find(name)[property as ExpressionProperty],
+      (name, property) =>
+        find(name)[property as ExpressionProperty] ??
+        (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
       {
         apiVersion,
         modules,
@@ -529,7 +582,9 @@ export function resolveExpressionTransforms(
           const id = byIdentity ? reference : names.get(reference)!;
           return metadata(byId.get(id!)!);
         },
-        resolveLayerById: (id, property) => find(id, true)[property as ExpressionProperty],
+        resolveLayerById: (id, property) =>
+          find(id, true)[property as ExpressionProperty] ??
+          (property === 'scaleX' || property === 'scaleY' ? 1 : 0),
         resolveScriptLayer: reference,
       },
     );

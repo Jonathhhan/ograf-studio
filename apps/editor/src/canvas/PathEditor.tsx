@@ -178,10 +178,16 @@ export function PathEditor({ layer, pose, zoom, container, onPreview }: Props) {
             width={pose.width}
             height={pose.height}
             style={{
-              left: pose.x,
-              top: pose.y,
-              transform: `rotate(${pose.rotation}deg)`,
-              transformOrigin: `${pose.transformOriginX * 100}% ${pose.transformOriginY * 100}%`,
+              left: 0,
+              top: 0,
+              transform:
+                container.querySelector<HTMLElement>(
+                  '[data-layer-id="' + CSS.escape(layer.id) + '"]',
+                )?.style.transform ?? 'none',
+              transformOrigin:
+                container.querySelector<HTMLElement>(
+                  '[data-layer-id="' + CSS.escape(layer.id) + '"]',
+                )?.style.transformOrigin ?? '0 0',
             }}
             aria-label={`Edit path points: ${layer.name}`}
             tabIndex={0}

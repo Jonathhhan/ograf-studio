@@ -578,6 +578,8 @@ function duplicateGroup(
             : `${pattern}${rewrittenName}`;
       } else layer.name = rewrittenName;
       layer.groupId = groupId;
+      if (source.transformParentId)
+        layer.transformParentId = layerIds[source.transformParentId] ?? source.transformParentId;
       layer.parentId =
         source.parentId && sourceIds.has(source.parentId)
           ? layerIds[source.parentId]!

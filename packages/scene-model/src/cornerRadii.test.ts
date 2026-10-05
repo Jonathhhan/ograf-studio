@@ -34,7 +34,21 @@ describe('corner radii', () => {
     });
     expect(path).toContain('M 4 0');
     expect(path).toContain('H 92');
-    expect(path).toContain('Q 100 80 88 80');
+    expect(path).toContain('A 12 12 0 0 1 88 80');
     expect(path).toContain('H 16');
   });
+});
+
+it('uses exact quarter circles for a fully rounded square, including oversized radii', () => {
+  const circle =
+    'M 30 0 H 30 A 30 30 0 0 1 60 30 V 30 A 30 30 0 0 1 30 60 H 30 A 30 30 0 0 1 0 30 V 30 A 30 30 0 0 1 30 0 Z';
+  expect(roundedRectangleSvgPath(60, 60, 30)).toBe(circle);
+  expect(roundedRectangleSvgPath(60, 60, 100)).toBe(circle);
+});
+
+it('keeps square corners and mixed radii finite', () => {
+  // SVG zero-radius arcs are straight segments, preserving sharp corners.
+  expect(roundedRectangleSvgPath(100, 60, { topRight: 30 })).toBe(
+    'M 0 0 H 70 A 30 30 0 0 1 100 30 V 60 A 0 0 0 0 1 100 60 H 0 A 0 0 0 0 1 0 60 V 0 A 0 0 0 0 1 0 0 Z',
+  );
 });

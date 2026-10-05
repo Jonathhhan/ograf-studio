@@ -364,6 +364,7 @@ export function InspectorPanel() {
   const updateLayerShaderParameter = useProjectStore((s) => s.updateLayerShaderParameter);
   const setLayerBindings = useProjectStore((s) => s.setLayerBindings);
   const toggleLayerLock = useProjectStore((s) => s.toggleLayerLock);
+  const setTransformParent = useProjectStore((s) => s.setTransformParent);
   const setLayerParent = useProjectStore((s) => s.setLayerParent);
   const setLayerClipChildren = useProjectStore((s) => s.setLayerClipChildren);
   const setLayerConstraints = useProjectStore((s) => s.setLayerConstraints);
@@ -441,8 +442,11 @@ export function InspectorPanel() {
       ? getLayerPropertyValueAtFrame(layer, 'strokeWidth', currentFrame)
       : 0;
   const transformInputValue = (key: keyof LayerTransform): number => {
-    if (isLiveTransform) return pose[key];
-    const value = activeLayerKeyframe?.transform[key] ?? pose[key];
+    if (isLiveTransform) return pose[key] ?? (key === 'scaleX' || key === 'scaleY' ? 1 : 0);
+    const value =
+      activeLayerKeyframe?.transform[key] ??
+      pose[key] ??
+      (key === 'scaleX' || key === 'scaleY' ? 1 : 0);
     return isPixelTransformKey(key) ? Math.round(value) : value;
   };
 
@@ -1490,13 +1494,65 @@ export function InspectorPanel() {
           />
         </PropertyRow>
         <PropertyRow
+          className="inspector-row"
+          help="Inherit position, rotation and geometric scale. Values stay local. Reparenting preserves the authored pose at the current frame, not the complete animation."
+        >
+          <span>Transform parent</span>
+          <select
+            value={layer.transformParentId ?? ''}
+            onChange={(event) => setTransformParent(layer.id, event.target.value || null)}
+          >
+            <option value="">None</option>
+            {composition.layers
+              .filter((candidate) => {
+                let current: typeof candidate | undefined = candidate;
+                const seen = new Set<string>();
+                while (current) {
+                  if (current.id === layer.id || seen.has(current.id)) return false;
+                  seen.add(current.id);
+                  current = composition.layers.find((l) => l.id === current!.transformParentId);
+                }
+                return !candidate.isGuide || layer.isGuide;
+              })
+              .map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name}
+                </option>
+              ))}
+          </select>
+        </PropertyRow>
+        {(['scaleX', 'scaleY', 'skewX'] as const).map((property) => (
+          <PropertyRow
+            key={property}
+            className="inspector-row"
+            help="Geometric transformation, independent of layout width and height."
+          >
+            <span>
+              {property === 'skewX' ? 'Skew X' : property === 'scaleX' ? 'Scale X' : 'Scale Y'}
+            </span>
+            <input
+              type="number"
+              step="0.01"
+              value={transformInputValue(property)}
+              onChange={(event) =>
+                useProjectStore
+                  .getState()
+                  .updateLayerTransform(layer.id, currentFrame, {
+                    [property]: Number(event.target.value),
+                  })
+              }
+            />
+          </PropertyRow>
+        ))}
+        <PropertyRow
           help={
             'Choose a parent layer to establish a layout relationship. Parent movement and resizing can move or resize this layer according to its constraints.'
           }
           className="inspector-row"
         >
-          <span>Parent</span>
+          <span>Layout parent</span>
           <select
+            disabled={Boolean(layer.transformParentId)}
             value={layer.parentId ?? ''}
             onChange={(event) => setLayerParent(layer.id, event.target.value || null)}
           >

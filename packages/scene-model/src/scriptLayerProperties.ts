@@ -289,7 +289,7 @@ export function scriptLayerReference(
   const target = Object.create(null);
   defineScriptVectors(
     target,
-    (property) => transform[property as keyof LayerTransform],
+    (property) => transform[property as keyof LayerTransform] ?? 0,
     (property, value) => {
       assertActive();
       transform[property as keyof LayerTransform] = value;
@@ -312,7 +312,7 @@ export function scriptLayerReference(
   for (const key of Object.keys(SCRIPT_TRANSFORM_CATALOG) as (keyof LayerTransform)[])
     define(
       key,
-      () => transform[key],
+      () => transform[key] ?? (key === 'scaleX' || key === 'scaleY' ? 1 : 0),
       (value) => {
         requireType(value, 'number', key);
         transform[key] = value;
