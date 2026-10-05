@@ -45,6 +45,8 @@ export const SCRIPT_ELEMENT_CATALOG: Record<
     overflowPolicy: choice('visible', 'clip', 'ellipsis'),
     autoFit: choice('auto-size', 'shrink-to-fit', 'fit-to-width', 'squeeze', 'fixed'),
   },
+  chart: {},
+  audio: {},
   rectangle: { fill: paint, strokeColor: string, strokeWidth: number, borderRadius: object },
   ellipse: { fill: paint, strokeColor: string, strokeWidth: number },
   path: {

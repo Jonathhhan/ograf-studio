@@ -64,6 +64,20 @@ describe('preview data', () => {
     ).toMatchObject({ number: -12.5, integer: 12, 'duration-ms': 250, percentage: 100 });
   });
 
+  it('fills cleared nested preview leaves before displaying forms or sending runtime data', () => {
+    const composition = createProject().compositions[0]!;
+    const field = createFieldDefinition('object', {
+      key: 'player',
+      defaultValue: { name: 'Authored name', score: 1 },
+    });
+    composition.dataFields.push(field);
+    const partial = { score: 9 };
+    expect(resolvePreviewFormValue(field, partial)).toEqual({ name: 'Authored name', score: 9 });
+    expect(buildPreviewDataFromTestValues(composition, { [field.id]: partial })).toEqual({
+      player: { name: 'Authored name', score: 9 },
+    });
+  });
+
   it('resolves local image assets for both test-value and keyed-form payloads', () => {
     const composition = createProject().compositions[0]!;
     const asset = createAsset({

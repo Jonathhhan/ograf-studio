@@ -2,6 +2,7 @@ import type { Element } from './types';
 import { inspectShaderSource, resolveShaderParameters, getElementShaderPaint } from './shader';
 import { isGradientPaint } from './paint';
 import { normalizeShaderParameterValue, shaderColorToHex } from './shaderParameters';
+import { parseChartData } from './chartData';
 
 const NUMERIC_TEXT_PROPERTIES = new Set([
   'fontSize',
@@ -18,6 +19,9 @@ export function applyElementDataValue(element: Element, property: string, value:
   if (element.type === 'text' && property === 'direction') {
     if (value !== 'auto' && value !== 'ltr' && value !== 'rtl') return element;
     return { ...element, direction: value };
+  }
+  if (element.type === 'chart' && property === 'data') {
+    return { ...element, data: parseChartData(value) };
   }
   if (property === 'dropShadowColor' || property.startsWith('effects.')) return element;
   const shaderTarget = /^(?:(fill|strokePaint)\.)?parameters\.(.+)$/.exec(property);
@@ -43,7 +47,10 @@ export function applyElementDataValue(element: Element, property: string, value:
       normalized = authored;
     const fill = { ...shader, parameters: { ...shader.parameters, [name]: normalized } };
     if (slot === 'stroke' && element.type === 'text') return { ...element, strokePaint: fill };
-    return element.type === 'shader' ? fill : { ...element, fill };
+    if (element.type === 'shader') return fill;
+    if (!('fill' in element))
+      throw new Error(`Shader parameter binding "${property}" requires a paintable object.`);
+    return { ...element, fill };
   }
   const stop = /^fill\.stops\[(0|[1-9]\d*)\]\.color$/.exec(property);
   if (stop) {
@@ -65,11 +72,39 @@ export function applyElementDataValue(element: Element, property: string, value:
       ...(typeof element.fill === 'string' ? { fill: String(value) } : {}),
     };
   }
+  if (element.type === 'text' && property === 'content') {
+    const content = String(value);
+    const authoredText = element.runs.length
+      ? element.runs.map((run) => run.text).join('')
+      : element.content;
+    return { ...element, content, runs: content === authoredText ? element.runs : [] };
+  }
   if (element.type === 'text' && NUMERIC_TEXT_PROPERTIES.has(property)) {
-    return { ...element, [property]: Number(value) } as Element;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? ({ ...element, [property]: numeric } as Element) : element;
   }
   return {
     ...element,
     [property]: property === 'fill' && value && typeof value === 'object' ? value : String(value),
   } as Element;
+}
+
+/** The value `applyElementDataValue` would replace; `undefined` when the element lacks it. */
+export function readElementDataValue(element: Element, property: string): unknown {
+  if (element.type === 'chart' && property === 'data') return JSON.stringify(element.data);
+  if (property === 'dropShadowColor' || property.startsWith('effects.')) return undefined;
+  const shaderTarget = /^(?:(fill|strokePaint)\.)?parameters\.(.+)$/.exec(property);
+  if (shaderTarget) {
+    const shader = getElementShaderPaint(
+      element,
+      shaderTarget[1] === 'strokePaint' ? 'stroke' : 'fill',
+    );
+    return shader ? resolveShaderParameters(shader)[shaderTarget[2]!] : undefined;
+  }
+  const stop = /^fill\.stops\[(0|[1-9]\d*)\]\.color$/.exec(property);
+  if (stop)
+    return 'fill' in element && isGradientPaint(element.fill)
+      ? element.fill.stops[Number(stop[1])]?.color
+      : undefined;
+  return (element as unknown as Record<string, unknown>)[property];
 }

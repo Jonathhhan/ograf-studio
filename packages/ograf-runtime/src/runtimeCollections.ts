@@ -11,11 +11,11 @@ function instanceId(collectionId: string, index: number, prototypeLayerId: strin
 function offsetLayer(
   collection: CompiledRuntimeCollection,
   prototype: CompiledLayer,
-  index: number,
+  slot: number,
   idByPrototypeId: Map<string, string>,
 ): CompiledLayer {
-  const offsetX = collection.offsetPerItem.x * index;
-  const offsetY = collection.offsetPerItem.y * index;
+  const offsetX = collection.offsetPerItem.x * slot;
+  const offsetY = collection.offsetPerItem.y * slot;
   const layer = structuredClone(prototype);
   layer.id = idByPrototypeId.get(prototype.id)!;
   layer.keyframes = layer.keyframes.map((keyframe) => ({
@@ -38,8 +38,14 @@ function offsetLayer(
       layer.loop.tracks[property] = loopKeys.map((key) => ({ ...key, value: key.value + offset }));
     }
   }
+  layer.transformParentId = prototype.transformParentId
+    ? (idByPrototypeId.get(prototype.transformParentId) ?? prototype.transformParentId)
+    : null;
   layer.clipParentId = prototype.clipParentId
     ? (idByPrototypeId.get(prototype.clipParentId) ?? null)
+    : null;
+  layer.layoutParentId = prototype.layoutParentId
+    ? (idByPrototypeId.get(prototype.layoutParentId) ?? null)
     : null;
   layer.mask = prototype.mask
     ? {
@@ -48,12 +54,40 @@ function offsetLayer(
           idByPrototypeId.get(prototype.mask.sourceLayerId) ?? prototype.mask.sourceLayerId,
       }
     : null;
-  layer.bindings = layer.bindings.map((binding) => ({ ...binding, itemIndex: index }));
+  layer.motionPath = prototype.motionPath
+    ? {
+        ...prototype.motionPath,
+        sourceLayerId:
+          idByPrototypeId.get(prototype.motionPath.sourceLayerId) ??
+          prototype.motionPath.sourceLayerId,
+      }
+    : null;
+  layer.bindings = layer.bindings.map((binding) => ({ ...binding, itemIndex: slot }));
+  // A row's rules drive that row's copies of sibling prototype layers.
+  if (layer.visualRules)
+    layer.visualRules = layer.visualRules.map((rule) => ({
+      ...rule,
+      actions: rule.actions.map((action) =>
+        'targetLayerId' in action &&
+        action.targetLayerId &&
+        idByPrototypeId.has(action.targetLayerId)
+          ? { ...action, targetLayerId: idByPrototypeId.get(action.targetLayerId)! }
+          : action,
+      ),
+    }));
   layer.collectionItem = {
-    prototypeLayerId: prototype.id,
     collectionId: collection.id,
     dataKey: collection.dataKey,
-    index,
+    slot,
+    capacity: collection.capacity,
+    itemKeyPath: [...collection.itemKeyPath],
+    sortPath: [...collection.sortPath],
+    sortDirection: collection.sortDirection,
+    pageSize: collection.pageSize,
+    page: collection.page,
+    offsetPerItem: { ...collection.offsetPerItem },
+    prototypeLayerId: prototype.id,
+    index: slot,
   };
   return layer;
 }
@@ -72,6 +106,46 @@ function expandCollection(collection: CompiledRuntimeCollection): CompiledLayer[
     }
   }
   return result;
+}
+
+function valueAtPath(value: unknown, path: string[]): unknown {
+  let current = value;
+  for (const segment of path) {
+    if (!current || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+export function runtimeCollectionItemSelection(
+  layer: CompiledLayer,
+  data: Record<string, unknown>,
+): { index: number; key: string } | null {
+  const item = layer.collectionItem;
+  if (!item) return null;
+  const value = data[item.dataKey];
+  if (!Array.isArray(value)) return null;
+  const ordered = value.map((entry, index) => ({ entry, index }));
+  if (item.sortDirection !== 'none' && item.sortPath.length > 0) {
+    ordered.sort((left, right) => {
+      const a = valueAtPath(left.entry, item.sortPath),
+        b = valueAtPath(right.entry, item.sortPath);
+      const comparison =
+        typeof a === 'number' && typeof b === 'number'
+          ? a - b
+          : String(a ?? '').localeCompare(String(b ?? ''), undefined, { numeric: true });
+      return (
+        (item.sortDirection === 'descending' ? -comparison : comparison) || left.index - right.index
+      );
+    });
+  }
+  const pageSize = item.pageSize > 0 ? Math.min(item.pageSize, item.capacity) : item.capacity;
+  const selected = ordered[item.page * pageSize + item.slot];
+  if (!selected || item.slot >= pageSize) return null;
+  const rawKey = item.itemKeyPath.length
+    ? valueAtPath(selected.entry, item.itemKeyPath)
+    : selected.index;
+  return { index: selected.index, key: String(rawKey ?? selected.index) };
 }
 
 /** Pure bounded expansion shared by the packaged runtime and browser-authoritative capture. */
@@ -105,6 +179,5 @@ export function isRuntimeCollectionLayerActive(
 ): boolean {
   const item = layer.collectionItem;
   if (!item) return true;
-  const value = data[item.dataKey];
-  return Array.isArray(value) && item.index < value.length;
+  return runtimeCollectionItemSelection(layer, data) !== null;
 }

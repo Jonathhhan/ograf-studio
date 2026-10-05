@@ -1,5 +1,9 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
-import { isShaderPaint, type FieldDefinition, type GradientPaint } from '@ograf-editor/scene-model';
+import {
+  isGradientPaint,
+  type FieldDefinition,
+  type GradientPaint,
+} from '@ograf-editor/scene-model';
 import type { TestValue } from '../state/testDataStore';
 import { PaintEditor } from './PaintEditor';
 import './DataFieldInput.css';
@@ -73,9 +77,10 @@ export function DataFieldInput({
     return value && typeof value === 'object' && !Array.isArray(value) && 'stops' in value ? (
       <PaintEditor
         allowShader={false}
+        allowMedia={false}
         value={value as GradientPaint}
         onChange={(paint) => {
-          if (paint !== undefined && !isShaderPaint(paint)) onChange(paint);
+          if (paint !== undefined && isGradientPaint(paint)) onChange(paint);
         }}
       />
     ) : null;

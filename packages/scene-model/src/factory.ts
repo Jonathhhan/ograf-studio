@@ -2,8 +2,11 @@ import { createId } from './id';
 import { createDefaultGradient } from './paint';
 import type {
   Asset,
+  AudioElement,
   Composition,
+  ChartElement,
   CustomActionDefinition,
+  MediaCue,
   Element,
   EllipseElement,
   FieldDefinition,
@@ -35,6 +38,8 @@ import type {
 import { normalizeAuthoredTransform } from './authoredTransform';
 import { normalizeCornerRadii } from './cornerRadii';
 import { normalizeShaderElement } from './shader';
+import { normalizeTextAnimation } from './textAnimation';
+import { DEFAULT_CHART_ANIMATION, normalizeChartAnimation } from './chartAnimation';
 
 const BASE_TRANSFORM: LayerTransform = {
   x: 100,
@@ -75,7 +80,6 @@ export function createTextElement(overrides: Partial<TextElement> = {}): TextEle
     fontFamily: 'system-ui, sans-serif',
     fontWeight: 600,
     textAlign: 'left',
-    direction: 'auto',
     lineHeight: 1.2,
     letterSpacing: 0,
     textTransform: 'none',
@@ -84,8 +88,12 @@ export function createTextElement(overrides: Partial<TextElement> = {}): TextEle
     minFontSize: Math.max(1, fontSize * 0.5),
     overflowPolicy: 'visible',
     autoFit: 'auto-size',
+    runs: [],
+    direction: 'auto',
+    language: '',
     ...overrides,
     fontSize,
+    textAnimation: normalizeTextAnimation(overrides.textAnimation),
   };
 }
 
@@ -118,6 +126,30 @@ export function createEllipseElement(overrides: Partial<EllipseElement> = {}): E
     strokeColor: 'transparent',
     strokeWidth: 0,
     ...overrides,
+  };
+}
+
+export function createChartElement(overrides: Partial<ChartElement> = {}): ChartElement {
+  return {
+    type: 'chart',
+    preset: 'bar',
+    data: {
+      labels: ['Alpha', 'Beta', 'Gamma', 'Delta'],
+      datasets: [
+        {
+          label: 'Series 1',
+          data: [42, 35, 15, 8],
+          backgroundColor: ['#2563eb', '#dc2626', '#f59e0b', '#16a34a'],
+          borderColor: '#38bdf8',
+        },
+      ],
+    },
+    textColor: '#e5e7eb',
+    fontSize: 28,
+    showLegend: false,
+    showGrid: true,
+    ...overrides,
+    animation: normalizeChartAnimation(overrides.animation ?? DEFAULT_CHART_ANIMATION),
   };
 }
 
@@ -189,6 +221,22 @@ function createLayer(name: string, element: Element): Layer {
     isMaskOnly: false,
     mask: null,
     constraints: { horizontal: 'left', vertical: 'top' },
+    autoLayout: {
+      direction: 'none',
+      gap: 0,
+      paddingTop: 0,
+      paddingRight: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      align: 'start',
+      hugWidth: false,
+      hugHeight: false,
+      minWidth: 0,
+      maxWidth: 0,
+      collapseHidden: true,
+    },
+    updateTransition: { style: 'inherit', durationFrames: 0, distance: 24 },
+    motionPath: null,
     keyframes: [],
     animationTracks: {},
     loop: null,
@@ -198,23 +246,27 @@ function createLayer(name: string, element: Element): Layer {
     designTokenBindings: [],
     componentLink: null,
     bindings: [],
+    visualRules: [],
   };
 }
 
 export type NewLayerKind =
   | 'rectangle'
   | 'ellipse'
+  | 'chart'
   | 'text'
   | 'image'
   | 'path'
   | 'pattern'
   | 'image-sequence'
   | 'lottie'
+  | 'audio'
   | 'shader';
 
 /** The starting pose for a freshly created layer of this kind — a fresh object every call. */
 export function defaultTransformFor(kind: NewLayerKind): LayerTransform {
   if (kind === 'text') return createDefaultTransform({ height: 64 });
+  if (kind === 'chart') return createDefaultTransform({ width: 640, height: 360 });
   if (kind === 'rectangle' || kind === 'ellipse') {
     return createDefaultTransform({ width: 200, height: 200 });
   }
@@ -232,6 +284,10 @@ export function createRectangleLayer(): Layer {
 
 export function createEllipseLayer(): Layer {
   return createLayer('Ellipse', createEllipseElement());
+}
+
+export function createChartLayer(): Layer {
+  return createLayer('Chart', createChartElement());
 }
 
 export function createTextLayer(): Layer {
@@ -254,6 +310,23 @@ export function createLottieLayer(): Layer {
   return createLayer('Lottie', createLottieElement());
 }
 
+export function createAudioElement(overrides: Partial<AudioElement> = {}): AudioElement {
+  return {
+    type: 'audio',
+    src: null,
+    volume: 1,
+    loop: false,
+    trimStartMs: 0,
+    trimEndMs: null,
+    timelineStartMs: 0,
+    ...overrides,
+  };
+}
+
+export function createAudioLayer(): Layer {
+  return createLayer('Audio', createAudioElement());
+}
+
 export function createShaderLayer(): Layer {
   return createLayer('Shader', createRectangleElement({ fill: createShaderElement() }));
 }
@@ -264,6 +337,8 @@ export function createLayerOfKind(kind: NewLayerKind): Layer {
       return createRectangleLayer();
     case 'ellipse':
       return createEllipseLayer();
+    case 'chart':
+      return createChartLayer();
     case 'text':
       return createTextLayer();
     case 'image':
@@ -282,6 +357,8 @@ export function createLayerOfKind(kind: NewLayerKind): Layer {
       return createImageSequenceLayer();
     case 'lottie':
       return createLottieLayer();
+    case 'audio':
+      return createAudioLayer();
     case 'shader':
       return createShaderLayer();
   }
@@ -465,6 +542,37 @@ export function createCustomActionDefinition(
   };
 }
 
+export function createMediaCue(overrides: Partial<MediaCue> = {}): MediaCue {
+  return {
+    id: createId('media-cue'),
+    name: 'Media Cue',
+    sources: [],
+    activeSourceId: null,
+    trigger: { type: 'timeline', startFrame: 0 },
+    trimStartMs: 0,
+    trimEndMs: null,
+    durationFrames: null,
+    loop: false,
+    speed: 1,
+    volume: 1,
+    muted: false,
+    retrigger: 'restart',
+    transition: {
+      type: 'cut',
+      durationFrames: 0,
+      audio: 'follow-picture',
+      onFailure: 'keep-current',
+    },
+    visual: {
+      targetLayerId: null,
+      fit: 'cover',
+      positionX: 0.5,
+      positionY: 0.5,
+    },
+    ...overrides,
+  };
+}
+
 export function createAsset(overrides: Partial<Asset> = {}): Asset {
   return {
     id: createId('asset'),
@@ -493,10 +601,12 @@ export function createComposition(overrides: Partial<Composition> = {}): Composi
     name: 'Main',
     width: 1920,
     height: 1080,
-    backgroundColor: '#000000',
+    backgroundColor: 'transparent',
     expressionApiVersion: 1,
+
     frameRate: DEFAULT_FRAME_RATE,
     updateTransitionFrames: 0,
+    updateInterruption: 'queue',
     layout: {
       showRulers: true,
       showActionSafe: false,
@@ -520,6 +630,8 @@ export function createComposition(overrides: Partial<Composition> = {}): Composi
     layers: [],
     dataFields: [],
     runtimeCollections: [],
+    dataConnections: [],
+    mediaCues: [],
     patterns: [],
     customActions: [],
     assets: [],
@@ -531,7 +643,7 @@ export function createComposition(overrides: Partial<Composition> = {}): Composi
   };
 }
 
-export const PROJECT_DOCUMENT_VERSION = 33;
+export const PROJECT_DOCUMENT_VERSION = 37;
 
 export function createProject(overrides: Partial<Project> = {}): Project {
   const mainComposition = createComposition({ name: 'Main' });

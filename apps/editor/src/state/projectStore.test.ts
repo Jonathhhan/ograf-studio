@@ -10,6 +10,8 @@ import { compileDataSchema } from '@ograf-editor/codegen';
 import {
   getLayerPropertyValueAtFrame,
   createShaderPaint,
+  createMediaPaint,
+  getElementMediaPaint,
   getElementShaderPaint,
   getEffectStack,
 } from '@ograf-editor/scene-model';
@@ -98,6 +100,66 @@ describe('project store authoring', () => {
       expect(current().layers.find((layer) => layer.id === id)!.bindings).toHaveLength(0);
     }
   });
+  it('applies media paint to every fill-capable object without changing its kind', () => {
+    for (const kind of [
+      'rectangle',
+      'ellipse',
+      'path',
+      'pattern',
+      'text',
+      'image',
+      'image-sequence',
+      'lottie',
+    ] as const) {
+      const store = useProjectStore.getState();
+      store.newProject();
+      const id = store.addLayer(kind);
+      store.updateLayerPaint(
+        id,
+        0,
+        createMediaPaint({ source: { kind: 'clip', src: 'https://media.example/clip.mp4' } }),
+      );
+      const layer = useProjectStore
+        .getState()
+        .project.compositions[0]!.layers.find((candidate) => candidate.id === id)!;
+      expect(layer.element.type).toBe(kind);
+      expect(getElementMediaPaint(layer.element)).toMatchObject({
+        type: 'media',
+        source: { kind: 'clip', src: 'https://media.example/clip.mp4' },
+        muted: true,
+      });
+      expect(useProjectStore.getState().project).toMatchObject({
+        supportsRealTime: true,
+        supportsNonRealTime: false,
+      });
+    }
+  });
+  it('repairs and preserves the real-time-only profile required by Media paints', () => {
+    const store = useProjectStore.getState();
+    const id = store.addLayer('rectangle');
+    const project = structuredClone(useProjectStore.getState().project);
+    const layer = project.compositions[0]!.layers.find((candidate) => candidate.id === id)!;
+    if (!('fill' in layer.element)) throw new Error('Expected a fill-capable layer.');
+    layer.element.fill = createMediaPaint({
+      source: { kind: 'clip', src: 'https://media.example/clip.mp4' },
+    });
+    project.supportsRealTime = false;
+    project.supportsNonRealTime = true;
+
+    store.loadProject(project);
+    expect(useProjectStore.getState().project).toMatchObject({
+      supportsRealTime: true,
+      supportsNonRealTime: false,
+    });
+    useProjectStore.getState().setProjectMeta({
+      supportsRealTime: false,
+      supportsNonRealTime: true,
+    });
+    expect(useProjectStore.getState().project).toMatchObject({
+      supportsRealTime: true,
+      supportsNonRealTime: false,
+    });
+  });
   it('keeps pragma controls and generated field defaults coherent through editing and duplication', () => {
     const store = useProjectStore.getState();
     const id = store.addLayer('shader');
@@ -180,6 +242,48 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
       2,
     );
   });
+  it('keeps one shared effects stack synchronized across persistent group members', () => {
+    useTimelineStore.getState().setAutoKeyframe(false);
+    const store = useProjectStore.getState(),
+      firstId = store.addLayer('rectangle'),
+      secondId = store.addLayer('text'),
+      layerIds = [firstId, secondId],
+      layers = () =>
+        useProjectStore
+          .getState()
+          .project.compositions[0]!.layers.filter((layer) => layerIds.includes(layer.id));
+    store.groupLayers(layerIds);
+    store.addGroupEffect(layerIds, 'glow');
+    const shared = getEffectStack(layers()[0]!.effects).find((effect) => effect.type === 'glow')!;
+    expect(
+      layers().map((layer) => getEffectStack(layer.effects).map((effect) => effect.id)),
+    ).toEqual([
+      getEffectStack(layers()[0]!.effects).map((effect) => effect.id),
+      getEffectStack(layers()[0]!.effects).map((effect) => effect.id),
+    ]);
+
+    store.updateGroupEffect(layerIds, shared.id, { enabled: true, params: { radius: 18 } }, 0);
+    expect(
+      layers().map(
+        (layer) =>
+          getEffectStack(layer.effects).find((effect) => effect.id === shared.id)!.params.radius,
+      ),
+    ).toEqual([18, 18]);
+
+    store.duplicateGroupEffect(layerIds, shared.id);
+    const ids = getEffectStack(layers()[0]!.effects).map((effect) => effect.id);
+    store.reorderGroupEffects(layerIds, [...ids].reverse());
+    expect(
+      layers().map((layer) => getEffectStack(layer.effects).map((effect) => effect.id)),
+    ).toEqual([[...ids].reverse(), [...ids].reverse()]);
+
+    store.removeGroupEffect(layerIds, shared.id);
+    expect(
+      layers().every(
+        (layer) => !getEffectStack(layer.effects).some((effect) => effect.id === shared.id),
+      ),
+    ).toBe(true);
+  });
   it('applies and removes a pack through Immer with existing token links and rounded shapes', () => {
     const store = useProjectStore.getState();
     const id = store.addLayer('rectangle');
@@ -242,11 +346,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     ).toBeUndefined();
   });
 
-  it('creates new projects with an opaque black canvas and 20% gray outside-canvas fill', () => {
+  it('creates new projects with a transparent overlay canvas and 20% gray outside-canvas fill', () => {
     const state = useProjectStore.getState();
     const composition = getActiveComposition(state.project, state.activeCompositionId);
 
-    expect(composition.backgroundColor).toBe('#000000');
+    expect(composition.backgroundColor).toBe('transparent');
     expect(composition.layout.dimOutsideCanvas).toBe(true);
   });
 

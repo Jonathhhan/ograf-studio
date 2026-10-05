@@ -28,7 +28,11 @@ import {
   isShaderPaint,
 } from './shader';
 import { compositionWithShaderParameterFields } from './shaderFields';
+import { isMediaPaint, normalizeMediaPaint } from './mediaPaint';
+import { normalizeLayerAutoLayout } from './autoLayout';
 import { parseShaderAnimationProperty } from './shaderAnimation';
+import { normalizeTextAnimation } from './textAnimation';
+import { normalizeChartAnimation } from './chartAnimation';
 import type {
   Composition,
   Element,
@@ -63,7 +67,11 @@ type LegacyLayer = Omit<
   | 'isMaskOnly'
   | 'mask'
   | 'constraints'
+  | 'autoLayout'
+  | 'updateTransition'
+  | 'motionPath'
   | 'bindings'
+  | 'visualRules'
   | 'semantics'
   | 'designTokenBindings'
   | 'componentLink'
@@ -81,7 +89,11 @@ type LegacyLayer = Omit<
   isMaskOnly?: boolean;
   mask?: Layer['mask'];
   constraints?: Layer['constraints'];
+  autoLayout?: Partial<Layer['autoLayout']>;
+  updateTransition?: Partial<Layer['updateTransition']>;
+  motionPath?: Layer['motionPath'];
   bindings?: Layer['bindings'];
+  visualRules?: Layer['visualRules'];
   semantics?: Layer['semantics'];
   designTokenBindings?: Layer['designTokenBindings'];
   componentLink?: Layer['componentLink'];
@@ -97,15 +109,20 @@ type LegacyComposition = Omit<
   | 'components'
   | 'designSystem'
   | 'runtimeCollections'
+  | 'dataConnections'
+  | 'mediaCues'
   | 'patterns'
 > & {
   keyframes: LegacyKeyframe[];
   layers: LegacyLayer[];
   layout?: Partial<Composition['layout']>;
   updateTransitionFrames?: number;
+  updateInterruption?: Composition['updateInterruption'];
   components?: Composition['components'];
   designSystem?: Composition['designSystem'];
   runtimeCollections?: Composition['runtimeCollections'];
+  dataConnections?: Composition['dataConnections'];
+  mediaCues?: Composition['mediaCues'];
   patterns?: Composition['patterns'];
 };
 
@@ -158,8 +175,31 @@ function normalizeFieldDefinition(field: LegacyFieldDefinition): FieldDefinition
   };
 }
 
+function normalizeMediaPaintElement(element: Element): Element {
+  if (!('fill' in element) || !isMediaPaint(element.fill)) return element;
+  return { ...element, fill: normalizeMediaPaint(element.fill) } as Element;
+}
+
 function normalizeElement(element: Element): Element {
+  if (element.type === 'chart')
+    return {
+      ...element,
+      textColor: element.textColor ?? '#e5e7eb',
+      fontSize: element.fontSize ?? 28,
+      showLegend: element.showLegend ?? false,
+      showGrid: element.showGrid ?? true,
+      animation: normalizeChartAnimation(element.animation),
+    };
   if (element.type === 'shader') return migrateShaderElement(element);
+  if (element.type === 'audio')
+    return {
+      ...element,
+      volume: element.volume ?? 1,
+      loop: element.loop ?? false,
+      trimStartMs: element.trimStartMs ?? 0,
+      trimEndMs: element.trimEndMs ?? null,
+      timelineStartMs: element.timelineStartMs ?? 0,
+    };
   const shader = getElementShaderPaint(element);
   if (shader && 'fill' in element)
     element = { ...element, fill: normalizeShaderElement(shader) } as Element;
@@ -179,7 +219,6 @@ function normalizeElement(element: Element): Element {
     ...element,
     strokeColor: element.strokeColor ?? 'transparent',
     strokeWidth: element.strokeWidth ?? 0,
-    direction: element.direction ?? 'ltr',
     lineHeight: element.lineHeight ?? 1.2,
     letterSpacing: element.letterSpacing ?? 0,
     textTransform: element.textTransform ?? 'none',
@@ -188,6 +227,10 @@ function normalizeElement(element: Element): Element {
     minFontSize: element.minFontSize ?? Math.max(1, element.fontSize * 0.5),
     overflowPolicy: element.overflowPolicy ?? 'visible',
     autoFit: element.autoFit ?? 'auto-size',
+    runs: element.runs ?? [],
+    direction: element.direction ?? 'auto',
+    language: element.language ?? '',
+    textAnimation: normalizeTextAnimation(element.textAnimation),
   };
 }
 
@@ -263,7 +306,18 @@ function normalizeComposition(composition: LegacyComposition): Composition {
         isMaskOnly: legacyLayer.isMaskOnly ?? false,
         mask: legacyLayer.mask ?? null,
         constraints: legacyLayer.constraints ?? { horizontal: 'left', vertical: 'top' },
+        autoLayout: normalizeLayerAutoLayout(legacyLayer.autoLayout),
+        updateTransition: {
+          style: legacyLayer.updateTransition?.style ?? 'inherit',
+          durationFrames: Math.max(
+            0,
+            Math.round(legacyLayer.updateTransition?.durationFrames ?? 0),
+          ),
+          distance: Math.max(0, Number(legacyLayer.updateTransition?.distance ?? 24)),
+        },
+        motionPath: legacyLayer.motionPath ?? null,
         bindings,
+        visualRules: legacyLayer.visualRules ?? [],
         element,
         effects,
         semantics: createLayerSemantics(legacyLayer.semantics),
@@ -381,7 +435,15 @@ function normalizeComposition(composition: LegacyComposition): Composition {
       isMaskOnly: legacyLayer.isMaskOnly ?? false,
       mask: legacyLayer.mask ?? null,
       constraints: legacyLayer.constraints ?? { horizontal: 'left', vertical: 'top' },
+      autoLayout: normalizeLayerAutoLayout(legacyLayer.autoLayout),
+      updateTransition: {
+        style: legacyLayer.updateTransition?.style ?? 'inherit',
+        durationFrames: Math.max(0, Math.round(legacyLayer.updateTransition?.durationFrames ?? 0)),
+        distance: Math.max(0, Number(legacyLayer.updateTransition?.distance ?? 24)),
+      },
+      motionPath: legacyLayer.motionPath ?? null,
       bindings,
+      visualRules: legacyLayer.visualRules ?? [],
       element,
       effects,
       semantics: createLayerSemantics(legacyLayer.semantics),
@@ -402,6 +464,7 @@ function normalizeComposition(composition: LegacyComposition): Composition {
     expressionApiVersion:
       composition.expressionApiVersion === 2 ? 1 : (composition.expressionApiVersion ?? 1),
     updateTransitionFrames: Math.max(0, Math.round(composition.updateTransitionFrames ?? 0)),
+    updateInterruption: composition.updateInterruption ?? 'queue',
     keyframes: normalizedKeyframes,
     transitions,
     layers,
@@ -418,6 +481,18 @@ function normalizeComposition(composition: LegacyComposition): Composition {
         y: Number(collection.offsetPerItem?.y ?? 0),
       },
       overflow: 'truncate',
+      itemKeyPath: collection.itemKeyPath ?? [],
+      sortPath: collection.sortPath ?? [],
+      sortDirection: collection.sortDirection ?? 'none',
+      pageSize: Math.max(0, Math.round(collection.pageSize ?? 0)),
+      page: Math.max(0, Math.round(collection.page ?? 0)),
+    })),
+    dataConnections: composition.dataConnections ?? [],
+    // Media Cue is the first released media transport model. Do not infer cues from experimental
+    // audio layers or media paints created by unreleased development builds.
+    mediaCues: (composition.mediaCues ?? []).map((cue) => ({
+      ...cue,
+      durationFrames: cue.durationFrames ?? null,
     })),
     patterns: composition.patterns ?? [],
     components: (composition.components ?? []).map((component) => ({
@@ -439,9 +514,17 @@ function normalizeComposition(composition: LegacyComposition): Composition {
             ...binding,
             targetProperty: migrateShaderBindingTarget(binding.targetProperty),
           })),
+          visualRules: layer.visualRules ?? [],
           isMaskOnly: layer.isMaskOnly ?? false,
           mask: layer.mask ?? null,
           blendMode: layer.blendMode ?? 'normal',
+          autoLayout: normalizeLayerAutoLayout(layer.autoLayout),
+          updateTransition: layer.updateTransition ?? {
+            style: 'inherit',
+            durationFrames: 0,
+            distance: 24,
+          },
+          motionPath: layer.motionPath ?? null,
           semantics: createLayerSemantics(layer.semantics),
           designTokenBindings: layer.designTokenBindings ?? [],
           componentLink: null,
@@ -572,8 +655,15 @@ export function migrateProject(project: Project | LegacyProject): Project {
         ? { ...resource, paint: normalizeShaderElement(resource.paint) }
         : resource,
     ),
-    compositions: cloned.compositions.map((composition) =>
-      compositionWithShaderParameterFields(normalizeComposition(composition)),
-    ),
+    compositions: cloned.compositions.map((composition) => {
+      const normalized = normalizeComposition(composition);
+      return compositionWithShaderParameterFields({
+        ...normalized,
+        layers: normalized.layers.map((layer) => ({
+          ...layer,
+          element: normalizeMediaPaintElement(layer.element),
+        })),
+      });
+    }),
   };
 }

@@ -141,39 +141,181 @@ interface TextLine {
   text: string;
   x: number;
   top: number;
+  style: CSSStyleDeclaration;
+  ancestors: HTMLElement[];
+  opacity: number;
+}
+
+interface TextMaskNodeStyle {
+  computed: CSSStyleDeclaration;
+  transform: string;
+  transformOrigin: string;
+}
+
+const TEXT_LAYOUT_PROPERTIES = [
+  'font-family',
+  'font-size',
+  'font-weight',
+  'font-style',
+  'font-stretch',
+  'font-variant',
+  'font-feature-settings',
+  'font-kerning',
+  'letter-spacing',
+  'word-spacing',
+  'line-height',
+  'text-transform',
+  'direction',
+  'text-align',
+] as const;
+
+/** Freeze native run typography before measuring the clone outside the editor's CSS ancestry. */
+function copyTextMaskStyles(
+  source: HTMLElement,
+  clone: HTMLElement,
+  view: Window,
+  styles: Map<HTMLElement, TextMaskNodeStyle>,
+): void {
+  const computed = view.getComputedStyle(source);
+  styles.set(clone, {
+    computed,
+    transform: computed.transform,
+    transformOrigin: computed.transformOrigin,
+  });
+  for (const property of TEXT_LAYOUT_PROPERTIES) {
+    clone.style.setProperty(property, computed.getPropertyValue(property));
+  }
+  // Range rectangles are measured before transforms; Canvas applies each ancestor matrix once.
+  clone.style.transform = 'none';
+  const children = [...(source.children ?? [])];
+  const clonedChildren = [...(clone.children ?? [])];
+  children.forEach((child, index) => {
+    const clonedChild = clonedChildren[index];
+    if (clonedChild)
+      copyTextMaskStyles(child as HTMLElement, clonedChild as HTMLElement, view, styles);
+  });
 }
 
 /** Read native line positions; the browser remains responsible for wrapping and font shaping. */
-function textLines(content: HTMLElement, origin: DOMRect): TextLine[] {
-  const node = content.firstChild;
-  if (!node || node.nodeType !== 3) return [];
-  const text = node.textContent ?? '';
+function textLines(
+  content: HTMLElement,
+  origin: DOMRect,
+  styles: Map<HTMLElement, TextMaskNodeStyle>,
+): TextLine[] {
   const lines: TextLine[] = [];
-  let current: TextLine | undefined;
-  let offset = 0;
   const range = content.ownerDocument.createRange();
-  for (const character of text) {
-    const next = offset + character.length;
-    if (character === '\n' || character === '\r') {
-      current = undefined;
-      offset = next;
-      continue;
+  const visit = (parent: HTMLElement, ancestors: HTMLElement[], opacity: number) => {
+    const style = styles.get(parent)?.computed;
+    const cursor = parent.getAttribute?.('data-ograf-text-cursor');
+    if (
+      !style ||
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.visibility === 'collapse' ||
+      cursor != null
+    )
+      return;
+    const ownOpacity = Number.parseFloat(style.opacity);
+    const alpha =
+      parent === content ? opacity : opacity * (Number.isFinite(ownOpacity) ? ownOpacity : 1);
+    if (alpha <= 0) return;
+    const children = parent.childNodes
+      ? [...parent.childNodes]
+      : parent.firstChild
+        ? [parent.firstChild]
+        : [];
+    for (const node of children) {
+      if (node.nodeType === 1) {
+        visit(node as HTMLElement, [...ancestors, node as HTMLElement], alpha);
+        continue;
+      }
+      if (node.nodeType !== 3) continue;
+      const text = node.textContent ?? '';
+      let current: TextLine | undefined;
+      let offset = 0;
+      for (const character of text) {
+        const next = offset + character.length;
+        if (character === '\n' || character === '\r') {
+          current = undefined;
+          offset = next;
+          continue;
+        }
+        range.setStart(node, offset);
+        range.setEnd(node, next);
+        const rect = range.getClientRects()[0];
+        offset = next;
+        if (!rect || rect.height <= 0 || (rect.width === 0 && !character.trim())) continue;
+        const top = rect.top - origin.top;
+        if (!current || Math.abs(current.top - top) > 0.5) {
+          current = { text: '', x: rect.left - origin.left, top, style, ancestors, opacity: alpha };
+          lines.push(current);
+        }
+        current.text += character;
+        current.x = Math.min(current.x, rect.left - origin.left);
+      }
     }
-    range.setStart(node, offset);
-    range.setEnd(node, next);
-    const rect = range.getClientRects()[0];
-    offset = next;
-    if (!rect || rect.height <= 0) continue;
-    const top = rect.top - origin.top;
-    if (!current || Math.abs(current.top - top) > 0.5) {
-      current = { text: '', x: rect.left - origin.left, top };
-      lines.push(current);
-    }
-    current.text += character;
-    current.x = Math.min(current.x, rect.left - origin.left);
+  };
+  try {
+    visit(content, [], 1);
+  } finally {
+    range.detach();
   }
-  range.detach();
   return lines;
+}
+
+function applyTextMaskAncestor(
+  context: CanvasRenderingContext2D,
+  node: HTMLElement,
+  state: TextMaskNodeStyle,
+  origin: DOMRect,
+): void {
+  const bounds = node.getBoundingClientRect();
+  const x = bounds.left - origin.left;
+  const y = bounds.top - origin.top;
+  if (state.transform && state.transform !== 'none') {
+    const matrix = new DOMMatrix(state.transform);
+    const [ox = 0, oy = 0] = state.transformOrigin
+      .split(' ')
+      .map((value) => Number.parseFloat(value) || 0);
+    context.translate(x + ox, y + oy);
+    context.transform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f);
+    context.translate(-x - ox, -y - oy);
+  }
+  const clips = (overflow: string) => ['hidden', 'clip', 'scroll', 'auto'].includes(overflow);
+  if (clips(state.computed.overflowX) || clips(state.computed.overflowY)) {
+    context.beginPath();
+    // Native text-animation clipping (for example Word Reveal) belongs to the ancestor before
+    // its inner run's translation. The measured box remains the browser's layout authority.
+    context.rect(x, y, bounds.width, bounds.height);
+    context.clip();
+  }
+}
+
+function setTextMaskFont(
+  context: CanvasRenderingContext2D,
+  style: CSSStyleDeclaration,
+  element: TextElement,
+): void {
+  context.font = `${style.fontStyle || 'normal'} ${style.fontWeight || element.fontWeight} ${style.fontSize || `${element.fontSize}px`} ${style.fontFamily || element.fontFamily}`;
+  context.fontKerning = style.fontKerning as CanvasFontKerning;
+  context.letterSpacing = style.letterSpacing === 'normal' ? '0px' : style.letterSpacing;
+  context.wordSpacing = style.wordSpacing === 'normal' ? '0px' : style.wordSpacing;
+  context.direction = style.direction === 'rtl' ? 'rtl' : 'ltr';
+  context.textAlign = 'left';
+  context.textBaseline = 'alphabetic';
+}
+
+function textMaskSnapshot(content: HTMLElement | null): unknown {
+  return content
+    ? [
+        content.style.cssText,
+        content.textContent,
+        [...(content.querySelectorAll?.('*') ?? [])].map((node) => [
+          (node as HTMLElement).style.cssText,
+          node.textContent,
+        ]),
+      ]
+    : null;
 }
 
 function textContent(host: HTMLElement): HTMLElement | null {
@@ -220,25 +362,8 @@ function paintTextMask(
     filter: 'none',
   });
   const content = original.cloneNode(true) as HTMLElement;
-  // Retain native fitting results, tracking and line grid, including programmatically loaded fonts.
-  for (const property of [
-    'font-family',
-    'font-size',
-    'font-weight',
-    'font-style',
-    'font-stretch',
-    'font-variant',
-    'font-feature-settings',
-    'font-kerning',
-    'letter-spacing',
-    'word-spacing',
-    'line-height',
-    'text-transform',
-    'direction',
-    'text-align',
-  ]) {
-    content.style.setProperty(property, computed.getPropertyValue(property));
-  }
+  const styles = new Map<HTMLElement, TextMaskNodeStyle>();
+  copyTextMaskStyles(original, content, view, styles);
   const transform = computed.transform;
   const transformOrigin = computed.transformOrigin;
   content.style.transform = 'none';
@@ -253,7 +378,7 @@ function paintTextMask(
   try {
     const origin = wrapper.getBoundingClientRect();
     const contentBounds = content.getBoundingClientRect();
-    const lines = textLines(content, origin);
+    const lines = textLines(content, origin, styles);
     context.scale(
       target.width / (layout.width + padding * 2),
       target.height / (layout.height + padding * 2),
@@ -283,13 +408,7 @@ function paintTextMask(
       );
       context.clip();
     }
-    context.font = `${computed.fontStyle || 'normal'} ${computed.fontWeight || element.fontWeight} ${computed.fontSize || `${element.fontSize}px`} ${computed.fontFamily || element.fontFamily}`;
-    context.fontKerning = computed.fontKerning as CanvasFontKerning;
-    context.letterSpacing = computed.letterSpacing === 'normal' ? '0px' : computed.letterSpacing;
-    context.wordSpacing = computed.wordSpacing === 'normal' ? '0px' : computed.wordSpacing;
-    context.direction = computed.direction === 'rtl' ? 'rtl' : 'ltr';
-    context.textAlign = 'left';
-    context.textBaseline = 'alphabetic';
+    setTextMaskFont(context, computed, element);
     context.fillStyle = '#ffffff';
     if (slot === 'stroke') {
       context.strokeStyle = '#ffffff';
@@ -301,20 +420,30 @@ function paintTextMask(
       // Match the native CSS text outline, instead of Canvas's default miter limit of ten.
       context.miterLimit = Number.isFinite(miterLimit) && miterLimit > 0 ? miterLimit : 4;
     }
-    const metrics = context.measureText('Mg');
-    const ascent = metrics.fontBoundingBoxAscent;
-    if (!Number.isFinite(ascent))
-      throw new Error('Shader text alpha requires browser font bounding-box metrics.');
     for (const line of lines) {
-      let text = transformedText(line.text, computed.textTransform);
-      if (shaderMaskUsesEllipsis(computed))
-        text = shaderMaskEllipsis(
-          text,
-          Math.max(0, layout.width - line.x),
-          (value) => context.measureText(value).width,
-        );
-      if (slot === 'stroke') context.strokeText(text, line.x, line.top + ascent);
-      else context.fillText(text, line.x, line.top + ascent);
+      context.save();
+      try {
+        for (const ancestor of line.ancestors) {
+          const state = styles.get(ancestor);
+          if (state) applyTextMaskAncestor(context, ancestor, state, origin);
+        }
+        context.globalAlpha = line.opacity;
+        setTextMaskFont(context, line.style, element);
+        const ascent = context.measureText('Mg').fontBoundingBoxAscent;
+        if (!Number.isFinite(ascent))
+          throw new Error('Shader text alpha requires browser font bounding-box metrics.');
+        let text = transformedText(line.text, line.style.textTransform);
+        if (shaderMaskUsesEllipsis(computed))
+          text = shaderMaskEllipsis(
+            text,
+            Math.max(0, layout.width - line.x),
+            (value) => context.measureText(value).width,
+          );
+        if (slot === 'stroke') context.strokeText(text, line.x, line.top + ascent);
+        else context.fillText(text, line.x, line.top + ascent);
+      } finally {
+        context.restore();
+      }
     }
   } finally {
     context.restore();
@@ -394,7 +523,7 @@ export function createShaderPaintMask(
         const content = textContent(baseHost);
         return (
           JSON.stringify([element.type, layout]) +
-          JSON.stringify([content?.style.cssText, content?.textContent, fontRevision])
+          JSON.stringify([textMaskSnapshot(content), fontRevision])
         );
       };
       key = snapshotKey();

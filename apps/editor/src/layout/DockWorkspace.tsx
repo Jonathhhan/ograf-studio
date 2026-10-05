@@ -1,3 +1,4 @@
+import { usePaneRequestStore } from '../state/paneRequestStore';
 import {
   Fragment,
   useEffect,
@@ -16,6 +17,7 @@ import { BrandKitPanel } from '../panels/BrandKitPanel';
 import { InspectorPanel } from '../panels/InspectorPanel';
 import { ScriptsPanel } from '../panels/ScriptsPanel';
 import { DataPanel } from '../panels/DataPanel';
+import { RulesPanel } from '../panels/RulesPanel';
 import { PreviewExportPanel } from '../panels/PreviewExportPanel';
 import { TimelinePanel } from '../panels/TimelinePanel';
 import { ResizeHandle } from './ResizeHandle';
@@ -28,6 +30,7 @@ import {
   revealDockPane,
   closeDockPane,
   createDefaultDockLayout,
+  DEFAULT_RULES_UNDOCKED_WIDTH,
   DOCK_PANE_LABELS,
   dockPaneAdjacentToTab,
   dockPaneToGroup,
@@ -35,6 +38,7 @@ import {
   dockZoneNearFloatingRect,
   dockZoneNearPointer,
   floatDockPane,
+  initialFloatingWidth,
   moveFloatingDockPane,
   parseDockLayout,
   reopenDockPane,
@@ -99,6 +103,8 @@ function PaneBody({ pane }: { pane: DockPaneId }) {
       return <ScriptsPanel />;
     case 'data':
       return <DataPanel />;
+    case 'rules':
+      return <RulesPanel />;
     case 'export':
       return <PreviewExportPanel />;
     case 'timeline':
@@ -629,6 +635,14 @@ export function DockWorkspace({
   useEffect(() => {
     if (proposalId) setLayout((current) => revealDockPane(current, 'chat'));
   }, [proposalId]);
+  const paneRequest = usePaneRequestStore((state) => state.request);
+  useEffect(() => {
+    if (paneRequest) setLayout((current) => revealDockPane(current, paneRequest.pane));
+  }, [paneRequest]);
+  const resetRequest = usePaneRequestStore((state) => state.resetRequest);
+  useEffect(() => {
+    if (resetRequest > 0) setLayout(createDefaultDockLayout());
+  }, [resetRequest]);
   const { windows: detachedWindows } = useDetachedWindows();
   const [draggingPane, setDraggingPane] = useState<DockPaneId | null>(null);
   const [dropTarget, setDropTarget] = useState<DockDropTarget | null>(null);
@@ -677,9 +691,11 @@ export function DockWorkspace({
       const preferred =
         paneCommand.pane === 'timeline'
           ? { width: 720, height: 340 }
-          : paneCommand.pane === 'chat' || paneCommand.pane === 'export'
-            ? { width: 460, height: 520 }
-            : { width: 380, height: 460 };
+          : paneCommand.pane === 'rules'
+            ? { width: DEFAULT_RULES_UNDOCKED_WIDTH, height: 460 }
+            : paneCommand.pane === 'chat' || paneCommand.pane === 'export'
+              ? { width: 460, height: 520 }
+              : { width: 380, height: 460 };
       const width = Math.max(240, Math.min(preferred.width, bounds.width - 24));
       const height = Math.max(160, Math.min(preferred.height, bounds.height - 24));
       const cascade = (current.floating.length % 5) * 18;
@@ -753,10 +769,16 @@ export function DockWorkspace({
       setLayout((current) => dockPaneToZone(current, pane, target));
     } else {
       const bounds = workspaceRef.current?.getBoundingClientRect();
+      const workspaceWidth = bounds?.width ?? 760;
+      const width = initialFloatingWidth(pane, workspaceWidth, 360);
       setLayout((current) =>
         floatDockPane(current, pane, {
-          x: Math.max(0, clientX - (bounds?.left ?? 0) - 180),
+          x: Math.max(
+            0,
+            Math.min(workspaceWidth - width, clientX - (bounds?.left ?? 0) - width / 2),
+          ),
           y: Math.max(0, clientY - (bounds?.top ?? 0) - 28),
+          width,
         }),
       );
     }
@@ -821,7 +843,12 @@ export function DockWorkspace({
 
   const floatAtCenter = (pane: DockPaneId) => {
     const bounds = workspaceRef.current?.getBoundingClientRect();
-    const width = Math.min(380, Math.max(280, (bounds?.width ?? 760) - 80));
+    const workspaceWidth = bounds?.width ?? 760;
+    const width = initialFloatingWidth(
+      pane,
+      workspaceWidth,
+      Math.min(380, Math.max(280, workspaceWidth - 80)),
+    );
     const height = Math.min(460, Math.max(220, (bounds?.height ?? 640) - 80));
     setLayout((current) =>
       floatDockPane(current, pane, {
@@ -840,10 +867,16 @@ export function DockWorkspace({
     if (!pane) return;
     if (target === 'float') {
       const bounds = workspaceRef.current?.getBoundingClientRect();
+      const workspaceWidth = bounds?.width ?? 760;
+      const width = initialFloatingWidth(pane, workspaceWidth, 360);
       setLayout((current) =>
         floatDockPane(current, pane, {
-          x: Math.max(0, event.clientX - (bounds?.left ?? 0) - 180),
+          x: Math.max(
+            0,
+            Math.min(workspaceWidth - width, event.clientX - (bounds?.left ?? 0) - width / 2),
+          ),
           y: Math.max(0, event.clientY - (bounds?.top ?? 0) - 28),
+          width,
         }),
       );
     } else {

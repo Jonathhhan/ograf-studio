@@ -6,11 +6,32 @@ export const DOCK_PANE_IDS = [
   'inspector',
   'data',
   'scripts',
+  'rules',
+
   'export',
   'timeline',
 ] as const;
 
 export type DockPaneId = (typeof DOCK_PANE_IDS)[number];
+export const DEFAULT_RULES_UNDOCKED_WIDTH = 800;
+
+export function detachedWindowWidth(pane: DockPaneId): number {
+  if (pane === 'rules') return DEFAULT_RULES_UNDOCKED_WIDTH;
+  if (pane === 'timeline') return 1100;
+  if (pane === 'export') return 1000;
+  return 480;
+}
+
+export function initialFloatingWidth(
+  pane: DockPaneId,
+  workspaceWidth: number,
+  otherPaneWidth: number,
+): number {
+  return pane === 'rules'
+    ? Math.max(240, Math.min(DEFAULT_RULES_UNDOCKED_WIDTH, workspaceWidth - 24))
+    : otherPaneWidth;
+}
+
 export type DockZone = 'left' | 'right' | 'top' | 'bottom';
 export type DockTabInsertSide = 'before' | 'after';
 
@@ -22,6 +43,8 @@ export const DOCK_PANE_LABELS: Record<DockPaneId, string> = {
   inspector: 'Properties',
   data: 'Data',
   scripts: 'Scripts',
+  rules: 'Rules',
+
   export: 'Preview & Export',
   timeline: 'Timeline',
 };
@@ -76,7 +99,8 @@ export function createDefaultDockLayout(): DockLayoutState {
       right: [
         {
           id: 'right-properties',
-          panes: ['inspector', 'brand-kit', 'data', 'scripts', 'export'],
+          panes: ['inspector', 'brand-kit', 'data', 'scripts', 'rules', 'export'],
+
           activePane: 'inspector',
           weight: 1,
         },

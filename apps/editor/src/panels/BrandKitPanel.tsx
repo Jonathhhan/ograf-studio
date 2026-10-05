@@ -7,6 +7,7 @@ import {
 } from '@ograf-editor/scene-model';
 import { useActiveComposition, useProjectStore } from '../state/projectStore';
 import { Panel } from './Panel';
+import { CollapsibleSection } from '../components/CollapsibleSection';
 import { ResourceTreeItem } from './ResourceTreeComponents';
 import './ResourcesPanel.css';
 import './BrandKitPanel.css';
@@ -45,79 +46,90 @@ export function BrandKitPanel() {
   return (
     <Panel title="Brand Kit">
       <div className="resources-panel brand-kit-panel">
-        <p className="inspector-hint" title="Playback updates can override these defaults.">
-          Palette colors update linked playback defaults.
-        </p>
-        <div className="brand-kit-palette">
-          {composition.designSystem.tokens
-            .filter((t) => t.type === 'color')
-            .map((token) => (
-              <label key={token.id} className="brand-kit-color">
-                <input
-                  aria-label={`Palette ${token.name}`}
-                  type="color"
-                  value={String(token.value).slice(0, 7)}
-                  onChange={(event) => updateDesignToken(token.id, { value: event.target.value })}
-                />
-                <span title={token.name}>{token.name}</span>
-              </label>
-            ))}
-        </div>
-        <div className="resources-tree-toolbar resources-style-pack-row">
-          <select
-            aria-label="Broadcast style pack"
-            value={selectedStylePack}
-            onChange={(event) => setSelectedStylePack(event.target.value as StylePackId)}
-          >
-            {STYLE_PACKS.map((pack) => (
-              <option key={pack.id} value={pack.id}>
-                {pack.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={() => applyStylePack(selectedStylePack)}>
-            Apply Pack
-          </button>
-        </div>
-        <div className="resources-tree-toolbar">
-          <span>
-            {appliedStylePack
-              ? `Applied: ${STYLE_PACKS.find((pack) => pack.id === appliedStylePack)?.name}`
-              : 'No pack applied'}
-          </span>
-          <button
-            type="button"
-            disabled={!appliedStylePack}
-            title={
-              composition.designSystem.stylePackRestore
-                ? 'Restore the fonts, colors and other styles recorded before the pack was applied.'
-                : 'This older applied pack has no saved original styles. Removal detaches its tokens; use Undo or saved source to recover earlier styling.'
-            }
-            onClick={removeStylePack}
-          >
-            Remove applied pack
-          </button>
-        </div>
-        {appliedStylePack && !composition.designSystem.stylePackRestore && (
-          <p className="inspector-hint">
-            Original styles were not saved with this older pack. Removal can only detach it.
+        <CollapsibleSection
+          sectionId="brand-kit.palette"
+          title="Palette & style pack"
+          contentClassName="brand-kit-section-content"
+        >
+          <p className="inspector-hint" title="Playback updates can override these defaults.">
+            Palette colors update linked playback defaults.
           </p>
-        )}
-        <div className="resources-tree-toolbar">
-          <input
-            aria-label="Brand kit name"
-            value={composition.designSystem.name}
-            onChange={(event) => setDesignSystemName(event.target.value)}
-          />
-          <button type="button" onClick={() => addDesignToken('color')}>
-            + Token
-          </button>
-        </div>
-        {composition.designSystem.tokens.length === 0 ? (
-          <p className="panel-placeholder">No design tokens.</p>
-        ) : (
-          <details className="brand-kit-advanced">
-            <summary>Advanced tokens ({composition.designSystem.tokens.length})</summary>
+          <div className="brand-kit-palette">
+            {composition.designSystem.tokens
+              .filter((t) => t.type === 'color')
+              .map((token) => (
+                <label key={token.id} className="brand-kit-color">
+                  <input
+                    aria-label={`Palette ${token.name}`}
+                    type="color"
+                    value={String(token.value).slice(0, 7)}
+                    onChange={(event) => updateDesignToken(token.id, { value: event.target.value })}
+                  />
+                  <span title={token.name}>{token.name}</span>
+                </label>
+              ))}
+          </div>
+          <div className="resources-tree-toolbar resources-style-pack-row">
+            <select
+              aria-label="Broadcast style pack"
+              value={selectedStylePack}
+              onChange={(event) => setSelectedStylePack(event.target.value as StylePackId)}
+            >
+              {STYLE_PACKS.map((pack) => (
+                <option key={pack.id} value={pack.id}>
+                  {pack.name}
+                </option>
+              ))}
+            </select>
+            <button type="button" onClick={() => applyStylePack(selectedStylePack)}>
+              Apply Pack
+            </button>
+          </div>
+          <div className="resources-tree-toolbar">
+            <span>
+              {appliedStylePack
+                ? `Applied: ${STYLE_PACKS.find((pack) => pack.id === appliedStylePack)?.name}`
+                : 'No pack applied'}
+            </span>
+            <button
+              type="button"
+              disabled={!appliedStylePack}
+              title={
+                composition.designSystem.stylePackRestore
+                  ? 'Restore the fonts, colors and other styles recorded before the pack was applied.'
+                  : 'This older applied pack has no saved original styles. Removal detaches its tokens; use Undo or saved source to recover earlier styling.'
+              }
+              onClick={removeStylePack}
+            >
+              Remove applied pack
+            </button>
+          </div>
+          {appliedStylePack && !composition.designSystem.stylePackRestore && (
+            <p className="inspector-hint">
+              Original styles were not saved with this older pack. Removal can only detach it.
+            </p>
+          )}
+        </CollapsibleSection>
+        <CollapsibleSection
+          sectionId="brand-kit.tokens"
+          title={`Design tokens (${composition.designSystem.tokens.length})`}
+          contentClassName="brand-kit-section-content"
+          actions={
+            <button type="button" onClick={() => addDesignToken('color')}>
+              + Token
+            </button>
+          }
+        >
+          <div className="resources-tree-toolbar">
+            <input
+              aria-label="Brand kit name"
+              value={composition.designSystem.name}
+              onChange={(event) => setDesignSystemName(event.target.value)}
+            />
+          </div>
+          {composition.designSystem.tokens.length === 0 ? (
+            <p className="panel-placeholder">No design tokens.</p>
+          ) : (
             <div className="resources-tree-items" role="group">
               {composition.designSystem.tokens.map((token) => {
                 const uses = tokenUsageCount(token.id);
@@ -218,8 +230,8 @@ export function BrandKitPanel() {
                 );
               })}
             </div>
-          </details>
-        )}
+          )}
+        </CollapsibleSection>
       </div>
     </Panel>
   );

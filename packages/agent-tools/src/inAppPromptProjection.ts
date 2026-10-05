@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const MAX_ESTIMATED_TOKENS = 9_000;
+const MAX_ESTIMATED_TOKENS = 9_300;
 const SOURCE_PATHS = [
   'skills/ograf-authoring/SKILL.md',
   'skills/ograf-authoring/references/tool-workflows.md',
@@ -29,6 +29,8 @@ export const STRIPPED_IN_APP_GUIDANCE = [
   'ograf_import_svg_bundle',
   '## References',
   'references/examples.md',
+  'references/charts.md',
+  '## Chart.js layers',
 ] as const;
 
 const PREAMBLE = `# OGraf Studio in-app authoring agent

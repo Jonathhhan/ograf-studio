@@ -4,6 +4,7 @@ import {
   type FieldDefinition,
   type FieldValue,
 } from '@ograf-editor/scene-model';
+import { resolvePreviewFieldValue } from './previewFieldValue';
 
 function hasOwn(record: Record<string, FieldValue>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
@@ -19,24 +20,7 @@ export function resolvePreviewFormValue(
     (typeof testValue !== 'string' || !field.options.some((option) => option.value === testValue))
   )
     return field.defaultValue;
-  const value = testValue ?? field.defaultValue;
-  if (field.type === 'select-multiple') {
-    if (!Array.isArray(value)) return field.defaultValue;
-    return value.filter(
-      (item) => typeof item === 'string' && field.options.some((option) => option.value === item),
-    );
-  }
-  if (field.type === 'object' && value && typeof value === 'object' && !Array.isArray(value)) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, childValue]) => {
-        const child = field.properties.find((property) => property.key === key);
-        return [key, child ? resolvePreviewFormValue(child, childValue) : childValue];
-      }),
-    );
-  }
-  if (field.type === 'array' && field.items && Array.isArray(value))
-    return value.map((item) => resolvePreviewFormValue(field.items!, item));
-  return value;
+  return resolvePreviewFieldValue(field, testValue)!;
 }
 
 function resolveFieldValue(
@@ -79,9 +63,7 @@ export function buildPreviewDataFromTestValues(
 ): Record<string, FieldValue> {
   return Object.fromEntries(
     composition.dataFields.map((field) => {
-      const value = hasOwn(testValuesByFieldId, field.id)
-        ? testValuesByFieldId[field.id]!
-        : field.defaultValue;
+      const value = resolvePreviewFieldValue(field, testValuesByFieldId[field.id])!;
       return [field.key, resolveFieldValue(composition, field, value)];
     }),
   );

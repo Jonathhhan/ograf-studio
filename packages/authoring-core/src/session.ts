@@ -153,7 +153,8 @@ export class AuthoringSession {
 
   replaceExternal(project: Project, reason = 'Editor project update'): AuthoringSessionSnapshot {
     const next = migrateProject(clone(project));
-    if (JSON.stringify(next) === JSON.stringify(this.#project)) return this.snapshot();
+    const current = migrateProject(clone(this.#project));
+    if (JSON.stringify(next) === JSON.stringify(current)) return this.snapshot();
     const affectedLayerIds = changedLayerIds(this.#project, next);
     // The browser owns undo history for direct UI edits. Mirroring every drag/keystroke into this
     // history would make an agent undo disagree with the editor's undo stack.

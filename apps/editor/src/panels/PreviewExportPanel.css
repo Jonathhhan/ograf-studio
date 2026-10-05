@@ -1,7 +1,15 @@
 .preview-export-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
+  margin: 0 -6px -4px;
+}
+
+.preview-section-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
 }
 
 .preview-export-heading {
@@ -227,6 +235,28 @@
   color: #ff8a8a;
 }
 
+.preview-playout-warnings {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #ffb86b 48%, var(--border));
+  border-left: 3px solid #ffb86b;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, #ffb86b 8%, transparent);
+  color: #ffcb8c;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.preview-playout-warnings strong {
+  display: block;
+  color: #ffd7a5;
+}
+
+.preview-playout-warnings ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
 .preview-validation-errors {
   margin: 0 0 8px;
   padding-left: 16px;
@@ -260,4 +290,65 @@
 /* Data overrides follow the shared two-column configuration-row contract. */
 .preview-data-form {
   gap: 0;
+}
+
+.preview-data-row {
+  min-height: var(--ui-row-height);
+  display: grid;
+  grid-template-columns: var(--property-label-width, minmax(118px, 42%)) minmax(0, 1fr);
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.preview-data-row > span:first-child {
+  width: auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 5px;
+  border-right: 1px solid var(--border);
+  color: var(--text);
+}
+
+.preview-data-row > input {
+  width: calc(100% - 8px);
+  margin: 1px 4px;
+}
+
+.preview-json-field {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 3px 4px;
+}
+
+.preview-json-field textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  resize: vertical;
+  font:
+    11px/1.35 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+
+.preview-json-field [role='alert'] {
+  color: #ff8b8b;
+  font-size: 11px;
+}
+
+.preview-developer > summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.preview-developer[open] > summary {
+  margin-bottom: 4px;
+}
+
+.preview-developer-error {
+  color: #ff8b8b;
 }

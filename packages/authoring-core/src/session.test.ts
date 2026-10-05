@@ -4,6 +4,8 @@ import {
   createFieldDefinition,
   createLayerOfKind,
   createProject,
+  createMediaCue,
+  getEffectStack,
   getLayerTransformAtFrame,
 } from '@ograf-editor/scene-model';
 import { AuthoringSession, RevisionConflictError } from './session';
@@ -69,6 +71,213 @@ describe('AuthoringSession', () => {
     expect(() => session.undo(session.revision)).toThrow('Nothing to undo');
     rename('latest');
     expect(session.undo(session.revision).project.name).toBe('small again');
+  });
+
+  it('authors one synchronized effects stack across a persistent canvas group', () => {
+    const project = createProject(),
+      composition = project.compositions[0]!,
+      first = createLayerOfKind('rectangle'),
+      second = createLayerOfKind('text');
+    first.groupId = 'score-group';
+    second.groupId = 'score-group';
+    composition.layers.push(first, second);
+    const session = new AuthoringSession(project, 'group-effects');
+    const added = session.apply({
+      expectedRevision: 0,
+      operations: [
+        {
+          type: 'add_effect',
+          groupId: 'score-group',
+          effectType: 'glow',
+          patch: { enabled: true, params: { radius: 12 } },
+        },
+      ],
+    });
+    const effectId = added.summary.generatedIds.find((entry) => entry.kind === 'effect')!.id;
+    expect(
+      added.project.compositions[0]!.layers.map(
+        (layer) => getEffectStack(layer.effects).find((effect) => effect.id === effectId)?.params,
+      ),
+    ).toEqual([
+      { radius: 12, color: '#a8d8ff', opacity: 0.5 },
+      { radius: 12, color: '#a8d8ff', opacity: 0.5 },
+    ]);
+
+    const updated = session.apply({
+      expectedRevision: 1,
+      operations: [
+        {
+          type: 'update_effect',
+          groupId: 'score-group',
+          effectId,
+          patch: { params: { radius: 24 } },
+        },
+      ],
+    });
+    expect(
+      updated.project.compositions[0]!.layers.map(
+        (layer) =>
+          getEffectStack(layer.effects).find((effect) => effect.id === effectId)?.params.radius,
+      ),
+    ).toEqual([24, 24]);
+
+    const removed = session.apply({
+      expectedRevision: 2,
+      operations: [{ type: 'remove_effect', groupId: 'score-group', effectId }],
+    });
+    expect(
+      removed.project.compositions[0]!.layers.every(
+        (layer) => !getEffectStack(layer.effects).some((effect) => effect.id === effectId),
+      ),
+    ).toBe(true);
+  });
+
+  it('authors, updates, and removes composition-level Media Cues', () => {
+    const session = new AuthoringSession(createProject(), 'media-cue');
+    const { id: _id, ...cue } = createMediaCue({
+      name: 'Program',
+      sources: [{ id: 'live', name: 'Program live', kind: 'live', tag: 'program.live' }],
+      activeSourceId: 'live',
+      trigger: { type: 'manual' },
+    });
+    const added = session.apply({
+      expectedRevision: 0,
+      operations: [{ type: 'add_media_cue', cue }],
+    });
+    const cueId = added.summary.generatedIds.find((item) => item.kind === 'media-cue')!.id;
+    expect(added.project.compositions[0]!.mediaCues[0]).toMatchObject({
+      id: cueId,
+      name: 'Program',
+      trigger: { type: 'manual' },
+    });
+    expect(added.project).toMatchObject({ supportsRealTime: true, supportsNonRealTime: false });
+    const updated = session.apply({
+      expectedRevision: 1,
+      operations: [
+        {
+          type: 'update_media_cue',
+          cueId,
+          patch: {
+            trigger: { type: 'timeline', startFrame: 6 },
+            transition: {
+              type: 'crossfade',
+              durationFrames: 8,
+              audio: 'crossfade',
+              onFailure: 'keep-current',
+            },
+          },
+        },
+      ],
+    });
+    expect(updated.project.compositions[0]!.mediaCues[0]).toMatchObject({
+      trigger: { type: 'timeline', startFrame: 6 },
+      transition: { type: 'crossfade', durationFrames: 8 },
+    });
+    const removed = session.apply({
+      expectedRevision: 2,
+      operations: [{ type: 'remove_media_cue', cueId }],
+    });
+    expect(removed.project.compositions[0]!.mediaCues).toEqual([]);
+  });
+
+  it('authors packaged audio layers and protects referenced assets', () => {
+    const session = new AuthoringSession(createProject(), 'audio');
+    const setup = session.apply({
+      expectedRevision: 0,
+      operations: [
+        { type: 'set_project_metadata', supportsNonRealTime: false },
+        {
+          type: 'add_asset',
+          name: 'Theme.mp3',
+          mimeType: 'audio/mpeg',
+          data: 'AAAA',
+        },
+      ],
+    });
+    const assetId = setup.summary.generatedIds.find((item) => item.kind === 'asset')!.id;
+    const added = session.apply({
+      expectedRevision: 1,
+      operations: [
+        {
+          type: 'add_layer',
+          kind: 'audio',
+          name: 'Theme',
+          element: {
+            src: `asset:${assetId}`,
+            volume: 0.75,
+            trimStartMs: 500,
+            trimEndMs: 2_500,
+            timelineStartMs: 1_000,
+          },
+        },
+      ],
+    });
+    expect(added.project.compositions[0]!.assets[0]).toMatchObject({
+      id: assetId,
+      kind: 'audio',
+      mimeType: 'audio/mpeg',
+    });
+    expect(added.project.compositions[0]!.layers[0]!.element).toMatchObject({
+      type: 'audio',
+      src: `asset:${assetId}`,
+      volume: 0.75,
+      trimStartMs: 500,
+      trimEndMs: 2_500,
+      timelineStartMs: 1_000,
+    });
+    expect(() =>
+      session.apply({
+        expectedRevision: 2,
+        operations: [{ type: 'remove_asset', assetId }],
+      }),
+    ).toThrow(/while referenced/);
+    const removed = session.apply({
+      expectedRevision: 2,
+      operations: [{ type: 'remove_asset', assetId, force: true }],
+    });
+    expect(removed.project.compositions[0]!.assets).toEqual([]);
+    expect(removed.project.compositions[0]!.layers[0]!.element).toMatchObject({
+      type: 'audio',
+      src: null,
+    });
+  });
+
+  it('authors typed visual rules against existing fields', () => {
+    const project = createProject();
+    const field = createFieldDefinition('text', { key: 'result', label: 'Result' });
+    project.compositions[0]!.dataFields.push(field);
+    const session = new AuthoringSession(project, 'visual-rules');
+    const added = session.apply({
+      expectedRevision: 0,
+      operations: [{ type: 'add_layer', kind: 'rectangle', name: 'Medal' }],
+    });
+    const layerId = added.summary.generatedIds[0]!.id;
+    const ruled = session.apply({
+      expectedRevision: 1,
+      operations: [
+        {
+          type: 'set_layer_visual_rules',
+          layerId,
+          rules: [
+            {
+              id: 'gold-rule',
+              name: 'Gold treatment',
+              enabled: true,
+              fieldId: field.id,
+              sourcePath: [],
+              operator: 'equals',
+              value: 'GOLD',
+              actions: [{ type: 'property', targetProperty: 'fill', value: '#d4af37' }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(ruled.project.compositions[0]!.layers[0]!.visualRules[0]).toMatchObject({
+      id: 'gold-rule',
+      fieldId: field.id,
+      operator: 'equals',
+    });
   });
 
   it('persists thumbnail frame preferences through metadata edits and undo', () => {
@@ -645,6 +854,13 @@ describe('AuthoringSession', () => {
           layerId: parentId!,
           groupId: 'lower-third',
           constraints: { horizontal: 'right', vertical: 'bottom' },
+          autoLayout: {
+            direction: 'horizontal',
+            gap: 16,
+            paddingLeft: 20,
+            align: 'center',
+            hugWidth: true,
+          },
         },
         {
           type: 'set_layer_layout',
@@ -668,6 +884,13 @@ describe('AuthoringSession', () => {
     expect(composition.layout.guides[0]).toMatchObject({ axis: 'vertical', position: 960 });
     expect(getLayerTransformAtFrame(parent, 12)).toMatchObject({ x: 400, y: 350 });
     expect(getLayerTransformAtFrame(child, 12)).toMatchObject({ x: 300, y: 250 });
+    expect(parent.autoLayout).toMatchObject({
+      direction: 'horizontal',
+      gap: 16,
+      paddingLeft: 20,
+      align: 'center',
+      hugWidth: true,
+    });
 
     session.apply({
       expectedRevision: 2,

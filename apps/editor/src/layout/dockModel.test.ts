@@ -3,6 +3,8 @@ import {
   activateDockPane,
   closeDockPane,
   createDefaultDockLayout,
+  DEFAULT_RULES_UNDOCKED_WIDTH,
+  detachedWindowWidth,
   DOCK_PANE_LABELS,
   dockPaneAdjacentToTab,
   dockPaneToGroup,
@@ -11,6 +13,7 @@ import {
   dockZoneNearPointer,
   findDockGroup,
   floatDockPane,
+  initialFloatingWidth,
   moveFloatingDockPane,
   parseDockLayout,
   reopenDockPane,
@@ -19,6 +22,17 @@ import {
 } from './dockModel';
 
 describe('dock layout model', () => {
+  it('starts undocked Rules at 800px when space allows without replacing saved widths', () => {
+    expect(DEFAULT_RULES_UNDOCKED_WIDTH).toBe(800);
+    expect(detachedWindowWidth('rules')).toBe(800);
+    expect(detachedWindowWidth('layers')).toBe(480);
+    expect(initialFloatingWidth('rules', 1600, 360)).toBe(800);
+    expect(initialFloatingWidth('rules', 700, 360)).toBe(676);
+    expect(initialFloatingWidth('layers', 1600, 360)).toBe(360);
+
+    const saved = floatDockPane(createDefaultDockLayout(), 'rules', { width: 700 });
+    expect(parseDockLayout(saved).floating[0]?.width).toBe(700);
+  });
   it('reveals AI review in its dock group and reopens a closed pane without floating it', () => {
     const initial = createDefaultDockLayout();
     const revealed = revealDockPane(initial, 'chat');
@@ -40,6 +54,8 @@ describe('dock layout model', () => {
       'brand-kit',
       'data',
       'scripts',
+      'rules',
+
       'export',
     ]);
     expect(layout.zones.bottom[0]?.panes).toEqual(['timeline']);
@@ -64,6 +80,8 @@ describe('dock layout model', () => {
       'brand-kit',
       'data',
       'scripts',
+      'rules',
+
       'export',
       'timeline',
     ]);
@@ -86,16 +104,19 @@ describe('dock layout model', () => {
       'brand-kit',
       'data',
       'scripts',
+      'rules',
     ]);
     expect(before.zones.right[0]?.activePane).toBe('export');
 
     const after = dockPaneAdjacentToTab(before, 'export', 'right-properties', 'scripts', 'after');
+
     expect(after.zones.right[0]?.panes).toEqual([
       'inspector',
       'brand-kit',
       'data',
       'scripts',
       'export',
+      'rules',
     ]);
   });
 
@@ -113,6 +134,8 @@ describe('dock layout model', () => {
       'timeline',
       'data',
       'scripts',
+      'rules',
+
       'export',
     ]);
     expect(moved.zones.bottom).toEqual([]);
@@ -183,8 +206,8 @@ describe('dock layout model', () => {
       ...Object.values(restored.zones).flatMap((groups) => groups.flatMap((group) => group.panes)),
       ...restored.floating.map((pane) => pane.pane),
     ];
-    expect(new Set(panes).size).toBe(9);
-    expect(panes).toHaveLength(9);
+    expect(new Set(panes).size).toBe(10);
+    expect(panes).toHaveLength(10);
     expect(restored.zones.left[0]?.activePane).toBe('layers');
   });
 

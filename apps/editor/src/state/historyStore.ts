@@ -114,6 +114,17 @@ export function remoteHistoryLabel(update: RemoteHistoryUpdate): string {
 
 /** Keep accepted batches in the same undo stack as direct editing, without echoing a server undo. */
 export function applyRemoteProjectUpdate(project: Project, update: RemoteHistoryUpdate): void {
+  // Same-project MCP echoes intentionally bypass the full loader to preserve exact browser edits.
+  // Establish only the new first-release collection; never infer it from experimental media data.
+  if (project.compositions.some((composition) => !Array.isArray(composition.mediaCues))) {
+    project = {
+      ...project,
+      compositions: project.compositions.map((composition) => ({
+        ...composition,
+        mediaCues: composition.mediaCues ?? [],
+      })),
+    };
+  }
   const current = useProjectStore.getState().project;
   if (documentEqual(current, project)) return;
   if (current.id !== project.id) {
@@ -206,6 +217,7 @@ function reconcileLayerSelection(): void {
 }
 
 export function undo(steps = 1): void {
+  if (steps === 1 && useSelectionStore.getState().undoDeselectAll()) return;
   window.clearTimeout(debounceTimer);
   flushPending();
   let restored = useProjectStore.getState().project;

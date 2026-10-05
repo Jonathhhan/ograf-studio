@@ -3,6 +3,8 @@ import {
   BLEND_MODES,
   EFFECT_TYPES,
   STYLE_PACK_IDS,
+  VISUAL_RULE_OPERATOR_VALUES,
+  VISUAL_RULE_TRIGGER_VALUES,
   type AnimatableLayerProperty,
   type DesignTokenTargetProperty,
   type FieldValue,
@@ -288,6 +290,123 @@ const effectPatchSchema = z
   })
   .strict();
 
+const mediaCueSourceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      kind: z.literal('clip'),
+      mediaType: z.enum(['audio', 'video']),
+      src: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      kind: z.literal('live'),
+      tag: z.string().min(1),
+      fallback: z.string().min(1).optional(),
+    })
+    .strict(),
+]);
+const mediaCueTriggerSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('timeline'), startFrame: frame }).strict(),
+  z.object({ type: z.literal('lifecycle'), keyframeId: z.string().min(1) }).strict(),
+  z.object({ type: z.literal('customAction'), actionId: z.string().min(1) }).strict(),
+  z.object({ type: z.literal('manual') }).strict(),
+]);
+const mediaCueTransitionSchema = z
+  .object({
+    type: z.enum(['cut', 'crossfade']),
+    durationFrames: z.number().int().nonnegative(),
+    audio: z.enum(['follow-picture', 'cut', 'crossfade']),
+    onFailure: z.enum(['keep-current', 'fallback', 'transparent']),
+  })
+  .strict();
+const mediaCueVisualSchema = z
+  .object({
+    targetLayerId: z.string().nullable(),
+    fit: z.enum(['cover', 'contain', 'fill']),
+    positionX: z.number().min(0).max(1),
+    positionY: z.number().min(0).max(1),
+  })
+  .strict();
+const mediaCueSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    name: z.string().min(1),
+    sources: z.array(mediaCueSourceSchema).min(1),
+    activeSourceId: z.string().nullable(),
+    trigger: mediaCueTriggerSchema,
+    trimStartMs: z.number().nonnegative(),
+    trimEndMs: z.number().positive().nullable(),
+    durationFrames: z.number().int().positive().nullable(),
+    loop: z.boolean(),
+    speed: z.number().min(0.1).max(16),
+    volume: z.number().min(0).max(1),
+    muted: z.boolean(),
+    retrigger: z.enum(['restart', 'resume', 'ignore']),
+    transition: mediaCueTransitionSchema,
+    visual: mediaCueVisualSchema,
+  })
+  .strict();
+const mediaCuePatchSchema = mediaCueSchema.omit({ id: true }).partial().strict();
+
+const visualRuleConditionShape = {
+  fieldId: z.string(),
+  sourcePath: z.array(z.string()).optional(),
+  operator: z.enum(VISUAL_RULE_OPERATOR_VALUES).optional(),
+  value: z.unknown().optional(),
+  compareFieldId: z.string().optional(),
+  compareSourcePath: z.array(z.string()).optional(),
+  ignoreCase: z.boolean().optional(),
+};
+
+const visualRuleConditionSchema = z.object(visualRuleConditionShape).strict();
+
+const visualRuleTargetShape = {
+  targetLayerId: z.string().optional(),
+  transitionFrames: z.number().optional(),
+};
+
+const layerMotionSpecSchema = z
+  .object({
+    style: z.enum(['fade', 'slide', 'fly', 'focus']),
+    durationFrames: z.number().int().positive(),
+  })
+  .catchall(z.unknown())
+  .superRefine((spec, context) => {
+    const allowed = new Set(['style', 'direction', 'durationFrames', 'distance', 'easing']);
+    for (const key of Object.keys(spec))
+      if (!allowed.has(key))
+        context.addIssue({ code: 'custom', path: [key], message: 'Unknown motion setting.' });
+    if (!['fade', 'slide', 'fly', 'focus'].includes(String(spec.style)))
+      context.addIssue({ code: 'custom', path: ['style'], message: 'Unknown motion style.' });
+    if (!Number.isInteger(spec.durationFrames) || Number(spec.durationFrames) < 1)
+      context.addIssue({
+        code: 'custom',
+        path: ['durationFrames'],
+        message: 'Use positive frames.',
+      });
+    if (
+      spec.direction !== undefined &&
+      !['left', 'right', 'up', 'down'].includes(String(spec.direction))
+    )
+      context.addIssue({ code: 'custom', path: ['direction'], message: 'Unknown direction.' });
+    if (
+      spec.distance !== undefined &&
+      !(typeof spec.distance === 'number' && Number.isFinite(spec.distance) && spec.distance >= 0)
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['distance'],
+        message: 'Use a non-negative distance.',
+      });
+    if (spec.easing !== undefined && !easingSchema.safeParse(spec.easing).success)
+      context.addIssue({ code: 'custom', path: ['easing'], message: 'Unknown easing preset.' });
+  });
+
 export const authoringOperationSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('set_layer_lighting'),
@@ -301,6 +420,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     layerId,
     layerName,
+    groupId: z.string().min(1).optional(),
     effectType: z.enum(EFFECT_TYPES),
     patch: effectPatchSchema.optional(),
     index: z.number().int().nonnegative().optional(),
@@ -310,6 +430,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     layerId,
     layerName,
+    groupId: z.string().min(1).optional(),
     effectId: z.string(),
     patch: effectPatchSchema,
     scope: z.enum(['authored', 'frame']).default('authored'),
@@ -320,6 +441,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     layerId,
     layerName,
+    groupId: z.string().min(1).optional(),
     effectId: z.string(),
   }),
   z.object({
@@ -327,6 +449,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     layerId,
     layerName,
+    groupId: z.string().min(1).optional(),
     effectId: z.string(),
   }),
   z.object({
@@ -334,6 +457,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     compositionId,
     layerId,
     layerName,
+    groupId: z.string().min(1).optional(),
     effectIds: z.array(z.string()).max(16),
   }),
 
@@ -367,6 +491,7 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     height: z.number().positive().optional(),
     frameRate: z.number().positive().optional(),
     updateTransitionFrames: z.number().int().nonnegative().optional(),
+    updateInterruption: z.enum(['queue', 'replace']).optional(),
     backgroundColor: z.string().optional(),
   }),
   z.object({
@@ -379,7 +504,9 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
         showTitleSafe: z.boolean().optional(),
         showCenterMarker: z.boolean().optional(),
         dimOutsideCanvas: z.boolean().optional(),
-        presentationBackground: z.enum(['none', 'big-buck-bunny', 'still-image']).optional(),
+        presentationBackground: z
+          .enum(['none', 'big-buck-bunny', 'still-image', 'webcam'])
+          .optional(),
         presentationBackgroundImageSource: z.string().max(2048).optional(),
         presentationBackgroundImageName: z.string().max(260).optional(),
         snappingEnabled: z.boolean().optional(),
@@ -451,6 +578,12 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     type: z.literal('remove_lifecycle_step'),
     compositionId,
     keyframeId: z.string(),
+  }),
+  z.object({
+    type: z.literal('retime_animation_phase'),
+    compositionId,
+    phase: z.enum(['in', 'on-air', 'out', 'entire']),
+    targetFrames: z.number().int().min(1),
   }),
   z.object({
     type: z.literal('add_canvas_guide'),
@@ -549,6 +682,11 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
       'image/gif',
       'image/webp',
       'image/svg+xml',
+      'video/mp4',
+      'video/webm',
+      'audio/mpeg',
+      'audio/wav',
+      'audio/ogg',
       'font/ttf',
       'font/otf',
       'font/woff',
@@ -585,11 +723,28 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     force: z.boolean().default(false),
   }),
   z.object({
+    type: z.literal('add_media_cue'),
+    compositionId,
+    cue: mediaCueSchema,
+  }),
+  z.object({
+    type: z.literal('update_media_cue'),
+    compositionId,
+    cueId: z.string().min(1),
+    patch: mediaCuePatchSchema,
+  }),
+  z.object({
+    type: z.literal('remove_media_cue'),
+    compositionId,
+    cueId: z.string().min(1),
+  }),
+  z.object({
     type: z.literal('add_layer'),
     compositionId,
     kind: z.enum([
       'rectangle',
       'ellipse',
+      'chart',
       'text',
       'image',
       'path',
@@ -768,6 +923,192 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
       })
       .strict()
       .optional(),
+    autoLayout: z
+      .object({
+        direction: z.enum(['none', 'horizontal', 'vertical']).optional(),
+        gap: z.number().min(0).optional(),
+        paddingTop: z.number().min(0).optional(),
+        paddingRight: z.number().min(0).optional(),
+        paddingBottom: z.number().min(0).optional(),
+        paddingLeft: z.number().min(0).optional(),
+        align: z.enum(['start', 'center', 'end', 'stretch']).optional(),
+        hugWidth: z.boolean().optional(),
+        hugHeight: z.boolean().optional(),
+        minWidth: z.number().min(0).optional(),
+        maxWidth: z.number().min(0).optional(),
+        collapseHidden: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    updateTransition: z
+      .object({
+        style: z
+          .enum([
+            'inherit',
+            'none',
+            'crossfade',
+            'slide-left',
+            'slide-right',
+            'slide-up',
+            'slide-down',
+          ])
+          .optional(),
+        durationFrames: z.number().int().min(0).optional(),
+        distance: z.number().min(0).optional(),
+      })
+      .strict()
+      .optional(),
+    motionPath: z
+      .object({
+        sourceLayerId: z.string().min(1),
+        progress: z.number().min(0).max(1),
+        orientToPath: z.boolean(),
+        offsetX: z.number(),
+        offsetY: z.number(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+  }),
+  z.object({
+    type: z.literal('set_layer_motion'),
+    compositionId,
+    layerId,
+    layerName,
+    side: z.enum(['in', 'out']),
+    spec: layerMotionSpecSchema.nullable(),
+  }),
+  z.object({
+    type: z.literal('set_layer_visual_rules'),
+    compositionId,
+    layerId,
+    layerName,
+    rules: z.array(
+      z
+        .object({
+          id: z.string().min(1),
+          name: z.string().min(1),
+          enabled: z.boolean(),
+          trigger: z.enum(VISUAL_RULE_TRIGGER_VALUES).optional(),
+          ...visualRuleConditionShape,
+          fieldId: z.string().optional(),
+          conditions: z.array(z.record(z.string(), z.unknown())).optional(),
+          match: z.enum(['all', 'any']).optional(),
+          eventId: z.string().optional(),
+          delayFrames: z.number().optional(),
+          actions: z.array(
+            z.discriminatedUnion('type', [
+              z
+                .object({
+                  type: z.enum(['visibility', 'toggle-visibility']),
+                  visible: z.boolean().optional(),
+                  ...visualRuleTargetShape,
+                })
+                .strict(),
+              z
+                .object({
+                  type: z.literal('property'),
+                  targetProperty: z.string().min(1),
+                  value: z.unknown(),
+                  ...visualRuleTargetShape,
+                })
+                .strict(),
+              z.object({ type: z.literal('custom-action'), actionId: z.string().min(1) }).strict(),
+              z.object({ type: z.literal('play-sound'), cueId: z.string().min(1) }).strict(),
+              z
+                .object({
+                  type: z.literal('take-media'),
+                  cueId: z.string().min(1),
+                  sourceId: z.string().min(1).optional(),
+                })
+                .strict(),
+              z
+                .object({ type: z.literal('shader-animation'), actionId: z.string().min(1) })
+                .strict(),
+            ]),
+          ),
+        })
+        .strict()
+        .superRefine((rule, context) => {
+          const trigger = rule.trigger ?? 'data';
+          for (const [index, condition] of (rule.conditions ?? []).entries()) {
+            const parsed = visualRuleConditionSchema.safeParse(condition);
+            if (!parsed.success)
+              for (const issue of parsed.error.issues)
+                context.addIssue({
+                  code: 'custom',
+                  path: ['conditions', index, ...issue.path.map(String)],
+                  message: issue.message,
+                });
+          }
+          if (trigger === 'data' && !rule.fieldId) {
+            context.addIssue({
+              code: 'custom',
+              path: ['fieldId'],
+              message: 'Data rules require a fieldId; other triggers do not.',
+            });
+          }
+          if (trigger === 'custom-action' && !rule.eventId) {
+            context.addIssue({
+              code: 'custom',
+              path: ['eventId'],
+              message: 'custom-action rules name the triggering custom actionId in eventId.',
+            });
+          }
+          const conditions = [
+            ...(trigger === 'data' ? [rule] : []),
+            ...(rule.conditions ?? []).map((condition) => ({
+              operator: String(condition.operator ?? ''),
+            })),
+          ];
+          if (
+            trigger !== 'data' &&
+            conditions.some((condition) =>
+              ['changed', 'increased', 'decreased'].includes(condition.operator ?? ''),
+            )
+          ) {
+            context.addIssue({
+              code: 'custom',
+              path: ['conditions'],
+              message: 'changed/increased/decreased watch data, so they need a data trigger.',
+            });
+          }
+          const isState =
+            trigger === 'hover' ||
+            (trigger === 'data' &&
+              !conditions.some((condition) =>
+                ['changed', 'increased', 'decreased'].includes(condition.operator ?? ''),
+              ));
+          if (isState && (rule.delayFrames ?? 0) > 0) {
+            context.addIssue({
+              code: 'custom',
+              path: ['delayFrames'],
+              message: 'Delays apply to event triggers only.',
+            });
+          }
+          for (const [index, action] of rule.actions.entries()) {
+            if (action.type === 'visibility' && action.visible === undefined)
+              context.addIssue({
+                code: 'custom',
+                path: ['actions', index, 'visible'],
+                message: 'visibility actions need visible; use toggle-visibility to flip.',
+              });
+            if (action.type === 'toggle-visibility' && action.visible !== undefined)
+              context.addIssue({
+                code: 'custom',
+                path: ['actions', index, 'visible'],
+                message: 'toggle-visibility flips the current visibility; omit visible.',
+              });
+          }
+          if (isState && rule.actions.some((action) => action.type === 'toggle-visibility')) {
+            context.addIssue({
+              code: 'custom',
+              path: ['actions'],
+              message: 'toggle-visibility needs an event trigger; state rules use visibility.',
+            });
+          }
+        }),
+    ),
   }),
   z.object({
     type: z.literal('update_element'),
@@ -846,6 +1187,12 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
       .union([
         z.object({ type: z.literal('lifecycle') }).strict(),
         z.object({ type: z.literal('step'), stepKeyframeId: z.string().min(1) }).strict(),
+        z
+          .object({
+            type: z.literal('customAction'),
+            customActionId: z.string().min(1),
+          })
+          .strict(),
       ])
       .optional(),
     durationFrames: z.number().int().positive().optional(),
@@ -988,6 +1335,11 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     offsetPerItem: z.object({ x: z.number(), y: z.number() }).strict(),
     capacity: z.number().int().min(1).max(100).default(12),
     overflow: z.literal('truncate').default('truncate'),
+    itemKeyPath: z.array(z.string()).default([]),
+    sortPath: z.array(z.string()).default([]),
+    sortDirection: z.enum(['none', 'ascending', 'descending']).default('none'),
+    pageSize: z.number().int().min(0).max(100).default(0),
+    page: z.number().int().min(0).default(0),
   }),
   z.object({
     type: z.literal('update_runtime_collection'),
@@ -1002,6 +1354,11 @@ export const authoringOperationSchema = z.discriminatedUnion('type', [
     offsetPerItem: z.object({ x: z.number(), y: z.number() }).strict().optional(),
     capacity: z.number().int().min(1).max(100).optional(),
     overflow: z.literal('truncate').optional(),
+    itemKeyPath: z.array(z.string()).optional(),
+    sortPath: z.array(z.string()).optional(),
+    sortDirection: z.enum(['none', 'ascending', 'descending']).optional(),
+    pageSize: z.number().int().min(0).max(100).optional(),
+    page: z.number().int().min(0).optional(),
   }),
   z.object({
     type: z.literal('remove_runtime_collection'),

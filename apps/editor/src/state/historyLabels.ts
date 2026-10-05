@@ -23,12 +23,14 @@ function describeLayerChange(before: Layer, after: Layer): string {
     before.groupId !== after.groupId ||
     before.parentId !== after.parentId ||
     before.clipChildren !== after.clipChildren ||
-    !same(before.constraints, after.constraints)
+    !same(before.constraints, after.constraints) ||
+    !same(before.autoLayout, after.autoLayout)
   ) {
     return `Change ${name} layer settings`;
   }
   if (
     !same(before.bindings, after.bindings) ||
+    !same(before.visualRules, after.visualRules) ||
     !same(before.semantics, after.semantics) ||
     !same(before.designTokenBindings, after.designTokenBindings) ||
     !same(before.componentLink, after.componentLink)
@@ -81,6 +83,7 @@ function describeCompositionChange(before: Composition, after: Composition): str
   if (!same(before.designSystem, after.designSystem)) return 'Edit Brand Kit';
   if (!same(before.components, after.components)) return 'Edit components';
   if (!same(before.customActions, after.customActions)) return 'Edit custom actions';
+  if (!same(before.mediaCues, after.mediaCues)) return 'Edit media cues';
   if (!same(before.runtimeCollections, after.runtimeCollections)) return 'Edit runtime collections';
   return 'Edit composition';
 }

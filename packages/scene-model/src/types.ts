@@ -31,7 +31,7 @@ export interface GradientPaint {
   stops: GradientStop[];
 }
 
-export type Paint = string | GradientPaint | ShaderPaint;
+export type Paint = string | GradientPaint | ShaderPaint | MediaPaint;
 
 export interface CornerRadii {
   topLeft: number;
@@ -55,6 +55,74 @@ export interface EllipseElement {
   strokeWidth: number;
 }
 
+export type ChartPreset =
+  | 'bar'
+  | 'horizontal-bar'
+  | 'stacked-bar'
+  | 'line'
+  | 'area'
+  | 'pie'
+  | 'doughnut'
+  | 'radar'
+  | 'polar-area';
+
+export interface ChartAnimation {
+  /** Frame-sampled entrance, shared by timeline playback and OGraf seeking. */
+  type: 'none' | 'grow' | 'reveal' | 'fade';
+  durationFrames: number;
+  delayFrames: number;
+  /** Additional start delay per label or data point. */
+  staggerFrames: number;
+  easing: EasingPreset;
+  /** Replay the entrance when bound chart data changes through updateAction. */
+  replayOnUpdate: boolean;
+}
+
+/** JSON-only Chart.js input; projects cannot include executable callbacks or plugins. */
+export interface ChartElement {
+  type: 'chart';
+  preset: ChartPreset;
+  data: {
+    labels: string[];
+    datasets: Array<{
+      label: string;
+      data: number[];
+      backgroundColor: string | string[];
+      borderColor: string;
+    }>;
+  };
+  textColor: string;
+  fontSize: number;
+  showLegend: boolean;
+  showGrid: boolean;
+  /** Absent preserves the static rendering of charts authored before animation support. */
+  animation?: ChartAnimation;
+}
+
+export interface TextRun {
+  text: string;
+  color?: string;
+  fontWeight?: number;
+  fontStyle?: 'normal' | 'italic';
+  fontFamily?: string;
+}
+
+export interface TextAnimation {
+  /** Frame-sampled segment preset, starting at the lifecycle Start frame. */
+  type: 'none' | 'typewriter' | 'fade' | 'rise' | 'pop' | 'word-reveal';
+  /** Unicode grapheme clusters keep emoji/combining marks intact; word mode reveals whole tokens. */
+  split: 'grapheme' | 'word';
+  /** Fixed OGraf-frame duration keeps realtime playback and non-realtime seeking deterministic. */
+  durationFrames: number;
+  cursor: 'none' | 'bar' | 'block';
+  /** Deterministic cursor blink period in OGraf frames. */
+  cursorBlinkFrames: number;
+  /** Replay after a content-bound data value changes through updateAction. */
+  replayOnUpdate: boolean;
+  /** Optional public OGraf customAction id that replays this text animation. */
+  customActionId: string | null;
+}
+
 export interface TextElement {
   type: 'text';
   content: string;
@@ -72,7 +140,6 @@ export interface TextElement {
   fontWeight: number;
   textAlign: 'left' | 'center' | 'right';
   /** Missing retains legacy LTR direction. */
-  direction?: 'auto' | 'ltr' | 'rtl';
   /** Unitless line-height multiplier retained across font-size changes. */
   lineHeight: number;
   /** Additional tracking in authored composition pixels. */
@@ -86,13 +153,17 @@ export interface TextElement {
   overflowPolicy: 'visible' | 'clip' | 'ellipsis';
   /** Squeeze deliberately scales glyph width and height independently to fill the authored box. */
   autoFit: 'auto-size' | 'shrink-to-fit' | 'fit-to-width' | 'squeeze' | 'fixed';
+  runs: TextRun[];
+  direction: 'auto' | 'ltr' | 'rtl';
+  language: string;
+  textAnimation: TextAnimation;
 }
 
 export interface ImageElement {
   type: 'image';
   src: string | null;
   /** Procedural paint clipped by the source image alpha; absent retains source pixels. */
-  fill?: ShaderPaint;
+  fill?: ShaderPaint | MediaPaint;
 }
 
 /**
@@ -111,6 +182,8 @@ export interface PathElement {
   strokeWidth: number;
   viewBoxWidth: number;
   viewBoxHeight: number;
+  /** Optional nine-slice source insets; destination edge bands retain these pixel sizes. */
+  stretchInsets?: { left: number; right: number; top: number; bottom: number };
 }
 
 /** Editable vector sources shared by every instance of a procedural pattern. */
@@ -202,7 +275,7 @@ export interface ImageSequenceElement {
   frames: string[];
   fps: number;
   loop: boolean;
-  fill?: ShaderPaint;
+  fill?: ShaderPaint | MediaPaint;
 }
 
 /** A self-contained Bodymovin/Lottie document rendered from the composition's absolute clock. */
@@ -225,7 +298,7 @@ export interface LottieElement {
   type: 'lottie';
   animationData: LottieAnimationData | null;
   speed: number;
-  fill?: ShaderPaint;
+  fill?: ShaderPaint | MediaPaint;
 }
 
 /** Self-contained single-pass GLSL mainImage, driven by the composition clock in WebGL2. */
@@ -262,6 +335,37 @@ export interface ShaderPaint {
   inputImage?: ShaderImageInput;
 }
 
+export type MediaPaintFit = 'cover' | 'contain' | 'fill';
+
+export type MediaPaintSource =
+  { kind: 'clip'; src: string } | { kind: 'live'; tag: string; fallback?: string };
+
+/** Moving-image paint clipped by the object's native geometry or alpha. Audio is never emitted. */
+export interface MediaPaint {
+  type: 'media';
+  source: MediaPaintSource;
+  fit: MediaPaintFit;
+  /** Normalized focal point used by cover/contain placement. */
+  positionX: number;
+  positionY: number;
+  loop: boolean;
+  speed: number;
+  offsetMs: number;
+  trimEndMs: number | null;
+  timelineStartMs: number;
+  muted: true;
+}
+
+export interface AudioElement {
+  type: 'audio';
+  src: string | null;
+  volume: number;
+  loop: boolean;
+  trimStartMs: number;
+  trimEndMs: number | null;
+  timelineStartMs: number;
+}
+
 /** @deprecated Import compatibility only; current scenes use a rectangle with ShaderPaint. */
 export type ShaderElement = ShaderPaint;
 
@@ -274,12 +378,14 @@ export interface ShaderResource {
 export type Element =
   | RectangleElement
   | EllipseElement
+  | ChartElement
   | TextElement
   | ImageElement
   | PathElement
   | PatternElement
   | ImageSequenceElement
   | LottieElement
+  | AudioElement
   | ShaderElement;
 export type ElementType = Element['type'];
 
@@ -293,12 +399,147 @@ export interface LayerBinding {
   valueMap?: Record<string, string | number | boolean | GradientPaint>;
 }
 
+export type VisualRuleOperator =
+  | 'equals'
+  | 'not-equals'
+  | 'empty'
+  | 'not-empty'
+  | 'greater-than'
+  | 'less-than'
+  | 'greater-or-equal'
+  | 'less-or-equal'
+  /** Inclusive numeric range; `value` is a `[min, max]` pair. */
+  | 'between'
+  | 'contains'
+  | 'not-contains'
+  | 'starts-with'
+  | 'ends-with'
+  /** `value` is a list, or a comma-separated string. */
+  | 'one-of'
+  | 'not-one-of'
+  | 'changed'
+  | 'increased'
+  | 'decreased';
+
+/**
+ * `data` and `hover` are states: their actions apply while the condition holds and revert when it
+ * stops. Every other trigger is an event whose actions persist until a later rule replaces them.
+ */
+export type VisualRuleTrigger =
+  | 'data'
+  | 'hover'
+  | 'click'
+  | 'double-click'
+  | 'pointer-enter'
+  | 'pointer-leave'
+  /** The graphic reached its first step from the Start state. */
+  | 'play'
+  /** A step was reached; `eventId` names the step keyframe, empty means any step. */
+  | 'step'
+  /** The graphic started leaving towards its End state. */
+  | 'stop'
+  /** A custom action ran; `eventId` names the public custom action id. */
+  | 'custom-action';
+
+export type VisualRuleMatch = 'all' | 'any';
+
+/** One comparison against runtime data. */
+export interface VisualRuleCondition {
+  fieldId: string;
+  sourcePath: string[];
+  operator: VisualRuleOperator;
+  /** Literal comparison value; `[min, max]` for `between`, a list for `one-of`. */
+  value?: unknown;
+  /** Compare against another data field instead of the literal `value`. */
+  compareFieldId?: string;
+  compareSourcePath?: string[];
+  /** Text comparisons ignore letter case. */
+  ignoreCase?: boolean;
+}
+
+/** Absent `targetLayerId` means the layer that owns the rule. */
+export type VisualRuleAction =
+  | { type: 'visibility'; visible: boolean; targetLayerId?: string; transitionFrames?: number }
+  /** Event triggers only: flips the target's current visibility. */
+  | { type: 'toggle-visibility'; targetLayerId?: string; transitionFrames?: number }
+  | {
+      type: 'property';
+      targetProperty: string;
+      value: unknown;
+      targetLayerId?: string;
+      /** Numeric and colour values animate over this many frames; other values switch. */
+      transitionFrames?: number;
+    }
+  | { type: 'custom-action'; actionId: string }
+  | { type: 'play-sound'; cueId: string }
+  | { type: 'take-media'; cueId: string; sourceId?: string }
+  | { type: 'shader-animation'; actionId: string };
+
+/**
+ * The inherited condition is the primary data condition of a `data` rule. `conditions` add more
+ * data conditions, combined with the primary one by `match`; on every other trigger they act as a
+ * guard that must also hold when the event fires.
+ */
+export interface LayerVisualRule extends VisualRuleCondition {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** Missing in older projects means a data condition. */
+  trigger?: VisualRuleTrigger;
+  conditions?: VisualRuleCondition[];
+  /** How the conditions combine; absent means `all`. */
+  match?: VisualRuleMatch;
+  /** Step keyframe id for `step`, public custom action id for `custom-action`. */
+  eventId?: string;
+  /** Event triggers only: wait this many frames before running the actions. */
+  delayFrames?: number;
+  actions: VisualRuleAction[];
+}
+
 export type HorizontalConstraint = 'left' | 'right' | 'left-right' | 'center' | 'scale';
 export type VerticalConstraint = 'top' | 'bottom' | 'top-bottom' | 'center' | 'scale';
 
 export interface LayerConstraints {
   horizontal: HorizontalConstraint;
   vertical: VerticalConstraint;
+}
+
+export type AutoLayoutDirection = 'none' | 'horizontal' | 'vertical';
+export type AutoLayoutAlignment = 'start' | 'center' | 'end' | 'stretch';
+
+/** Flow layout applied to this layer's direct children in paint order. */
+export interface LayerAutoLayout {
+  direction: AutoLayoutDirection;
+  gap: number;
+  paddingTop: number;
+  paddingRight: number;
+  paddingBottom: number;
+  paddingLeft: number;
+  align: AutoLayoutAlignment;
+  hugWidth: boolean;
+  hugHeight: boolean;
+  /** Zero disables the corresponding authored clamp. */
+  minWidth: number;
+  maxWidth: number;
+  collapseHidden: boolean;
+}
+
+export type LayerUpdateTransitionStyle =
+  'inherit' | 'none' | 'crossfade' | 'slide-left' | 'slide-right' | 'slide-up' | 'slide-down';
+
+export interface LayerUpdateTransition {
+  style: LayerUpdateTransitionStyle;
+  /** Zero inherits the composition update duration. */
+  durationFrames: number;
+  distance: number;
+}
+
+export interface LayerMotionPath {
+  sourceLayerId: string;
+  progress: number;
+  orientToPath: boolean;
+  offsetX: number;
+  offsetY: number;
 }
 
 export interface LayerEffects {
@@ -477,6 +718,7 @@ export type AnimatableLayerProperty =
   | 'dropShadowOffsetX'
   | 'dropShadowOffsetY'
   | 'dropShadowBlur'
+  | 'motionPathProgress'
   | GradientStopOffsetProperty
   | ShaderAnimationProperty;
 
@@ -546,8 +788,11 @@ export type LayerAnimationTracks = Partial<
   Record<AnimatableLayerProperty, LayerPropertyKeyframe[]>
 >;
 
-/** When a local loop is active relative to the OGraf lifecycle. */
-export type LayerLoopActivation = { type: 'step'; stepKeyframeId: string } | { type: 'lifecycle' };
+/** When a local property clip is active relative to the OGraf lifecycle or a custom action. */
+export type LayerLoopActivation =
+  | { type: 'step'; stepKeyframeId: string }
+  | { type: 'lifecycle' }
+  | { type: 'customAction'; customActionId: string };
 
 /**
  * A layer-local animation clip. Its keys use a local 0..durationFrames ruler and never become
@@ -566,6 +811,27 @@ export interface LayerLoopClip {
 }
 
 /** A same-composition matte. Path mode uses geometry; alpha mode uses painted transparency. */
+/** Fade; Slide moves a short distance while fading; Fly enters from off-canvas; Focus un-blurs. */
+export type LayerMotionStyle = 'fade' | 'slide' | 'fly' | 'focus';
+/** Where an entrance comes from, or where an exit goes. */
+export type LayerMotionDirection = 'left' | 'right' | 'up' | 'down';
+
+export interface LayerMotionSpec {
+  style: LayerMotionStyle;
+  /** Slide and Fly only. */
+  direction?: LayerMotionDirection;
+  /** Frames of motion, ending at the first Step (in) or at End (out). */
+  durationFrames: number;
+  /** Slide only: travel in composition pixels. */
+  distance?: number;
+  easing?: EasingPreset;
+}
+
+export interface LayerMotion {
+  in: LayerMotionSpec | null;
+  out: LayerMotionSpec | null;
+}
+
 export interface LayerMask {
   sourceLayerId: string;
   mode: 'alpha' | 'path';
@@ -609,6 +875,15 @@ export interface Layer {
   mask: LayerMask | null;
   /** Rules applied when the composition dimensions change; results are baked into layer tracks. */
   constraints: LayerConstraints;
+  /** Optional runtime flow for direct children; ordinary parent constraints remain independent. */
+  autoLayout: LayerAutoLayout;
+  updateTransition: LayerUpdateTransition;
+  motionPath: LayerMotionPath | null;
+  /**
+   * Authoring-only Animate In/Out choice. Its keys are baked into ordinary tracks, so exports and
+   * other tools see plain animation; this only lets Studio show and re-apply the choice.
+   */
+  motion?: LayerMotion | null;
   /** Independent animation keys on the composition frame ruler, sorted by frame. */
   keyframes: LayerKeyframe[];
   /** Canonical per-property animation tracks. Legacy full-pose keys remain as an aggregate view. */
@@ -633,6 +908,8 @@ export interface Layer {
   /** Vector fields return two numbers; rotation/opacity and legacy scalar fields return one. */
   expressions?: Partial<Record<LayerExpressionProperty, string>>;
   expressionsEnabled?: Partial<Record<LayerExpressionProperty, boolean>>;
+  /** Ordered no-code conditions evaluated after ordinary bindings. */
+  visualRules: LayerVisualRule[];
 }
 
 export type KeyframeRole = 'start' | 'step' | 'end';
@@ -755,6 +1032,91 @@ export interface RuntimeCollectionDefinition {
   /** Hard authored/rendered item limit; W12b.1 supports 1..100. */
   capacity: number;
   overflow: 'truncate';
+  /** Stable object key used to identify items across reordered snapshots. */
+  itemKeyPath?: string[];
+  sortPath?: string[];
+  sortDirection?: 'none' | 'ascending' | 'descending';
+  /** Zero uses capacity. */
+  pageSize?: number;
+  page?: number;
+}
+
+export interface DataConnectionMapping {
+  fieldId: string;
+  /** Dot-separated JSON path or CSV column name. */
+  sourcePath: string;
+}
+
+/** Editor-side preview connector; exported OGraf still receives ordinary GDD data. */
+export interface DataConnectionDefinition {
+  id: string;
+  name: string;
+  format: 'json' | 'csv';
+  source: 'url' | 'embedded';
+  url: string;
+  embeddedText: string;
+  refreshMs: number;
+  missing: 'default' | 'empty' | 'keep-last';
+  enabled: boolean;
+  mappings: DataConnectionMapping[];
+}
+
+export type MediaCueClipType = 'audio' | 'video';
+
+export type MediaCueSource =
+  | {
+      id: string;
+      name: string;
+      kind: 'clip';
+      mediaType: MediaCueClipType;
+      /** URL, data URI, or asset:<id> reference. */
+      src: string;
+    }
+  | {
+      id: string;
+      name: string;
+      kind: 'live';
+      tag: string;
+      /** Optional image or video fallback URL/data URI/asset reference. */
+      fallback?: string;
+    };
+
+export type MediaCueTrigger =
+  | { type: 'timeline'; startFrame: number }
+  | { type: 'lifecycle'; keyframeId: string }
+  | { type: 'customAction'; actionId: string }
+  | { type: 'manual' };
+
+export interface MediaCueTransition {
+  type: 'cut' | 'crossfade';
+  durationFrames: number;
+  audio: 'follow-picture' | 'cut' | 'crossfade';
+  onFailure: 'keep-current' | 'fallback' | 'transparent';
+}
+
+/** Shared nonvisual transport for playable audio/video and renderer-provided live sources. */
+export interface MediaCue {
+  id: string;
+  name: string;
+  sources: MediaCueSource[];
+  activeSourceId: string | null;
+  trigger: MediaCueTrigger;
+  trimStartMs: number;
+  trimEndMs: number | null;
+  /** Authored Timeline block length; null derives it from trim/source duration. */
+  durationFrames: number | null;
+  loop: boolean;
+  speed: number;
+  volume: number;
+  muted: boolean;
+  retrigger: 'restart' | 'resume' | 'ignore';
+  transition: MediaCueTransition;
+  visual: {
+    targetLayerId: string | null;
+    fit: MediaPaintFit;
+    positionX: number;
+    positionY: number;
+  };
 }
 
 /** An author-defined `customAction` the Composition responds to — compiles into `manifest.customActions[]`. */
@@ -774,13 +1136,15 @@ export interface CustomActionDefinition {
 export interface Asset {
   id: string;
   name: string;
-  kind: 'image' | 'font' | 'source';
+  kind: 'image' | 'media' | 'audio' | 'font' | 'source';
   dataUri: string;
   mimeType: string;
   /** Original local filename retained for traceability after package-path normalization. */
   originalFileName?: string;
   /** Imported byte count, used for resource reporting without decoding the data URI. */
   byteSize?: number;
+  /** Decoded duration for playable audio/video, captured at import time. */
+  durationMs?: number;
   /** Optional validated relative package path. Defaults to assets/<asset-id>.<extension>. */
   packagePath?: string;
   /** CSS family name registered by the exported runtime when kind is font. */
@@ -819,7 +1183,7 @@ export interface ComponentDefinition {
   dataFields: FieldDefinition[];
 }
 
-export type CanvasPresentationBackground = 'none' | 'big-buck-bunny' | 'still-image';
+export type CanvasPresentationBackground = 'none' | 'big-buck-bunny' | 'still-image' | 'webcam';
 
 export interface CompositionLayout {
   showRulers: boolean;
@@ -857,6 +1221,7 @@ export interface Composition {
   frameRate: number;
   /** Crossfade duration for updateAction, authored in composition frames. */
   updateTransitionFrames: number;
+  updateInterruption: 'queue' | 'replace';
   /** Persistent authoring layout controls; excluded from compiled OGraf output. */
   layout: CompositionLayout;
   layers: Layer[];
@@ -865,6 +1230,9 @@ export interface Composition {
   dataFields: FieldDefinition[];
   /** Runtime-expanded GDD array prototypes. */
   runtimeCollections: RuntimeCollectionDefinition[];
+  dataConnections: DataConnectionDefinition[];
+  /** Composition-level audio/video/live transports. They are timeline tracks, not canvas layers. */
+  mediaCues: MediaCue[];
   patterns: TilingPattern[];
   customActions: CustomActionDefinition[];
   assets: Asset[];

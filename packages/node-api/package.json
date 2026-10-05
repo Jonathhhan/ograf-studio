@@ -1,0 +1,30 @@
+{
+  "name": "@ograf-editor/node-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "main": "dist/index.mjs",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ograf-editor/scene-model": "*",
+    "@ograf-editor/validation": "*",
+    "@ograf-editor/authoring-core": "*",
+    "@ograf-editor/codegen": "*"
+  },
+  "devDependencies": {
+    "vite": "^8.2.0",
+    "typescript": "~6.0.2",
+    "@types/node": "^24.13.3"
+  }
+}

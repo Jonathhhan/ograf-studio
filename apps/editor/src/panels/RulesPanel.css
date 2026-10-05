@@ -1,0 +1,284 @@
+.rules-panel {
+  display: grid;
+  gap: 3px;
+  padding: 2px;
+  overflow: auto;
+}
+
+.rules-toolbar,
+.rules-card header,
+.rules-action {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rules-toolbar {
+  justify-content: space-between;
+}
+
+.rules-toolbar > select {
+  min-width: 90px;
+  flex: 1;
+}
+
+.rules-toolbar > .rules-toolbar-trigger {
+  min-width: 102px;
+  max-width: 124px;
+  flex: none;
+}
+
+.rules-toolbar label,
+.rules-enabled {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.rules-list {
+  display: grid;
+  gap: 3px;
+}
+
+.rules-card {
+  display: grid;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-panel-raised);
+}
+
+.rules-card header {
+  min-height: var(--ui-row-height);
+}
+
+.rules-owner {
+  max-width: none;
+  padding: 1px 4px;
+  overflow: visible;
+  border-radius: 7px;
+  background: var(--bg-canvas);
+  color: var(--text-dim);
+  font-size: 8px;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.rules-name {
+  min-width: 0;
+  flex: 1;
+}
+
+.rules-match {
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--bg-canvas);
+  color: var(--text-dim);
+  font-size: 8px;
+}
+
+.rules-match.matched {
+  background: #245b39;
+  color: #bfffd2;
+}
+
+.rules-match.event {
+  background: #57461e;
+  color: #ffe2a0;
+}
+
+.rules-match.overridden {
+  background: #5b2b24;
+  color: #ffc2b8;
+  cursor: help;
+}
+
+.rules-card.overridden {
+  border-color: #7a3a30;
+}
+
+.rules-editor-row,
+.rules-condition-grid {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+}
+
+.rules-editor-row {
+  align-items: flex-start;
+}
+
+.rules-conditions {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 48%;
+  gap: 3px;
+}
+
+.rules-condition-grid {
+  flex-wrap: wrap;
+}
+
+.rules-condition-grid > select,
+.rules-condition-grid > input {
+  min-width: 62px;
+  flex: 1;
+}
+
+.rules-condition-grid > .rules-trigger {
+  min-width: 96px;
+  max-width: 112px;
+  flex: none;
+}
+
+.rules-when,
+.rules-arrow {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 8px;
+}
+
+.rules-actions {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 52%;
+  gap: 3px;
+}
+
+.rules-action {
+  width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.rules-action > select,
+.rules-action > input {
+  min-width: 90px;
+  flex: 1;
+}
+
+.rules-action small {
+  color: var(--accent);
+  font-size: 8px;
+}
+
+.rules-action .rules-color-value {
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  height: var(--ui-control-height);
+  flex: none;
+  padding: 1px;
+  cursor: pointer;
+}
+
+.rules-remove {
+  color: #ff8b8b;
+}
+
+.rules-add-action {
+  width: 22px;
+  flex: none;
+  justify-self: start;
+  padding: 0;
+}
+
+.rules-duplicate-action {
+  width: 22px;
+  flex: none;
+  padding: 0;
+}
+
+.rules-duplicate-rule {
+  width: 22px;
+  flex: none;
+  padding: 0;
+}
+
+@media (max-width: 560px) {
+  .rules-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .rules-editor-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+.rules-condition-grid > .rules-compare-source,
+.rules-condition-grid > .rules-match-mode {
+  min-width: 52px;
+  max-width: 96px;
+  flex: none;
+}
+
+.rules-range {
+  display: flex;
+  min-width: 96px;
+  flex: 1;
+  gap: 3px;
+}
+
+.rules-range > input {
+  width: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.rules-frames {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-dim);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.rules-frames > input {
+  width: 42px;
+  min-width: 42px;
+  max-width: 42px;
+}
+
+.rules-action > .rules-action-target {
+  min-width: 80px;
+  max-width: 140px;
+}
+
+.rules-ignore-case {
+  width: 24px;
+  flex: none;
+  padding: 0;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.rules-ignore-case.active {
+  background: var(--accent);
+  color: var(--bg-panel);
+}
+
+.rules-add-condition {
+  flex: none;
+  justify-self: start;
+  padding: 0 6px;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.rules-simulate {
+  width: 22px;
+  flex: none;
+  padding: 0;
+  color: #ffe2a0;
+}
+
+.rules-reset-simulation {
+  flex: none;
+}

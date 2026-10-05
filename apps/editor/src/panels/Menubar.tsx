@@ -32,6 +32,23 @@ import {
   type AutosaveSnapshot,
 } from '../state/autosaveStorage';
 import { scriptsDisabledAtStartup, withoutProjectScripts } from '../state/safeStart';
+import { STUDIO_BUILD_DATE, STUDIO_VERSION } from '../state/buildInfo';
+import {
+  canGroupLayers,
+  canUngroupLayers,
+  copyLayers,
+  cutLayers,
+  deleteLayers,
+  groupLayers,
+  pasteLayers,
+  ungroupLayers,
+} from '../state/layerCommands';
+import { useLayerClipboardStore } from '../state/layerClipboardStore';
+import { usePaneRequestStore } from '../state/paneRequestStore';
+import { KeyboardShortcutsDialog } from '../components/KeyboardShortcutsDialog';
+
+const USER_GUIDE_URL = 'https://github.com/zerodensity/ograf-studio/blob/stable/docs/USER_GUIDE.md';
+const MOD = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl';
 
 const historyTime = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString([], {
@@ -56,6 +73,7 @@ export function Menubar({
   const project = useProjectStore((s) => s.project);
   const activeCompositionId = useProjectStore((s) => s.activeCompositionId);
   const select = useSelectionStore((s) => s.select);
+  const deselectAll = useSelectionStore((s) => s.deselectAll);
   const selectMany = useSelectionStore((s) => s.selectMany);
   const selectedLayerIds = useSelectionStore((s) => s.selectedLayerIds);
   const [status, setStatus] = useState('');
@@ -69,24 +87,42 @@ export function Menubar({
   const [remoteBusy, setRemoteBusy] = useState(false);
   const [editMenuOpen, setEditMenuOpen] = useState(false);
   const [windowMenuOpen, setWindowMenuOpen] = useState(false);
+  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const editMenuRef = useRef<HTMLDivElement>(null);
   const windowMenuRef = useRef<HTMLDivElement>(null);
+  const helpMenuRef = useRef<HTMLDivElement>(null);
+  const clipboardCount = useLayerClipboardStore((state) => state.layers.length);
+  const revealPane = usePaneRequestStore((state) => state.reveal);
+  const resetLayout = usePaneRequestStore((state) => state.resetLayout);
+  const closeMenus = () => {
+    setEditMenuOpen(false);
+    setWindowMenuOpen(false);
+    setHelpMenuOpen(false);
+  };
   const history = useSyncExternalStore(subscribeHistory, getHistorySnapshot, getHistorySnapshot);
   const agentConnected = useAgentBridgeStatus((state) => state.connected);
   const agentActivity = useAgentBridgeStatus((state) => state.activity);
 
   useEffect(() => {
-    if (!editMenuOpen && !windowMenuOpen) return;
+    if (!editMenuOpen && !windowMenuOpen && !helpMenuOpen) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (editMenuRef.current?.contains(target) || windowMenuRef.current?.contains(target)) return;
+      if (
+        editMenuRef.current?.contains(target) ||
+        windowMenuRef.current?.contains(target) ||
+        helpMenuRef.current?.contains(target)
+      )
+        return;
       setEditMenuOpen(false);
       setWindowMenuOpen(false);
+      setHelpMenuOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       setEditMenuOpen(false);
       setWindowMenuOpen(false);
+      setHelpMenuOpen(false);
     };
     document.addEventListener('pointerdown', closeOnOutsidePointer);
     document.addEventListener('keydown', closeOnEscape);
@@ -94,7 +130,7 @@ export function Menubar({
       document.removeEventListener('pointerdown', closeOnOutsidePointer);
       document.removeEventListener('keydown', closeOnEscape);
     };
-  }, [editMenuOpen, windowMenuOpen]);
+  }, [editMenuOpen, windowMenuOpen, helpMenuOpen]);
 
   const applyUndo = (steps = 1) => {
     const label = history.past.at(-1)?.label;
@@ -127,6 +163,18 @@ export function Menubar({
     if (duplicatedIds.length > 0) {
       setStatus(`Duplicated ${duplicatedIds.length} layer${duplicatedIds.length === 1 ? '' : 's'}`);
     }
+  };
+
+  const plural = (count: number) => `${count} layer${count === 1 ? '' : 's'}`;
+  const runLayerCommand = (command: () => string) => {
+    setEditMenuOpen(false);
+    setStatus(command());
+  };
+
+  const handleDeselect = () => {
+    deselectAll();
+    setEditMenuOpen(false);
+    setStatus('Selection cleared');
   };
 
   const handleNew = () => {
@@ -324,6 +372,13 @@ export function Menubar({
         >
           Save Project
         </button>
+        <button
+          type="button"
+          onClick={() => revealPane('export')}
+          title="Open Preview & Export to test and export the .ograf.zip package."
+        >
+          Export…
+        </button>
         <div className="menubar-edit-control" ref={editMenuRef}>
           <button
             type="button"
@@ -332,6 +387,7 @@ export function Menubar({
             onClick={() => {
               setEditMenuOpen((open) => !open);
               setWindowMenuOpen(false);
+              setHelpMenuOpen(false);
             }}
           >
             Edit
@@ -356,9 +412,33 @@ export function Menubar({
                 <span>{history.canRedo ? `Redo ${history.future[0]?.label}` : 'Redo'}</span>
                 <kbd>Ctrl+Y</kbd>
               </button>
-              <button type="button" role="menuitem" onClick={selectAllLayers}>
-                <span>Select all layers</span>
-                <kbd>Ctrl+A</kbd>
+              <div className="menubar-menu-separator" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                disabled={selectedLayerIds.length === 0}
+                onClick={() => runLayerCommand(() => `Cut ${plural(cutLayers())}`)}
+              >
+                <span>Cut</span>
+                <kbd>{MOD}+X</kbd>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={selectedLayerIds.length === 0}
+                onClick={() => runLayerCommand(() => `Copied ${plural(copyLayers())}`)}
+              >
+                <span>Copy</span>
+                <kbd>{MOD}+C</kbd>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={clipboardCount === 0}
+                onClick={() => runLayerCommand(() => `Pasted ${plural(pasteLayers().length)}`)}
+              >
+                <span>Paste</span>
+                <kbd>{MOD}+V</kbd>
               </button>
               <button
                 type="button"
@@ -367,6 +447,56 @@ export function Menubar({
                 onClick={handleDuplicate}
               >
                 <span>Duplicate</span>
+                <kbd>{MOD}+Shift+D</kbd>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={selectedLayerIds.length === 0}
+                onClick={() => runLayerCommand(() => `Deleted ${plural(deleteLayers())}`)}
+              >
+                <span>Delete</span>
+                <kbd>Del</kbd>
+              </button>
+              <div className="menubar-menu-separator" role="separator" />
+              {canUngroupLayers() ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() =>
+                    runLayerCommand(() => (ungroupLayers() ? 'Ungrouped' : 'Nothing to ungroup'))
+                  }
+                >
+                  <span>Ungroup</span>
+                  <kbd>{MOD}+Shift+G</kbd>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!canGroupLayers()}
+                  onClick={() =>
+                    runLayerCommand(() =>
+                      groupLayers() ? `Grouped ${plural(selectedLayerIds.length)}` : 'Not grouped',
+                    )
+                  }
+                >
+                  <span>Group</span>
+                  <kbd>{MOD}+G</kbd>
+                </button>
+              )}
+              <div className="menubar-menu-separator" role="separator" />
+              <button type="button" role="menuitem" onClick={selectAllLayers}>
+                <span>Select all layers</span>
+                <kbd>Ctrl+A</kbd>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={selectedLayerIds.length === 0}
+                onClick={handleDeselect}
+              >
+                <span>Deselect all</span>
                 <kbd>Ctrl+D</kbd>
               </button>
               <div className="menubar-history-heading" role="presentation">
@@ -418,6 +548,7 @@ export function Menubar({
             onClick={() => {
               setWindowMenuOpen((open) => !open);
               setEditMenuOpen(false);
+              setHelpMenuOpen(false);
             }}
           >
             Window
@@ -444,6 +575,70 @@ export function Menubar({
                   </button>
                 );
               })}
+              <div className="menubar-menu-separator" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  resetLayout();
+                  setWindowMenuOpen(false);
+                  setStatus('Panes back in their original places');
+                }}
+              >
+                <span aria-hidden="true" />
+                Reset layout
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <div className="menubar-window-control" ref={helpMenuRef}>
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={helpMenuOpen}
+            onClick={() => {
+              setHelpMenuOpen((open) => !open);
+              setEditMenuOpen(false);
+              setWindowMenuOpen(false);
+            }}
+          >
+            Help
+          </button>
+          {helpMenuOpen ? (
+            <div className="menubar-window-menu" role="menu" aria-label="Help">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setShortcutsOpen(true);
+                  closeMenus();
+                }}
+              >
+                <span aria-hidden="true" />
+                Keyboard shortcuts
+              </button>
+              <a
+                href={USER_GUIDE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                role="menuitem"
+                className="menubar-menu-link"
+                onClick={closeMenus}
+              >
+                <span aria-hidden="true" />
+                User guide ↗
+              </a>
+              <div className="menubar-build-info" role="presentation">
+                <a
+                  href="https://github.com/zerodensity/ograf-studio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  role="menuitem"
+                >
+                  OGraf Studio v{STUDIO_VERSION}
+                </a>
+                <time dateTime={STUDIO_BUILD_DATE}>Build {STUDIO_BUILD_DATE}</time>
+              </div>
             </div>
           ) : null}
         </div>
@@ -465,6 +660,8 @@ export function Menubar({
           {autosave.message}
         </span>
       )}
+      {shortcutsOpen ? <KeyboardShortcutsDialog onClose={() => setShortcutsOpen(false)} /> : null}
+
       {remoteDialogOpen && (
         <section
           className="ograf-import-report remote-project-dialog"

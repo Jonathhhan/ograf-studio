@@ -4,6 +4,12 @@
   gap: 4px;
   font-size: 11px;
 }
+.brand-kit-section-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+}
 .brand-kit-panel .inspector-hint {
   margin: 0 0 2px;
   font-size: 10px;

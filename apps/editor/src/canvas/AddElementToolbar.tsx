@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent } from 'react';
 import { ImagePicker } from '../components/ImagePicker';
+import { ChartPresetGallery } from '../panels/ChartPresetGallery';
 import { parseLottieJson } from '@ograf-editor/scene-model';
 import { useActiveComposition, useProjectStore, type NewLayerKind } from '../state/projectStore';
 import { useSelectionStore } from '../state/selectionStore';
@@ -12,6 +13,7 @@ import { usePatternDialogStore } from '../state/patternDialogStore';
 const KINDS: { kind: NewLayerKind; label: string }[] = [
   { kind: 'rectangle', label: 'Rectangle' },
   { kind: 'ellipse', label: 'Ellipse' },
+  { kind: 'chart', label: 'Chart' },
   { kind: 'text', label: 'Text' },
   { kind: 'image', label: 'Image' },
   { kind: 'path', label: 'Path' },
@@ -32,6 +34,14 @@ function ElementIcon({ kind }: { kind: NewLayerKind }) {
       )}
       {kind === 'rectangle' && <rect x="3.5" y="5" width="17" height="14" rx="1.4" />}
       {kind === 'ellipse' && <ellipse cx="12" cy="12" rx="8.5" ry="6.8" />}
+      {kind === 'chart' && (
+        <>
+          <path d="M3 3v18h18" />
+          <rect x="6" y="12" width="3" height="6" />
+          <rect x="11" y="8" width="3" height="10" />
+          <rect x="16" y="5" width="3" height="13" />
+        </>
+      )}
       {kind === 'text' && (
         <>
           <path d="M4 5.5h16M12 5.5v13M8.2 18.5h7.6" />
@@ -98,6 +108,7 @@ function ArrangeIcon({ action }: { action: LayerArrangeAction }) {
 
 export function AddElementToolbar() {
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
+  const [chartPickerOpen, setChartPickerOpen] = useState(false);
   const composition = useActiveComposition();
   const addLayer = useProjectStore((s) => s.addLayer);
   const addLowerThird = useProjectStore((s) => s.addLowerThird);
@@ -180,7 +191,7 @@ export function AddElementToolbar() {
       {selectedLayerIds.length > 0 && (
         <button
           type="button"
-          title="Materialize the selected item as a three-item horizontal data repeater"
+          title="Turn the selection into a data-driven row of three copies"
           onClick={() => {
             const repeater = addRepeater(selectedLayerIds);
             if (repeater) {
@@ -188,7 +199,7 @@ export function AddElementToolbar() {
             }
           }}
         >
-          Repeat ×3
+          Repeat selection ×3
         </button>
       )}
       <div className="element-tools" role="group" aria-label="Add element">
@@ -202,7 +213,8 @@ export function AddElementToolbar() {
             title={`Add ${label}`}
             data-tooltip={label}
             onClick={() => {
-              if (kind === 'image') setImagePickerOpen(true);
+              if (kind === 'chart') setChartPickerOpen((open) => !open);
+              else if (kind === 'image') setImagePickerOpen(true);
               else if (kind === 'pattern') usePatternDialogStore.getState().open();
               else select(addLayer(kind));
             }}
@@ -230,6 +242,28 @@ export function AddElementToolbar() {
         onChange={(event) => void importLottie(event)}
       />
       {imagePickerOpen && <ImagePicker onClose={() => setImagePickerOpen(false)} />}
+      {chartPickerOpen && (
+        <div className="chart-picker-popover" role="dialog" aria-label="Choose chart type">
+          <div className="chart-picker-header">
+            <span>Choose chart type</span>
+            <button
+              type="button"
+              aria-label="Close chart gallery"
+              onClick={() => setChartPickerOpen(false)}
+            >
+              ×
+            </button>
+          </div>
+          <ChartPresetGallery
+            onSelect={(preset) => {
+              const id = addLayer('chart');
+              updateLayerElement(id, { preset });
+              select(id);
+              setChartPickerOpen(false);
+            }}
+          />
+        </div>
+      )}
       {selectedLayerIds.length > 0 && (
         <div className="arrange-toolbar" role="group" aria-label="Arrange selected layers">
           {ARRANGE_ACTIONS.map(({ action, label }) => (

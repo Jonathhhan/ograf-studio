@@ -51,6 +51,7 @@ export function compiledLoopElapsedFrames(
       ? { type: 'lifecycle' as const }
       : layer.loop?.activation;
   if (!activation) return undefined;
+  if (activation.type === 'customAction') return undefined;
   const orderedLifecycle = [...descriptor.keyframes].sort(
     (left, right) => left.frame - right.frame,
   );
@@ -216,6 +217,7 @@ export function sampleCompiledLayerVisualState(
         keys.length === 0 ||
         isGradientStopOffsetProperty(property) ||
         property === 'strokeWidth' ||
+        property === 'motionPathProgress' ||
         parseShaderAnimationProperty(property)
       ) {
         continue;
@@ -251,7 +253,13 @@ export function sampleCompiledLayerVisualState(
   const boundElement = resolveBoundElement(layer, data);
   for (const property of paintProperties) {
     const shader = shaderAnimationPropertySpec(boundElement, property);
-    if (!isGradientStopOffsetProperty(property) && property !== 'strokeWidth' && !shader) continue;
+    if (
+      !isGradientStopOffsetProperty(property) &&
+      property !== 'strokeWidth' &&
+      property !== 'motionPathProgress' &&
+      !shader
+    )
+      continue;
     const timelineKeys = layer.animationTracks[property] ?? [];
     const loopKeys = loop?.tracks[property] ?? [];
     if (shader) {
@@ -267,7 +275,11 @@ export function sampleCompiledLayerVisualState(
       continue;
     }
     const fallback =
-      property === 'strokeWidth' && layer.element.type === 'text' ? layer.element.strokeWidth : 0;
+      property === 'strokeWidth' && layer.element.type === 'text'
+        ? layer.element.strokeWidth
+        : property === 'motionPathProgress'
+          ? (layer.motionPath?.progress ?? 0)
+          : 0;
     const baseValue = getTrackValueAtFrame(
       layer.animationTracks[property] ?? [],
       baseFrame,

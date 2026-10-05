@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createProject } from '@ograf-editor/scene-model';
+import {
+  createAsset,
+  createLayerOfKind,
+  createMediaPaint,
+  createProject,
+  getElementMediaPaint,
+} from '@ograf-editor/scene-model';
+
 import {
   MAX_REMOTE_PROJECT_BYTES,
   openProjectFromUrl,
@@ -9,6 +16,45 @@ import {
 } from './fileIO';
 
 describe('remote OGraf Studio project loading', () => {
+  it('preserves packaged Media paint through an editable source save and reopen round trip', () => {
+    const project = createProject({ name: 'Media source round trip' });
+    const composition = project.compositions[0]!;
+    const asset = createAsset({
+      id: 'clip',
+      name: 'Opening clip',
+      kind: 'media',
+      mimeType: 'video/mp4',
+      dataUri: 'data:video/mp4;base64,AAAA',
+      byteSize: 3,
+      originalFileName: 'opening.mp4',
+    });
+    const layer = createLayerOfKind('rectangle');
+    if (!('fill' in layer.element)) throw new Error('Expected a fill-capable layer.');
+    layer.element.fill = createMediaPaint({
+      source: { kind: 'clip', src: 'asset:clip' },
+      fit: 'contain',
+      positionX: 0.25,
+      positionY: 0.75,
+      loop: false,
+      speed: 1.5,
+      offsetMs: 420,
+    });
+    composition.assets.push(asset);
+    composition.layers.push(layer);
+
+    const reopened = parseProjectSource(JSON.stringify(project));
+    const reopenedComposition = reopened.compositions[0]!;
+    expect(reopenedComposition.assets[0]).toMatchObject({
+      id: 'clip',
+      kind: 'media',
+      dataUri: 'data:video/mp4;base64,AAAA',
+      originalFileName: 'opening.mp4',
+    });
+    expect(getElementMediaPaint(reopenedComposition.layers.at(-1)!.element)).toEqual(
+      getElementMediaPaint(layer.element),
+    );
+  });
+
   it('downloads a valid HTTP project without credentials', async () => {
     const project = createProject();
     project.name = 'Remote News';

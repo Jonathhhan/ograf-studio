@@ -32,6 +32,7 @@ export const TIMELINE_PROPERTY_TRACK_COLORS: Record<FixedTimelineProperty, strin
   dropShadowOffsetX: '#ef6c75',
   dropShadowOffsetY: '#74c69d',
   dropShadowBlur: '#8c9eff',
+  motionPathProgress: '#26c6da',
 };
 
 const GRADIENT_STOP_TRACK_COLORS = [

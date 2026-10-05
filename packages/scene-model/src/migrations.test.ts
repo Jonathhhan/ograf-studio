@@ -101,7 +101,7 @@ describe('migrateProject', () => {
 
     const migrated = migrateProject(project);
 
-    expect(migrated.documentVersion).toBe(33);
+    expect(migrated.documentVersion).toBe(37);
     expect(migrated.compositions[0]!.layout).toMatchObject({
       presentationBackground: 'still-image',
       presentationBackgroundImageSource: 'data:image/png;base64,cHJlc2VudGF0aW9u',
@@ -123,7 +123,7 @@ describe('migrateProject', () => {
       type: 'rectangle',
       borderRadius: { topLeft: 14, topRight: 14, bottomRight: 14, bottomLeft: 14 },
     });
-    expect(migrated.documentVersion).toBe(33);
+    expect(migrated.documentVersion).toBe(37);
   });
 
   it('upgrades legacy intro/outro documents into start/step/end without mutating the source', () => {
@@ -247,7 +247,7 @@ describe('migrateProject', () => {
     });
     expect(layer.animationTracks.x?.length).toBeGreaterThan(0);
     expect(layer.animationTracks.blur?.[0]?.value).toBe(0);
-    expect(migrated.documentVersion).toBe(33);
+    expect(migrated.documentVersion).toBe(37);
     expect(layer.loop).toBeNull();
     expect(migrated.compositions[0]!.layers.every((layer) => layer.clipChildren === false)).toBe(
       true,
@@ -320,7 +320,7 @@ describe('migrateProject', () => {
     expect(migrated.compositions[0]!.layers[0]!.bindings).toEqual([
       { fieldId: 'headline-field', targetProperty: 'content', sourcePath: [] },
     ]);
-    expect(migrated.documentVersion).toBe(33);
+    expect(migrated.documentVersion).toBe(37);
   });
 
   it('backfills document-v13 typography without changing the authored font size', () => {
@@ -357,7 +357,7 @@ describe('migrateProject', () => {
       minFontSize: 20,
       overflowPolicy: 'visible',
     });
-    expect(migrated.documentVersion).toBe(33);
+    expect(migrated.documentVersion).toBe(37);
   });
 
   it('backfills timeline folders and removes stale or duplicate members', () => {
@@ -397,7 +397,7 @@ describe('migrateProject', () => {
     project.documentVersion = 16;
 
     const migrated = migrateProject(project);
-    expect(migrated.documentVersion).toBe(33);
+    expect(migrated.documentVersion).toBe(37);
     expect(migrated.compositions[0]!.dataFields[0]).toMatchObject({
       key: 'headline',
       defaultValue: 'News',
@@ -416,7 +416,7 @@ describe('migrateProject', () => {
     project.documentVersion = 17;
 
     const migrated = migrateProject(project);
-    expect(migrated.documentVersion).toBe(33);
+    expect(migrated.documentVersion).toBe(37);
     expect(migrated.compositions[0]!.layers[0]!.blendMode).toBe('normal');
   });
 
@@ -434,7 +434,7 @@ describe('migrateProject', () => {
     project.documentVersion = 18;
 
     const migrated = migrateProject(project);
-    expect(migrated.documentVersion).toBe(33);
+    expect(migrated.documentVersion).toBe(37);
     expect(migrated.compositions[0]!.dataFields[0]).toMatchObject({
       properties: [],
       items: null,
@@ -472,7 +472,7 @@ describe('migrateProject', () => {
     const migratedLayer = migrated.compositions[0]!.layers[0]!;
     const migratedComponentLayer = migrated.compositions[0]!.components[0]!.layers[0]!;
 
-    expect(migrated.documentVersion).toBe(33);
+    expect(migrated.documentVersion).toBe(37);
     expect(migratedLayer.element).toMatchObject({
       type: 'text',
       strokeColor: 'transparent',

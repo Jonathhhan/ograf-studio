@@ -7,17 +7,23 @@ import {
   isGradientStopOffsetProperty,
   parseShaderAnimationProperty,
   TRANSFORM_ANIMATION_PROPERTIES,
+  normalizeTextAnimation,
+  normalizeChartAnimation,
   type AnimatableLayerProperty,
   type LayerEffects,
   type LayerTransform,
   type ExpressionDiagnostic,
 } from '@ograf-editor/scene-model';
 import { easingForGsap } from './easing';
-import { applyAnimatedPaint, resolveBoundEffects } from './renderElement';
+import { resolveBoundEffects, resolveBoundElement } from './renderElement';
+import { renderTextAnimationAtFrame } from './textAnimationRendering';
+import { renderChartAnimationAtFrame } from './chartRendering';
 import { applyCompiledMasks } from './maskRendering';
 import { sampleCompiledLayerVisualState, applyCompiledLayerVisualState } from './loopRendering';
 import { compiledLoopElapsedFrames } from './loopRendering';
 import { renderPatternAtElapsed } from './patternRendering';
+import { applyCompiledAutoLayout } from './autoLayoutRendering';
+import { applyCompiledMotionPaths } from './motionPathRendering';
 
 const DIRECT_GSAP_PROPERTIES: Partial<Record<keyof LayerTransform, string>> = {
   x: 'x',
@@ -144,54 +150,53 @@ export function buildRuntimeTimeline(
   const endFrame = descriptor.keyframes.at(-1)?.frame ?? 0;
   const updateDynamicRendering = () => {
     const frame = tl.time() * frameRate;
+    const data = dataProvider();
+    const states = new Map(
+      descriptor.layers.map((layer) => [
+        layer.id,
+        sampleCompiledLayerVisualState(
+          layer,
+          frame,
+          compiledLoopElapsedFrames(descriptor, layer, frame),
+          data,
+        ),
+      ]),
+    );
+    applyCompiledAutoLayout(descriptor, states, data, layerEls);
+    applyCompiledMotionPaths(descriptor, states);
     for (const layer of descriptor.layers) {
       const child = layerEls.get(layer.id);
-      if (child && layer.effects.stack?.some((e) => !e.legacy))
-        applyLayerEffectsFilter(
-          child,
-          sampleCompiledLayerVisualState(layer, frame, undefined, dataProvider()).effects,
-          tl.time() * 1000,
-        );
-      if (child) {
-        const sampled = sampleCompiledLayerVisualState(layer, frame, undefined, dataProvider());
-        applyAnimatedPaint(child, sampled.paintTracks, sampled.paintFrame);
-      }
+      const state = states.get(layer.id);
+      if (child && state) applyCompiledLayerVisualState(child, state, tl.time() * 1000);
       if (child && layer.element.type === 'pattern')
         renderPatternAtElapsed(child, compiledLoopElapsedFrames(descriptor, layer, frame) ?? 0);
-      if (child && layer.lighting)
-        applyCompiledLayerVisualState(
-          child,
-          sampleCompiledLayerVisualState(
-            layer,
-            frame,
-            compiledLoopElapsedFrames(descriptor, layer, frame),
-            dataProvider(),
-          ),
-        );
+      if (child && layer.element.type === 'chart') {
+        const resolved = resolveBoundElement(layer, data);
+        if (resolved.type === 'chart') renderChartAnimationAtFrame(child, resolved, frame);
+      }
+      if (
+        child &&
+        layer.element.type === 'text' &&
+        normalizeTextAnimation(layer.element.textAnimation).type !== 'none'
+      ) {
+        const resolved = resolveBoundElement(layer, data);
+        if (resolved.type === 'text') renderTextAnimationAtFrame(child, resolved, frame);
+      }
     }
-    applyCompiledMasks(
-      descriptor,
-      layerEls,
-      new Map(
-        descriptor.layers.map((layer) => [
-          layer.id,
-          sampleCompiledLayerVisualState(
-            layer,
-            frame,
-            compiledLoopElapsedFrames(descriptor, layer, frame),
-            dataProvider(),
-          ),
-        ]),
-      ),
-      dataProvider(),
-      onDiagnostics,
-    );
+    applyCompiledMasks(descriptor, layerEls, states, dataProvider(), onDiagnostics);
   };
   const hasDynamicRendering =
     descriptor.scripting?.enabled ||
     descriptor.layers.some(
       (layer) =>
         layer.clipParentId ||
+        layer.layoutParentId ||
+        layer.autoLayout?.direction !== 'none' ||
+        layer.motionPath ||
+        (layer.element.type === 'chart' &&
+          normalizeChartAnimation(layer.element.animation).type !== 'none') ||
+        (layer.element.type === 'text' &&
+          normalizeTextAnimation(layer.element.textAnimation).type !== 'none') ||
         layer.expressions ||
         layer.mask ||
         layer.element.type === 'pattern' ||

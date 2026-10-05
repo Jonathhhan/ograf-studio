@@ -14,6 +14,9 @@ Save/export must certify the same artifact bytes that are written. If certificat
 - Layer animation keys sit on the composition frame ruler but belong to one layer and one property.
 - Frame rate and transition durations determine the total frame range.
 - Non-realtime behavior must remain deterministic under `goToTime()` and scheduled-action replay.
+- Pointer-triggered visual rules need no GDD field and apply only in interactive real-time HTML
+  playback. Do not treat browser pointer events as scheduled non-real-time or remote OGraf actions;
+  playout rule triggers, delays and transitions replay from the schedule.
 - Lottie source frames include `animationData.ip`, while the bundled player seek API is relative to
   that in-point. Keep conversion at the runtime adapter boundary. `load()` must await Lottie
   `DOMLoaded`; a timer or successful JSON parse is not proof that embedded assets rendered.
